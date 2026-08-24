@@ -10,11 +10,13 @@ The product requirements and per-feature implementation/test status are maintain
 |---|---|
 | Agentic SDLC scaffold | Complete |
 | Application bootstrap | Complete — `FND-01` verified |
-| Automated feature tests | FND-01 passing; FND-02 has 69 passing non-browser checks and 16 discoverable Playwright cases pending consolidated execution |
+| Automated feature tests | 70 non-browser checks pass; the consolidated rapid desktop/mobile Playwright smoke passes 2/2; the full FND-02 browser suite remains pending |
 | Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL |
-| Active implementation batch | Remaining master, operations, finance, control, data, governance, integration, and configuration features |
+| Feature implementation | All 18 feature areas have locally deployed implementation surfaces; rapid consolidated acceptance passes and deeper feature-specific acceptance remains pending |
 
 Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
+
+The rapid implementation pass uses a shared tenant-scoped record/workflow kernel for masters, operations, POD, finance, governance, and configuration, with PostgreSQL-backed control-tower, alert, import, and integration modules. The cross-feature desktop/mobile smoke passes; feature status remains `In progress` until the deeper feature-specific acceptance suites pass.
 
 ## Engineering baseline
 

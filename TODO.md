@@ -6,8 +6,8 @@ This is the active execution queue. It is synchronized at the end of every featu
 
 | Feature | Work item | State | Owner/reason | Evidence or unblock condition |
 |---|---|---|---|---|
-| FND-02 | Run the preserved 16-case desktop/mobile Playwright suite during consolidated testing | Implemented | Development-first batch; browser execution intentionally deferred | `tests/e2e/fnd-02-identity-access.spec.ts` |
-| MST-01..CFG-01 | Implement the remaining feature register using reusable master, workflow, finance, reporting, and configuration modules | In progress | Rapid parallel implementation batch requested by user | `FEATURES.md` feature register |
+| FND-02 | Run the preserved 16-case desktop/mobile Playwright suite | Implemented | Non-browser gates pass; full feature-specific browser execution remains | `tests/e2e/fnd-02-identity-access.spec.ts` |
+| MST-01..CFG-01 | Expand the passing rapid smoke into feature-specific acceptance suites | Implemented | Desktop/mobile cross-feature smoke passes 2/2 | `tests/e2e/rapid-all-features.spec.ts` |
 
 ## Blocked
 

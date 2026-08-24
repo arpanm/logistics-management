@@ -75,22 +75,39 @@ describe.sequential(
         "202608240001_fnd01_foundation",
         "202608240002_fnd01_security_hardening",
         "202608240003_fnd02_identity_access",
+        "202608250004_module_kernel",
+        "202608250006_intelligence_modules",
       ]);
       await expect(service.ready()).resolves.toMatchObject({
         status: "ready",
         migration: "ready",
-        migrationCount: 3,
+        migrationCount: 5,
       });
     });
 
     it("FND01-A-006: every live tenant table has forced RLS, a policy, tenant-leading index and declared nullability", async () => {
       const expected: Record<string, boolean> = {
         "app.access_invitations": false,
+        "app.alert_rules": false,
         "app.authorization_probe_records": false,
         "app.authorization_scope_nodes": false,
+        "app.control_saved_views": false,
         "app.idempotency_records": true,
+        "app.import_errors": false,
+        "app.import_jobs": false,
+        "app.import_rows": false,
+        "app.integration_dead_letters": false,
+        "app.integration_deliveries": false,
+        "app.integration_endpoints": false,
         "app.job_runs": true,
         "app.legal_entities": false,
+        "app.module_comments": false,
+        "app.module_documents": false,
+        "app.module_record_snapshots": false,
+        "app.module_records": false,
+        "app.module_workflow_events": false,
+        "app.operational_alert_actions": false,
+        "app.operational_alerts": false,
         "app.outbox_events": true,
         "app.owner_invitations": false,
         "app.platform_alerts": true,

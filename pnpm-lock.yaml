@@ -215,6 +215,18 @@ importers:
         specifier: 3.2.4
         version: 3.2.4(@types/node@24.3.0)(jiti@2.7.0)(supports-color@7.2.0)(tsx@4.20.5)
 
+  packages/module-kit:
+    devDependencies:
+      eslint:
+        specifier: 9.34.0
+        version: 9.34.0(jiti@2.7.0)(supports-color@7.2.0)
+      prettier:
+        specifier: 3.6.2
+        version: 3.6.2
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
 packages:
 
   '@axe-core/playwright@4.10.2':

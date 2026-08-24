@@ -3,9 +3,25 @@ import { ApiController } from "./api.controller.js";
 import { AppService } from "./app.service.js";
 import { AccessController } from "./access.controller.js";
 import { AccessService } from "./access.service.js";
+import { KernelController } from "./modules/kernel/kernel.controller.js";
+import { KernelService } from "./modules/kernel/index.js";
+import {
+  intelligenceControllers,
+  intelligenceProviders,
+} from "./modules/control/index.js";
 
 @Module({
-  controllers: [AccessController, ApiController],
-  providers: [AppService, AccessService],
+  controllers: [
+    AccessController,
+    ...intelligenceControllers,
+    KernelController,
+    ApiController,
+  ],
+  providers: [
+    AppService,
+    AccessService,
+    KernelService,
+    ...intelligenceProviders,
+  ],
 })
 export class AppModule {}

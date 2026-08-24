@@ -118,6 +118,20 @@ export function Shell({
           {area === "tenant" && effective?.navigation.reports && (
             <Link href="/app/access/reports">Security</Link>
           )}
+          {area === "tenant" && effective && (
+            <>
+              <Link href="/app/masters/locations">Masters</Link>
+              <Link href="/app/operations">Operations</Link>
+              <Link href="/app/pod">POD</Link>
+              <Link href="/app/finance">Finance</Link>
+              <Link href="/app/control">Control</Link>
+              <Link href="/app/alerts">Alerts</Link>
+              <Link href="/app/data">Imports</Link>
+              <Link href="/app/integrations">Integrations</Link>
+              <Link href="/app/governance/policies">Governance</Link>
+              <Link href="/app/configuration/settings">Configuration</Link>
+            </>
+          )}
           <button className="link-button" onClick={() => void logout()}>
             Sign out
           </button>

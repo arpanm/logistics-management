@@ -74,6 +74,8 @@ export class AppService implements OnModuleDestroy {
         "202608240001_fnd01_foundation",
         "202608240002_fnd01_security_hardening",
         "202608240003_fnd02_identity_access",
+        "202608250004_module_kernel",
+        "202608250006_intelligence_modules",
       ];
       if (
         !required.every((name) =>
@@ -306,7 +308,7 @@ export class AppService implements OnModuleDestroy {
         !user ||
         !(await argon2.verify(String(user.passwordHash), password))
       ) {
-        const failed = await tx.$queryRawUnsafe<Array<Row>>(
+        await tx.$queryRawUnsafe<Array<Row>>(
           `INSERT INTO app.login_attempts(identity_hash,window_start) VALUES($1,date_trunc('minute',now())) ON CONFLICT(identity_hash,window_start) DO UPDATE SET attempts=app.login_attempts.attempts+1,updated_at=now() RETURNING attempts,window_start AS "windowStart"`,
           identityHash,
         );
@@ -323,16 +325,18 @@ export class AppService implements OnModuleDestroy {
               user.id,
               membership.id,
               identityHash.slice(0, 24),
-              JSON.stringify({ attempt: Number(failed[0]?.attempts ?? 1) }),
+              JSON.stringify({
+                attempt: Number(attempts[0]?.count ?? 0) + 1,
+              }),
               correlationId,
             );
-            if (Number(failed[0]?.attempts ?? 1) >= 5)
+            if (Number(attempts[0]?.count ?? 0) + 1 >= 5)
               await tx.$executeRawUnsafe(
                 `INSERT INTO app.security_alerts(tenant_id,alert_type,severity,deduplication_key,user_id,membership_id)
                  VALUES($1::uuid,'REPEATED_LOGIN_FAILURES','HIGH',$2,$3::uuid,$4::uuid)
                  ON CONFLICT(tenant_id,deduplication_key) DO UPDATE SET occurrence_count=app.security_alerts.occurrence_count+1,last_seen_at=now(),updated_at=now()`,
                 membership.tenantId,
-                `login:${identityHash}:${String(failed[0]?.windowStart)}`,
+                `login:${identityHash}`,
                 user.id,
                 membership.id,
               );
