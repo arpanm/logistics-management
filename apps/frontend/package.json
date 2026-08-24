@@ -1,0 +1,29 @@
+{
+  "name": "@logistics/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3000",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 3000",
+    "format:check": "prettier --check app components next.config.mjs",
+    "lint": "next lint || eslint app components --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "next": "15.5.23",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "eslint": "9.34.0",
+    "eslint-config-next": "15.5.23",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}

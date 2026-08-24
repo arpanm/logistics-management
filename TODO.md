@@ -6,7 +6,7 @@ This is the active execution queue. It is synchronized at the end of every featu
 
 | Feature | Work item | State | Owner/reason | Evidence or unblock condition |
 |---|---|---|---|---|
-| FND-01 | Bootstrap Next.js frontend, NestJS backend, Prisma/PostgreSQL tenancy baseline, local deployment, and Playwright foundation | Ready | Next dependency-ready feature | `FEATURES.md` FND-01 |
+| FND-02 | Implement identity, roles, and scoped access on the verified tenant/session foundation | Ready | Next dependency-ready feature after FND-01 completion | `FEATURES.md` FND-02 |
 
 ## Blocked
 

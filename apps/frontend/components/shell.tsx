@@ -1,0 +1,98 @@
+"use client";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { api } from "./api";
+import { usePathname, useRouter } from "next/navigation";
+type Me = {
+  user: { email: string; platformAdmin: boolean };
+  activeTenantId: string | null;
+  contextVersion: number;
+  memberships: Array<{
+    id: string;
+    code: string;
+    name: string;
+    primaryColor: string;
+  }>;
+};
+export function Shell({
+  children,
+  area = "tenant",
+}: {
+  children: React.ReactNode;
+  area?: "platform" | "tenant";
+}) {
+  const [me, setMe] = useState<Me | null>(null);
+  const [notice, setNotice] = useState("");
+  const router = useRouter();
+  const path = usePathname();
+  useEffect(() => {
+    api<Me>("/auth/me")
+      .then(setMe)
+      .catch(() => router.replace("/login"));
+  }, [router, path]);
+  async function change(id: string) {
+    if (!me) return;
+    const result = await api<{ contextVersion: number }>(
+      "/session/active-tenant",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId: id,
+          expectedContextVersion: me.contextVersion,
+        }),
+      },
+    );
+    setNotice(`Active tenant changed`);
+    window.location.replace(`/app/setup?context=${result.contextVersion}`);
+  }
+  async function logout() {
+    await api("/auth/logout", { method: "POST" });
+    router.replace("/login");
+  }
+  return (
+    <>
+      <header className="topbar">
+        <Link
+          className="brand"
+          href={area === "platform" ? "/platform/tenants" : "/app/setup"}
+        >
+          <span className="brand-mark">RG</span>
+          <span>Rupantar Logistics</span>
+        </Link>
+        <nav aria-label="Primary">
+          {me?.user.platformAdmin && (
+            <>
+              <Link href="/platform/tenants">Tenants</Link>
+              <Link href="/platform/report">Health</Link>
+            </>
+          )}
+          {area === "tenant" && me && me.memberships.length > 1 && (
+            <label className="switcher">
+              Tenant
+              <select
+                aria-label="Active tenant"
+                value={me.activeTenantId ?? ""}
+                onChange={(e) => void change(e.target.value)}
+              >
+                {me.memberships.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button className="link-button" onClick={() => void logout()}>
+            Sign out
+          </button>
+        </nav>
+      </header>
+      <p className="sr-only" aria-live="polite">
+        {notice}
+      </p>
+      <main id="main" className="page" tabIndex={-1}>
+        {children}
+      </main>
+    </>
+  );
+}

@@ -9,9 +9,10 @@ The product requirements and per-feature implementation/test status are maintain
 | Item | Status |
 |---|---|
 | Agentic SDLC scaffold | Complete |
-| Application bootstrap | Not started — `FND-01` is next |
-| Automated feature tests | Not started |
-| Local frontend/backend deployment | Not available until `FND-01` |
+| Application bootstrap | Complete — `FND-01` verified |
+| Automated feature tests | Passing — 36 non-browser checks and 14 Playwright project cases |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL |
+| Next dependency-ready feature | `FND-02` identity, roles, and scoped access |
 
 Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
 
@@ -47,8 +48,6 @@ Other projects may use the same container with their own database/schema names.
 
 ## Application commands
 
-After `FND-01` creates the frontend and backend packages:
-
 ```bash
 make dev
 make check
@@ -64,7 +63,7 @@ See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup and [docs/S
 Open the repository as a trusted Codex project and invoke:
 
 ```text
-$feature-sdlc Implement FND-01.
+$feature-sdlc Implement FND-02.
 ```
 
 The skill starts the required multi-agent team, creates the feature specification and test plan, develops the vertical slice, deploys frontend/backend locally against shared PostgreSQL, runs Playwright, performs independent review, synchronizes all status/test/TODO artifacts, and creates a focused local commit only after the gates pass.
@@ -93,6 +92,7 @@ The skill starts the required multi-agent team, creates the feature specificatio
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — boundaries and engineering invariants
 - [docs/SDLC.md](docs/SDLC.md) — specification-to-commit lifecycle
 - [docs/TESTING.md](docs/TESTING.md) — test strategy and status conventions
+- [docs/API.md](docs/API.md) — current HTTP authentication, tenancy, and route contract
 - [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) — shared PostgreSQL and local deployment
 - [CONTRIBUTING.md](CONTRIBUTING.md) — commit and review conventions
 - [specs/README.md](specs/README.md) — per-feature artifact layout

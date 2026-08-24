@@ -35,9 +35,7 @@ packages/
   domain/              Framework-light domain rules and types
   db/                  Prisma schema, migrations, repositories, seeds
   auth/                Capabilities, scopes, and policy evaluation
-  ui/                  Shared accessible UI components
   config/              Typed tenant and runtime configuration
-  observability/       Logs, metrics, and audit helpers
 tests/
   e2e/                 Playwright journeys
   fixtures/            Cross-module deterministic test data
@@ -76,6 +74,7 @@ Modules own their writes. Cross-module reads use published query services or rep
 ## Data and isolation
 
 - Every tenant-owned row has a non-null tenant key.
+- Mixed platform/tenant tables classify nullable tenant keys explicitly and use forced PostgreSQL row-level security. Platform access requires an explicit transaction context; tenant access sees only the matching tenant.
 - Natural-key uniqueness is tenant-scoped and includes legal-entity scope when required.
 - Repository methods require tenant context; unscoped access is limited to reviewed platform-administration paths.
 - Tests create at least two tenants and prove negative access for each tenant-owned aggregate.
@@ -118,6 +117,7 @@ Operational screens read canonical transaction models. Dashboards may use Postgr
 - Frontend uses only the documented backend API; it never connects directly to PostgreSQL.
 - Backend provides liveness/readiness endpoints and verifies database connectivity/migration state.
 - Local deployment starts both processes against central PostgreSQL and Playwright tests through the frontend.
+- Local deployment records independently owned frontend/backend PIDs and logs under ignored `.sdlc/runtime/` state and refuses to stop unrelated port owners.
 
 ## Security baseline
 

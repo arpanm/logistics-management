@@ -1,0 +1,42 @@
+{
+  "name": "@logistics/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "format:check": "prettier --check src test",
+    "lint": "eslint src test --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bash ../../scripts/test-backend.sh"
+  },
+  "dependencies": {
+    "@logistics/auth": "workspace:*",
+    "@logistics/config": "workspace:*",
+    "@logistics/db": "workspace:*",
+    "@logistics/domain": "workspace:*",
+    "@nestjs/common": "11.1.6",
+    "@nestjs/core": "11.1.6",
+    "@nestjs/platform-express": "11.1.6",
+    "argon2": "0.44.0",
+    "cookie-parser": "1.4.7",
+    "helmet": "8.1.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "1.4.9",
+    "@types/express": "5.0.3",
+    "@types/node": "24.3.0",
+    "@types/supertest": "6.0.3",
+    "eslint": "9.34.0",
+    "prettier": "3.6.2",
+    "supertest": "7.1.4",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}

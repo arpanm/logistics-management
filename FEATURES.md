@@ -100,7 +100,7 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 | ID | Feature | Evidence | Implementation status | Test status | Depends on |
 |---|---|---|---|---|---|
-| FND-01 | Multi-tenant product foundation | Product objective | Proposed | Not started | — |
+| FND-01 | Multi-tenant product foundation | Product objective | Complete | Passing | — |
 | FND-02 | Identity, roles, and scoped access | Operating-model roles | Proposed | Not started | FND-01 |
 | MST-01 | Organization, employee, and geography masters | Workbook managers; stated hierarchy | Proposed | Not started | FND-01, FND-02 |
 | MST-02 | Client, contract, lane, SLA, and rate-card masters | Client/location forms; contract business model | Client/location prototype only; contract, lane, and rate card proposed | Not started | MST-01 |
@@ -138,9 +138,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## FND-01 — Multi-tenant product foundation
 
-**Status:** Proposed
+**Status:** Complete
 
-**Test status:** Not started
+**Test status:** Passing
 
 **Outcome:** One deployable product can safely serve multiple logistics companies, each with isolated data, branding, configuration, and legal entities.
 

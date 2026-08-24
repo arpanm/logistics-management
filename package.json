@@ -11,7 +11,16 @@
     "start:local": "bash scripts/run-app-command.sh start:local",
     "db:migrate": "bash scripts/run-app-command.sh db:migrate",
     "test:e2e": "bash scripts/e2e.sh",
-    "verify": "bash scripts/verify.sh"
+    "verify": "bash scripts/verify.sh",
+    "db:seed": "pnpm --filter @logistics/db run db:seed",
+    "db:reset:test": "pnpm --filter @logistics/db run db:reset:test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.55.0",
+    "eslint": "9.34.0",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.41.0"
   }
 }
-

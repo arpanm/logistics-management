@@ -11,7 +11,7 @@ if [[ ! -d apps/frontend || ! -d apps/backend ]]; then
   exit 1
 fi
 
-backend_health="${BACKEND_URL:-http://127.0.0.1:4000}/health/ready"
+backend_health="${BACKEND_URL:-http://127.0.0.1:4000}/api/v1/health/ready"
 frontend_health="${FRONTEND_URL:-http://127.0.0.1:3000}"
 
 for health_url in "$backend_health" "$frontend_health"; do

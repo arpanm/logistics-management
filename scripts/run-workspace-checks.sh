@@ -4,6 +4,16 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+if [[ -f .env ]]; then
+  set -a
+  source .env
+  set +a
+else
+  set -a
+  source .env.example
+  set +a
+fi
+
 bash scripts/policy-check.sh
 git diff --check
 
