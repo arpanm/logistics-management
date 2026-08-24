@@ -29,6 +29,7 @@ type Dead = {
   reasonCode: string;
   safeError: string;
   replayCount: number;
+  deliveryVersion: number;
   resolvedAt?: string;
 };
 export default function IntegrationsPage() {
@@ -55,7 +56,8 @@ export default function IntegrationsPage() {
   }, []);
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const f = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const f = new FormData(form);
     try {
       await api("/tenant/integrations", {
         method: "POST",
@@ -72,8 +74,9 @@ export default function IntegrationsPage() {
           mappingVersion: 1,
         }),
       });
-      event.currentTarget.reset();
+      form.reset();
       await load();
+      setTab("health");
     } catch (value) {
       setError(value as ApiError);
     }
@@ -85,7 +88,7 @@ export default function IntegrationsPage() {
       await api(`/tenant/integrations/dead-letters/${item.id}/replay`, {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason, expectedVersion: item.deliveryVersion }),
       });
       await load();
     } catch (value) {

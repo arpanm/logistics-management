@@ -1,20 +1,73 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { withTenant, type Prisma } from "@logistics/db";
 import type { SessionActor } from "@logistics/auth";
+import { z } from "zod";
 import { AppError, AppService } from "../../app.service.js";
+import { AlertsProvider } from "../alerts/alerts.provider.js";
+import { IntegrationsProvider } from "../integrations/integrations.provider.js";
 import type {
   KernelRecordInput,
   KernelRecordUpdate,
   KernelTransitionInput,
 } from "./contracts.js";
 import { findKernelManifest, moduleNavDescriptors } from "./manifests.js";
+import { canonicalJson } from "../control/idempotency.js";
 
 type Tx = Prisma.TransactionClient;
 type Row = Record<string, unknown>;
+const boundedJson = z
+  .unknown()
+  .refine(
+    (value) => Buffer.byteLength(canonicalJson(value), "utf8") <= 16_384,
+    "Payload is too large",
+  );
+const alertDataSchema = z
+  .object({
+    type: z
+      .string()
+      .trim()
+      .min(2)
+      .max(80)
+      .regex(/^[A-Z0-9_.-]+$/),
+    severity: z.enum(["INFO", "WARNING", "HIGH", "CRITICAL"]),
+    summary: z.string().trim().min(2).max(500),
+    sourceModule: z.string().trim().min(2).max(60).optional(),
+    sourceRecordId: z.string().uuid().optional(),
+    evidence: boundedJson.optional(),
+  })
+  .strict();
+const failedDeliveryDataSchema = z
+  .object({
+    endpointId: z.string().uuid(),
+    direction: z.enum(["INBOUND", "OUTBOUND"]),
+    eventType: z
+      .string()
+      .trim()
+      .min(2)
+      .max(120)
+      .regex(/^[A-Za-z0-9_.:-]+$/),
+    mappingVersion: z.number().int().positive().default(1),
+    payload: boundedJson.optional(),
+    reasonCode: z
+      .string()
+      .trim()
+      .min(2)
+      .max(80)
+      .regex(/^[A-Z0-9_.-]+$/)
+      .optional(),
+    safeError: z.string().trim().min(2).max(500).optional(),
+    expectedVersion: z.number().int().positive(),
+  })
+  .strict();
 
 @Injectable()
 export class KernelService {
-  constructor(@Inject(AppService) private readonly app: AppService) {}
+  constructor(
+    @Inject(AppService) private readonly app: AppService,
+    @Inject(AlertsProvider) private readonly alerts: AlertsProvider,
+    @Inject(IntegrationsProvider)
+    private readonly integrations: IntegrationsProvider,
+  ) {}
 
   private manifest(moduleKey: string, resource: string) {
     const manifest = findKernelManifest(moduleKey, resource);
@@ -102,6 +155,14 @@ export class KernelService {
     page = 1,
   ) {
     this.manifest(moduleKey, resource);
+    if (moduleKey === "alerts" && resource === "alert") {
+      const result = await this.alerts.queue(actor, status);
+      return { ...result, page: 1, pageSize: 250 };
+    }
+    if (moduleKey === "integrations" && resource === "delivery") {
+      const items = await this.integrations.deliveries(actor, status);
+      return { items, total: items.length, page: 1, pageSize: 250 };
+    }
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);
@@ -146,8 +207,57 @@ export class KernelService {
     resource: string,
     input: KernelRecordInput,
     correlationId: string,
+    idempotencyKey?: string,
   ) {
     const manifest = this.manifest(moduleKey, resource);
+    if (moduleKey === "alerts" && resource === "alert") {
+      const parsed = alertDataSchema.safeParse(input.data ?? {});
+      if (!parsed.success)
+        throw new AppError(400, "VALIDATION_FAILED", "Alert input is invalid");
+      const data = parsed.data;
+      return this.alerts.createOccurrence(
+        actor,
+        {
+          code: input.code,
+          title: input.name,
+          type: data.type,
+          severity: data.severity,
+          summary: data.summary,
+          sourceModule: data.sourceModule ?? "alerts",
+          sourceRecordId: data.sourceRecordId,
+          evidence: data.evidence,
+        },
+        idempotencyKey ?? "",
+        correlationId,
+      );
+    }
+    if (moduleKey === "integrations" && resource === "delivery") {
+      const parsed = failedDeliveryDataSchema.safeParse(input.data ?? {});
+      if (!parsed.success)
+        throw new AppError(
+          400,
+          "VALIDATION_FAILED",
+          "Delivery input is invalid",
+        );
+      const data = parsed.data;
+      return this.integrations.recordFailedDelivery(
+        actor,
+        {
+          endpointId: data.endpointId,
+          direction: data.direction,
+          eventId: input.code,
+          eventType: data.eventType,
+          mappingVersion: data.mappingVersion,
+          payload: data.payload ?? data,
+          correlationId,
+          reasonCode: data.reasonCode,
+          safeError: data.safeError,
+          expectedVersion: data.expectedVersion,
+        },
+        idempotencyKey ?? "",
+        correlationId,
+      );
+    }
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);
@@ -202,6 +312,10 @@ export class KernelService {
     id: string,
   ) {
     this.manifest(moduleKey, resource);
+    if (moduleKey === "alerts" && resource === "alert")
+      return this.alerts.detail(actor, id);
+    if (moduleKey === "integrations" && resource === "delivery")
+      return this.integrations.deliveryDetail(actor, id);
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);
@@ -250,6 +364,15 @@ export class KernelService {
     correlationId: string,
   ) {
     this.manifest(moduleKey, resource);
+    if (
+      (moduleKey === "alerts" && resource === "alert") ||
+      (moduleKey === "integrations" && resource === "delivery")
+    )
+      throw new AppError(
+        405,
+        "METHOD_NOT_ALLOWED",
+        "Operation is not supported",
+      );
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);
@@ -298,6 +421,15 @@ export class KernelService {
     correlationId: string,
   ) {
     const manifest = this.manifest(moduleKey, resource);
+    if (
+      (moduleKey === "alerts" && resource === "alert") ||
+      (moduleKey === "integrations" && resource === "delivery")
+    )
+      throw new AppError(
+        405,
+        "METHOD_NOT_ALLOWED",
+        "Operation is not supported",
+      );
     if (!(manifest.statuses as readonly string[]).includes(input.toStatus))
       throw new AppError(
         400,
@@ -365,6 +497,10 @@ export class KernelService {
 
   async report(actor: SessionActor, moduleKey: string, resource: string) {
     const manifest = this.manifest(moduleKey, resource);
+    if (moduleKey === "alerts" && resource === "alert")
+      return this.alerts.report(actor);
+    if (moduleKey === "integrations" && resource === "delivery")
+      return this.integrations.deliveryReport(actor);
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);
@@ -393,6 +529,15 @@ export class KernelService {
     body: string,
   ) {
     this.manifest(moduleKey, resource);
+    if (
+      (moduleKey === "alerts" && resource === "alert") ||
+      (moduleKey === "integrations" && resource === "delivery")
+    )
+      throw new AppError(
+        405,
+        "METHOD_NOT_ALLOWED",
+        "Operation is not supported",
+      );
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);
@@ -427,6 +572,15 @@ export class KernelService {
     },
   ) {
     this.manifest(moduleKey, resource);
+    if (
+      (moduleKey === "alerts" && resource === "alert") ||
+      (moduleKey === "integrations" && resource === "delivery")
+    )
+      throw new AppError(
+        405,
+        "METHOD_NOT_ALLOWED",
+        "Operation is not supported",
+      );
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertInternal(tx, actor);

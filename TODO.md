@@ -4,10 +4,10 @@ This is the active execution queue. It is synchronized at the end of every featu
 
 ## Active
 
-| Feature | Work item | State | Owner/reason | Evidence or unblock condition |
-|---|---|---|---|---|
-| FND-02 | Run the preserved 16-case desktop/mobile Playwright suite | Implemented | Non-browser gates pass; full feature-specific browser execution remains | `tests/e2e/fnd-02-identity-access.spec.ts` |
-| MST-01..CFG-01 | Expand the passing rapid smoke into feature-specific acceptance suites | Implemented | Desktop/mobile cross-feature smoke passes 2/2 | `tests/e2e/rapid-all-features.spec.ts` |
+| Feature | Work item                                                                                             | State       | Owner/reason                                                                         | Evidence or unblock condition              |
+| ------- | ----------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ | ------------------------------------------ |
+| FND-02  | Run the preserved 16-case desktop/mobile Playwright suite                                             | Implemented | Non-browser gates pass; full feature-specific browser execution remains              | `tests/e2e/fnd-02-identity-access.spec.ts` |
+| ALL     | Complete the remaining operations/finance mobile acceptance matrix beyond the six remediated UI cases | Implemented | All 12 remediated cases pass on desktop/mobile; remaining mobile breadth is deferred | `specs/ALL-FEATURES-E2E-STATUS.md`         |
 
 ## Blocked
 

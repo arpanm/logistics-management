@@ -1291,22 +1291,39 @@ export class AppService implements OnModuleDestroy {
   async platformReport(actor: SessionActor) {
     this.requirePlatform(actor);
     return withPlatform(this.db, async (tx) => {
-      const totals = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT count(*)::int total,count(*) FILTER(WHERE status='ACTIVE')::int active,count(*) FILTER(WHERE status='INACTIVE')::int inactive FROM app.tenants`,
-      );
-      const tenants = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT * FROM reporting.platform_tenant_health ORDER BY name`,
-      );
+      const snapshot = (
+        await tx.$queryRawUnsafe<
+          Array<{
+            total: number;
+            active: number;
+            inactive: number;
+            tenants: Array<Row>;
+          }>
+        >(
+          `WITH tenant_health AS MATERIALIZED (
+             SELECT * FROM reporting.platform_tenant_health
+           )
+           SELECT count(*)::int AS total,
+             count(*) FILTER(WHERE status='ACTIVE')::int AS active,
+             count(*) FILTER(WHERE status='INACTIVE')::int AS inactive,
+             coalesce(jsonb_agg(to_jsonb(tenant_health) ORDER BY name),'[]'::jsonb) AS tenants
+           FROM tenant_health`,
+        )
+      )[0] ?? { total: 0, active: 0, inactive: 0, tenants: [] };
       const size = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT pg_database_size(current_database())::text AS bytes`,
       );
       return {
         generatedAt: new Date().toISOString(),
-        totals: totals[0],
+        totals: {
+          total: Number(snapshot.total ?? 0),
+          active: Number(snapshot.active ?? 0),
+          inactive: Number(snapshot.inactive ?? 0),
+        },
         projectDatabaseBytes: size[0]?.bytes,
         storageLabel: "Shared-container project database usage",
         integrationHealth: "Not configured",
-        tenants,
+        tenants: snapshot.tenants ?? [],
       };
     });
   }

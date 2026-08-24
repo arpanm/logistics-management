@@ -14,3 +14,5 @@ Use the templates in `.codex/templates/`. Specifications are durable product/eng
 `spec.md` must be Approved before production implementation begins. The test plan tracks every test ID through Planned, Implemented, Passing, Failing, Blocked, or justified N/A. `completion.md` must map every acceptance criterion to passing test evidence before implementation becomes Complete and test status becomes Passing.
 
 The final feature gate also synchronizes `FEATURES.md`, `README.md`, `TODO.md`, executable tests/fixtures, and affected documentation. Status drift is a failed completion gate.
+
+Cross-feature executable Playwright cases and their latest evidence are tracked in `ALL-FEATURES-E2E-STATUS.md`.

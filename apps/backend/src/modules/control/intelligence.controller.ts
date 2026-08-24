@@ -159,7 +159,17 @@ export class IntelligenceController {
         })
         .strict()
         .parse(body);
-      return this.alerts.act(actor, uuid.parse(id), input.action, input);
+      return this.alerts.act(
+        actor,
+        uuid.parse(id),
+        input.action,
+        input,
+        typeof req.headers["idempotency-key"] === "string"
+          ? req.headers["idempotency-key"]
+          : "",
+        (req as Request & { correlationId?: string }).correlationId ??
+          crypto.randomUUID(),
+      );
     });
   }
   @Get("imports/status") importStatus(
@@ -277,15 +287,29 @@ export class IntelligenceController {
             environment: z.string().min(2).max(40),
             endpoint: z.string().url().optional(),
             credentialReference: z.string().min(3).max(240).optional(),
-            scopes: z.array(z.string()).default([]),
-            allowedEvents: z.array(z.string()).default([]),
+            scopes: z
+              .array(z.string().trim().min(1).max(100))
+              .max(50)
+              .default([]),
+            allowedEvents: z
+              .array(z.string().trim().min(1).max(120))
+              .max(100)
+              .default([]),
             mappingVersion: z.number().int().positive().default(1),
             rateLimit: z.unknown().optional(),
             retryPolicy: z.unknown().optional(),
           })
           .strict()
           .parse(body);
-        return this.integrations.createEndpoint(actor, input);
+        return this.integrations.createEndpoint(
+          actor,
+          input,
+          typeof req.headers["idempotency-key"] === "string"
+            ? req.headers["idempotency-key"]
+            : "",
+          (req as Request & { correlationId?: string }).correlationId ??
+            crypto.randomUUID(),
+        );
       },
       201,
     );
@@ -330,10 +354,23 @@ export class IntelligenceController {
       const actor = await this.authorized(req, "integrations.replay");
       this.csrf(req, actor);
       const input = z
-        .object({ reason: z.string().min(5).max(1000) })
+        .object({
+          reason: z.string().min(5).max(1000),
+          expectedVersion: z.number().int().positive(),
+        })
         .strict()
         .parse(body);
-      return this.integrations.replay(actor, uuid.parse(id), input.reason);
+      return this.integrations.replay(
+        actor,
+        uuid.parse(id),
+        input.reason,
+        typeof req.headers["idempotency-key"] === "string"
+          ? req.headers["idempotency-key"]
+          : "",
+        input.expectedVersion,
+        (req as Request & { correlationId?: string }).correlationId ??
+          crypto.randomUUID(),
+      );
     });
   }
 }

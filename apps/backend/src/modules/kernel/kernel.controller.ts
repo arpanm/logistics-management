@@ -14,6 +14,7 @@ import {
 import type { Request, Response } from "express";
 import { z, ZodError } from "zod";
 import { AppError, AppService } from "../../app.service.js";
+import { AccessService } from "../../access.service.js";
 import { KernelService } from "./kernel.service.js";
 
 const recordSchema = z.object({
@@ -55,6 +56,7 @@ export class KernelController {
   private readonly logger = new Logger(KernelController.name);
   constructor(
     @Inject(AppService) private readonly app: AppService,
+    @Inject(AccessService) private readonly access: AccessService,
     @Inject(KernelService) private readonly kernel: KernelService,
   ) {}
 
@@ -71,6 +73,30 @@ export class KernelController {
         : undefined,
       req.headers.origin,
     );
+    return actor;
+  }
+
+  private capability(moduleKey: string, resource: string, write: boolean) {
+    if (moduleKey === "alerts" && resource === "alert")
+      return write ? "alerts.admin" : "alerts.read";
+    if (moduleKey === "integrations" && resource === "delivery")
+      return write ? "integrations.admin" : "integrations.read";
+    return undefined;
+  }
+
+  private async authorizedResource(
+    req: Request,
+    moduleKey: string,
+    resource: string,
+    write: boolean,
+  ) {
+    const actor = write ? await this.mutate(req) : await this.actor(req);
+    const capability = this.capability(moduleKey, resource, write);
+    if (capability) {
+      const effective = await this.access.effective(actor, correlationId(req));
+      if (!effective.capabilities.includes(capability))
+        throw new AppError(403, "FORBIDDEN", "Action is not permitted");
+    }
     return actor;
   }
 
@@ -144,7 +170,11 @@ export class KernelController {
     @Res() res: Response,
   ) {
     return this.run(req, res, async () =>
-      this.kernel.report(await this.actor(req), moduleKey, resource),
+      this.kernel.report(
+        await this.authorizedResource(req, moduleKey, resource, false),
+        moduleKey,
+        resource,
+      ),
     );
   }
 
@@ -160,7 +190,7 @@ export class KernelController {
   ) {
     return this.run(req, res, async () =>
       this.kernel.list(
-        await this.actor(req),
+        await this.authorizedResource(req, moduleKey, resource, false),
         moduleKey,
         resource,
         search,
@@ -181,14 +211,24 @@ export class KernelController {
     return this.run(
       req,
       res,
-      async () =>
-        this.kernel.create(
-          await this.mutate(req),
+      async () => {
+        const actor = await this.authorizedResource(
+          req,
+          moduleKey,
+          resource,
+          true,
+        );
+        return this.kernel.create(
+          actor,
           moduleKey,
           resource,
           recordSchema.parse(body),
           correlationId(req),
-        ),
+          typeof req.headers["idempotency-key"] === "string"
+            ? req.headers["idempotency-key"]
+            : undefined,
+        );
+      },
       201,
     );
   }
@@ -203,7 +243,7 @@ export class KernelController {
   ) {
     return this.run(req, res, async () =>
       this.kernel.detail(
-        await this.actor(req),
+        await this.authorizedResource(req, moduleKey, resource, false),
         moduleKey,
         resource,
         z.string().uuid().parse(id),
@@ -222,7 +262,7 @@ export class KernelController {
   ) {
     return this.run(req, res, async () =>
       this.kernel.update(
-        await this.mutate(req),
+        await this.authorizedResource(req, moduleKey, resource, true),
         moduleKey,
         resource,
         z.string().uuid().parse(id),
@@ -243,7 +283,7 @@ export class KernelController {
   ) {
     return this.run(req, res, async () =>
       this.kernel.transition(
-        await this.mutate(req),
+        await this.authorizedResource(req, moduleKey, resource, true),
         moduleKey,
         resource,
         z.string().uuid().parse(id),
@@ -267,7 +307,7 @@ export class KernelController {
       res,
       async () =>
         this.kernel.addComment(
-          await this.mutate(req),
+          await this.authorizedResource(req, moduleKey, resource, true),
           moduleKey,
           resource,
           z.string().uuid().parse(id),
@@ -291,7 +331,7 @@ export class KernelController {
       res,
       async () =>
         this.kernel.addDocument(
-          await this.mutate(req),
+          await this.authorizedResource(req, moduleKey, resource, true),
           moduleKey,
           resource,
           z.string().uuid().parse(id),

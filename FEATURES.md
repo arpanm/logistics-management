@@ -28,25 +28,25 @@ When sources conflict:
 
 Implementation status:
 
-| Status | Meaning |
-|---|---|
+| Status         | Meaning                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Prototype only | Demonstrated in static/local HTML or sample data, but no production persistence, authorization, API, or automated tests exist. |
-| Specified only | Defined in the workbook or this document, but not demonstrated in the HTML. |
-| Proposed | Required for the target operating model or reusable product; business confirmation is still advisable. |
-| In progress | Implementation exists but all acceptance criteria have not passed. |
-| Complete | Implemented, authorized, persisted, observable, and all listed end-to-end acceptance tests pass. |
-| Blocked | A named unresolved decision or external dependency prevents completion. |
+| Specified only | Defined in the workbook or this document, but not demonstrated in the HTML.                                                    |
+| Proposed       | Required for the target operating model or reusable product; business confirmation is still advisable.                         |
+| In progress    | Implementation exists but all acceptance criteria have not passed.                                                             |
+| Complete       | Implemented, authorized, persisted, observable, and all listed end-to-end acceptance tests pass.                               |
+| Blocked        | A named unresolved decision or external dependency prevents completion.                                                        |
 
 Test status:
 
-| Status | Meaning |
-|---|---|
-| Not started | No approved feature test plan or executable feature tests exist. |
-| Planned | Acceptance criteria are mapped to approved test IDs, but executable coverage is incomplete. |
-| Implemented | Required tests exist but the full local acceptance suite is not currently passing. |
-| Failing | The required suite ran and has one or more named failures. |
-| Passing | Required unit/integration/contract/security/migration and Playwright acceptance tests pass against the locally deployed feature. |
-| Blocked | A named blocker prevents the required test suite from running or passing. |
+| Status      | Meaning                                                                                                                          |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Not started | No approved feature test plan or executable feature tests exist.                                                                 |
+| Planned     | Acceptance criteria are mapped to approved test IDs, but executable coverage is incomplete.                                      |
+| Implemented | Required tests exist but the full local acceptance suite is not currently passing.                                               |
+| Failing     | The required suite ran and has one or more named failures.                                                                       |
+| Passing     | Required unit/integration/contract/security/migration and Playwright acceptance tests pass against the locally deployed feature. |
+| Blocked     | A named blocker prevents the required test suite from running or passing.                                                        |
 
 ## 4. Product-wide rules
 
@@ -877,141 +877,141 @@ This section is the compatibility contract for the seven supplied Excel/form dat
 
 ### 10.1 Client Master
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| Client Code | Required | Tenant-unique uppercase text with no spaces; stable join key. |
-| Client Name | Required | Text. |
-| Industry | Optional | Text or configurable industry master. |
-| Account Manager | Required | Active scoped employee; prototype values `PHANI`, `NAND` become tenant data. |
-| Billing Entity | Optional/defaulted | Tenant legal entity; prototype default `Jurigari Private Limited`. |
-| GSTIN | Optional/configurable | Validate format when supplied. |
-| Credit Days | Required | Non-negative whole number; default 45 in prototype. |
-| POD Submission Mode | Optional | `Portal`, `Hard copy`, `Email`, `Portal + Hard copy`, tenant configurable. |
-| Escalation Name | Optional | Text. |
-| Escalation Email | Optional | Valid email when supplied. |
-| Active | Optional/defaulted | `Y`/`N`, default `Y`. |
+| Field               | Requirement           | Input/rule                                                                   |
+| ------------------- | --------------------- | ---------------------------------------------------------------------------- |
+| Client Code         | Required              | Tenant-unique uppercase text with no spaces; stable join key.                |
+| Client Name         | Required              | Text.                                                                        |
+| Industry            | Optional              | Text or configurable industry master.                                        |
+| Account Manager     | Required              | Active scoped employee; prototype values `PHANI`, `NAND` become tenant data. |
+| Billing Entity      | Optional/defaulted    | Tenant legal entity; prototype default `Jurigari Private Limited`.           |
+| GSTIN               | Optional/configurable | Validate format when supplied.                                               |
+| Credit Days         | Required              | Non-negative whole number; default 45 in prototype.                          |
+| POD Submission Mode | Optional              | `Portal`, `Hard copy`, `Email`, `Portal + Hard copy`, tenant configurable.   |
+| Escalation Name     | Optional              | Text.                                                                        |
+| Escalation Email    | Optional              | Valid email when supplied.                                                   |
+| Active              | Optional/defaulted    | `Y`/`N`, default `Y`.                                                        |
 
 ### 10.2 Location Master
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| Client Code | Required | Must reference an active/known client on create. |
-| Location Code | Required | Tenant-unique; recommended `CLIENT-LOC`. |
-| Location Name | Required | Text. |
-| State | Optional | Geography value. |
-| Location Type | Optional | `Plant`, `Depot`, `DC`, `Warehouse`, `CFA`, `Market`, tenant configurable. |
-| Committed Placement TAT (Hrs) | Required | Positive whole hours; prototype default 24. |
-| Branch Manager | Optional | Active scoped employee. |
-| Traffic Manager | Optional | Employee/person reference. |
-| Traffic Manager Mobile | Optional | Valid mobile when supplied. |
-| Active | Optional/defaulted | `Y`/`N`, default `Y`. |
+| Field                         | Requirement        | Input/rule                                                                 |
+| ----------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| Client Code                   | Required           | Must reference an active/known client on create.                           |
+| Location Code                 | Required           | Tenant-unique; recommended `CLIENT-LOC`.                                   |
+| Location Name                 | Required           | Text.                                                                      |
+| State                         | Optional           | Geography value.                                                           |
+| Location Type                 | Optional           | `Plant`, `Depot`, `DC`, `Warehouse`, `CFA`, `Market`, tenant configurable. |
+| Committed Placement TAT (Hrs) | Required           | Positive whole hours; prototype default 24.                                |
+| Branch Manager                | Optional           | Active scoped employee.                                                    |
+| Traffic Manager               | Optional           | Employee/person reference.                                                 |
+| Traffic Manager Mobile        | Optional           | Valid mobile when supplied.                                                |
+| Active                        | Optional/defaulted | `Y`/`N`, default `Y`.                                                      |
 
 ### 10.3 Vendor Master
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| Vendor Code | Required | Tenant-unique; recommended `VEN-nnnn`. |
-| Vendor Name | Required | Text. |
-| Owner Name | Optional | Text. |
-| Base Location Code | Optional | Known location; support vendor-native base geography in the normalized model. |
-| Contact 1 | Required | Valid mobile/contact. |
-| Contact 2 | Optional | Valid mobile/contact. |
-| PAN | Optional/configurable | Validate and protect as sensitive data. |
-| GSTIN | Optional/configurable | Validate and protect as sensitive data. |
-| Fleet Size | Optional | Non-negative whole number. |
-| Truck Types Served | Optional | Workbook uses semicolon-separated configured truck types. |
-| Onboarded By (Emp Code) | Required | Active/known employee; recommended `JGL-nnn`. |
-| Onboarded By (Name) | Required for workbook | Must reconcile to employee code or be flagged. |
-| Onboarding Date | Required | Date. |
-| Active | Optional/defaulted | `Y`/`N`, default `Y`. |
+| Field                   | Requirement           | Input/rule                                                                    |
+| ----------------------- | --------------------- | ----------------------------------------------------------------------------- |
+| Vendor Code             | Required              | Tenant-unique; recommended `VEN-nnnn`.                                        |
+| Vendor Name             | Required              | Text.                                                                         |
+| Owner Name              | Optional              | Text.                                                                         |
+| Base Location Code      | Optional              | Known location; support vendor-native base geography in the normalized model. |
+| Contact 1               | Required              | Valid mobile/contact.                                                         |
+| Contact 2               | Optional              | Valid mobile/contact.                                                         |
+| PAN                     | Optional/configurable | Validate and protect as sensitive data.                                       |
+| GSTIN                   | Optional/configurable | Validate and protect as sensitive data.                                       |
+| Fleet Size              | Optional              | Non-negative whole number.                                                    |
+| Truck Types Served      | Optional              | Workbook uses semicolon-separated configured truck types.                     |
+| Onboarded By (Emp Code) | Required              | Active/known employee; recommended `JGL-nnn`.                                 |
+| Onboarded By (Name)     | Required for workbook | Must reconcile to employee code or be flagged.                                |
+| Onboarding Date         | Required              | Date.                                                                         |
+| Active                  | Optional/defaulted    | `Y`/`N`, default `Y`.                                                         |
 
 ### 10.4 Indent & Placement
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| Indent No | Required | Tenant-unique and never reused. |
-| Indent Date & Time | Required | Starts placement commitment calculation. |
-| Client Code | Required | Known client. |
-| Location Code | Required | Known location belonging to Client Code. |
-| Origin | Required | Text/geography. |
-| Destination | Required | Text/geography. |
-| Truck Type | Required | Configured code. |
-| Qty / Weight (MT) | Optional | Non-negative decimal. |
-| Committed Placement Date & Time | Required | Defaults from SLA/TAT; override is governed. |
-| Vendor Code | Optional until allocation | Known eligible vendor when supplied. |
-| Vehicle No | Required when Placed | Known/eligible vehicle or validated registration. |
-| Driver Name | Optional until Placed | Prefer driver reference; workbook exports name. |
-| Driver Mobile | Optional until Placed | Prefer driver reference; validate when supplied. |
-| Actual Placement Date & Time | Required when Placed | Blank while awaited/NTP; stops placement ageing. |
-| Placement Status | Required | `Placed`, `Awaited`, `NTP`, `Cancelled`. |
-| NTP / Delay Reason | Conditional | Configured reason; expected for NTP/late exception. |
-| Remarks | Optional | Text; preserve audit/history. |
+| Field                           | Requirement               | Input/rule                                          |
+| ------------------------------- | ------------------------- | --------------------------------------------------- |
+| Indent No                       | Required                  | Tenant-unique and never reused.                     |
+| Indent Date & Time              | Required                  | Starts placement commitment calculation.            |
+| Client Code                     | Required                  | Known client.                                       |
+| Location Code                   | Required                  | Known location belonging to Client Code.            |
+| Origin                          | Required                  | Text/geography.                                     |
+| Destination                     | Required                  | Text/geography.                                     |
+| Truck Type                      | Required                  | Configured code.                                    |
+| Qty / Weight (MT)               | Optional                  | Non-negative decimal.                               |
+| Committed Placement Date & Time | Required                  | Defaults from SLA/TAT; override is governed.        |
+| Vendor Code                     | Optional until allocation | Known eligible vendor when supplied.                |
+| Vehicle No                      | Required when Placed      | Known/eligible vehicle or validated registration.   |
+| Driver Name                     | Optional until Placed     | Prefer driver reference; workbook exports name.     |
+| Driver Mobile                   | Optional until Placed     | Prefer driver reference; validate when supplied.    |
+| Actual Placement Date & Time    | Required when Placed      | Blank while awaited/NTP; stops placement ageing.    |
+| Placement Status                | Required                  | `Placed`, `Awaited`, `NTP`, `Cancelled`.            |
+| NTP / Delay Reason              | Conditional               | Configured reason; expected for NTP/late exception. |
+| Remarks                         | Optional                  | Text; preserve audit/history.                       |
 
 ### 10.5 POD Register
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| LR No | Required | Unique delivery/shipment key within configured scope. |
-| Indent No | Optional in prototype | Must reference known indent when supplied. |
-| Client Code | Required | Known client. |
-| Location Code | Required | Known client location. |
-| Invoice No | Required by workbook | Links to invoice/opening invoice; normalized workflow may allow POD before billing and add link later. |
-| Invoice Date | Optional | Date; must match linked invoice when present. |
-| Vehicle No | Required | Registration/vehicle reference. |
-| Truck Type | Optional | Configured code; reconcile to trip when present. |
-| Loading Date | Required | Must not be after delivery without governed correction. |
-| Delivery Date | Required | Starts POD ageing. |
-| POD Received Date | Optional | Blank while pending; stops POD ageing. |
-| POD Submitted to Client Date | Optional | Requires received POD unless policy allows digital direct submission. |
-| POD Mode | Optional | `Soft copy`, `Hard copy`, `Portal upload`, tenant configurable. |
-| Receiver Name | Optional | Text. |
-| Stamp Present | Optional | `Y`/`N`. |
-| Shortage / Damage Remarks | Conditional | Required when discrepancy/hold exists. |
+| Field                        | Requirement           | Input/rule                                                                                             |
+| ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| LR No                        | Required              | Unique delivery/shipment key within configured scope.                                                  |
+| Indent No                    | Optional in prototype | Must reference known indent when supplied.                                                             |
+| Client Code                  | Required              | Known client.                                                                                          |
+| Location Code                | Required              | Known client location.                                                                                 |
+| Invoice No                   | Required by workbook  | Links to invoice/opening invoice; normalized workflow may allow POD before billing and add link later. |
+| Invoice Date                 | Optional              | Date; must match linked invoice when present.                                                          |
+| Vehicle No                   | Required              | Registration/vehicle reference.                                                                        |
+| Truck Type                   | Optional              | Configured code; reconcile to trip when present.                                                       |
+| Loading Date                 | Required              | Must not be after delivery without governed correction.                                                |
+| Delivery Date                | Required              | Starts POD ageing.                                                                                     |
+| POD Received Date            | Optional              | Blank while pending; stops POD ageing.                                                                 |
+| POD Submitted to Client Date | Optional              | Requires received POD unless policy allows digital direct submission.                                  |
+| POD Mode                     | Optional              | `Soft copy`, `Hard copy`, `Portal upload`, tenant configurable.                                        |
+| Receiver Name                | Optional              | Text.                                                                                                  |
+| Stamp Present                | Optional              | `Y`/`N`.                                                                                               |
+| Shortage / Damage Remarks    | Conditional           | Required when discrepancy/hold exists.                                                                 |
 
 ### 10.6 Invoice & Collection
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| Invoice No | Required | Tenant/legal-entity unique; immutable after posting. |
-| Invoice Date | Required | Date. |
-| Submission Date to Client | Required by workbook | Client acknowledgement date; starts collection ageing. Production draft invoices may be blank until acknowledged. |
-| Client Code | Required | Known client. |
-| Location Code | Required | Known client location. |
-| Billing Month | Optional | Display period such as `Jun-26`; normalized as a period value. |
-| Taxable Value | Required | Exact non-negative decimal. |
-| GST Amount | Optional/defaulted | Exact decimal, derived from tax lines where applicable. |
-| Total Invoice Amount | Calculated/accepted on import | Taxable value + GST/charges − credits; imported value must reconcile. |
-| Credit Days | Optional/defaulted | Snapshot from client/contract. |
-| Due Date | Calculated | Submission acknowledgement + credit days. |
-| Payment Received | Calculated/accepted as opening balance | Derived from posted receipts; workbook import value requires reconciliation mode. |
-| Balance Due | Calculated/accepted on import | Total − settled transactions; imported value must reconcile. |
-| Last Payment Date | Calculated/accepted on import | Latest posted receipt allocation date. |
-| Hold / Deduction Reason | Conditional | Required for configured open/disputed conditions. |
-| SOA Reference | Optional | Text/document reference. |
-| Followed Up On | Optional/calculated | Latest collection follow-up date in normalized model. |
+| Field                     | Requirement                            | Input/rule                                                                                                        |
+| ------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Invoice No                | Required                               | Tenant/legal-entity unique; immutable after posting.                                                              |
+| Invoice Date              | Required                               | Date.                                                                                                             |
+| Submission Date to Client | Required by workbook                   | Client acknowledgement date; starts collection ageing. Production draft invoices may be blank until acknowledged. |
+| Client Code               | Required                               | Known client.                                                                                                     |
+| Location Code             | Required                               | Known client location.                                                                                            |
+| Billing Month             | Optional                               | Display period such as `Jun-26`; normalized as a period value.                                                    |
+| Taxable Value             | Required                               | Exact non-negative decimal.                                                                                       |
+| GST Amount                | Optional/defaulted                     | Exact decimal, derived from tax lines where applicable.                                                           |
+| Total Invoice Amount      | Calculated/accepted on import          | Taxable value + GST/charges − credits; imported value must reconcile.                                             |
+| Credit Days               | Optional/defaulted                     | Snapshot from client/contract.                                                                                    |
+| Due Date                  | Calculated                             | Submission acknowledgement + credit days.                                                                         |
+| Payment Received          | Calculated/accepted as opening balance | Derived from posted receipts; workbook import value requires reconciliation mode.                                 |
+| Balance Due               | Calculated/accepted on import          | Total − settled transactions; imported value must reconcile.                                                      |
+| Last Payment Date         | Calculated/accepted on import          | Latest posted receipt allocation date.                                                                            |
+| Hold / Deduction Reason   | Conditional                            | Required for configured open/disputed conditions.                                                                 |
+| SOA Reference             | Optional                               | Text/document reference.                                                                                          |
+| Followed Up On            | Optional/calculated                    | Latest collection follow-up date in normalized model.                                                             |
 
 ### 10.7 Payment Receipts
 
-| Field | Requirement | Input/rule |
-|---|---|---|
-| Receipt Ref | Required | Tenant-unique/idempotent external reference. |
-| Invoice No | Required by workbook | Known invoice; normalized UI also permits a receipt allocated across invoices. |
-| Client Code | Required | Must match invoice client. |
-| Payment Date | Required | Date; prototype defaults to current local date. |
-| Amount Received | Required | Positive exact decimal. |
-| Mode | Required | `NEFT`, `RTGS`, `IMPS`, `Cheque`, `UPI`, `Adjustment`, tenant configurable. |
-| UTR / Instrument No | Conditional | Required according to payment mode/policy; duplicate detection applies. |
-| Deduction Amount | Optional/defaulted | Non-negative exact decimal, default zero. |
-| Deduction Reason | Conditional | Required when deduction amount is positive. |
-| Reconciled (Y/N) | Optional/defaulted | `Y`/`N`, default `N`; maps to governed reconciliation status. |
+| Field               | Requirement          | Input/rule                                                                     |
+| ------------------- | -------------------- | ------------------------------------------------------------------------------ |
+| Receipt Ref         | Required             | Tenant-unique/idempotent external reference.                                   |
+| Invoice No          | Required by workbook | Known invoice; normalized UI also permits a receipt allocated across invoices. |
+| Client Code         | Required             | Must match invoice client.                                                     |
+| Payment Date        | Required             | Date; prototype defaults to current local date.                                |
+| Amount Received     | Required             | Positive exact decimal.                                                        |
+| Mode                | Required             | `NEFT`, `RTGS`, `IMPS`, `Cheque`, `UPI`, `Adjustment`, tenant configurable.    |
+| UTR / Instrument No | Conditional          | Required according to payment mode/policy; duplicate detection applies.        |
+| Deduction Amount    | Optional/defaulted   | Non-negative exact decimal, default zero.                                      |
+| Deduction Reason    | Conditional          | Required when deduction amount is positive.                                    |
+| Reconciled (Y/N)    | Optional/defaulted   | `Y`/`N`, default `N`; maps to governed reconciliation status.                  |
 
 ### 10.8 Supplied exact code lists
 
-| List | Supplied values |
-|---|---|
-| Truck Type | `10 ft`, `14 ft`, `17 ft`, `19 ft`, `22 ft`, `32 ft SXL`, `32 ft MXL`, `20 ft container`, `40 ft container` |
-| Placement Status | `Placed`, `Awaited`, `NTP`, `Cancelled` |
-| NTP / Delay Reason | `Vehicle breakdown`, `Rate not agreed`, `No vehicle in market`, `Loading delay at plant`, `Driver unavailable`, `Client cancelled`, `Permit / documentation` |
-| POD Mode | `Soft copy`, `Hard copy`, `Portal upload` |
-| Payment Mode | `NEFT`, `RTGS`, `IMPS`, `Cheque`, `UPI`, `Adjustment` |
+| List                    | Supplied values                                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Truck Type              | `10 ft`, `14 ft`, `17 ft`, `19 ft`, `22 ft`, `32 ft SXL`, `32 ft MXL`, `20 ft container`, `40 ft container`                                                                                                                                                                          |
+| Placement Status        | `Placed`, `Awaited`, `NTP`, `Cancelled`                                                                                                                                                                                                                                              |
+| NTP / Delay Reason      | `Vehicle breakdown`, `Rate not agreed`, `No vehicle in market`, `Loading delay at plant`, `Driver unavailable`, `Client cancelled`, `Permit / documentation`                                                                                                                         |
+| POD Mode                | `Soft copy`, `Hard copy`, `Portal upload`                                                                                                                                                                                                                                            |
+| Payment Mode            | `NEFT`, `RTGS`, `IMPS`, `Cheque`, `UPI`, `Adjustment`                                                                                                                                                                                                                                |
 | Hold / Deduction Reason | `Shortage claim under verification`, `POD copy awaited at client end`, `Rate difference, revised bill raised`, `Detention not approved`, `Damage debit note raised`, `GRN mismatch at plant`, `Awaiting SCM head approval`, `Invoice not booked in client system`, `No reason given` |

@@ -2,21 +2,21 @@
 
 A configurable, multi-tenant B2B logistics platform for managing client contracts, truck indents, vendor placement, trips, POD, client billing and collections, vendor payables, alerts, and control-tower reporting.
 
-The product requirements and per-feature implementation/test status are maintained in [FEATURES.md](FEATURES.md). The active execution queue is [TODO.md](TODO.md). Supplied Juri Gari prototypes and the workbook are preserved in `backup/` as read-only reference material and intentionally excluded from Git.
+The product requirements and per-feature implementation/test status are maintained in [FEATURES.md](FEATURES.md). The active execution queue is [TODO.md](TODO.md), and failed-acceptance RCA is maintained in [BUGS.md](BUGS.md). Supplied Juri Gari prototypes and the workbook are preserved in `backup/` as read-only reference material and intentionally excluded from Git.
 
 ## Current project status
 
-| Item | Status |
-|---|---|
-| Agentic SDLC scaffold | Complete |
-| Application bootstrap | Complete — `FND-01` verified |
-| Automated feature tests | 70 non-browser checks pass; the consolidated rapid desktop/mobile Playwright smoke passes 2/2; the full FND-02 browser suite remains pending |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL |
-| Feature implementation | All 18 feature areas have locally deployed implementation surfaces; rapid consolidated acceptance passes and deeper feature-specific acceptance remains pending |
+| Item                              | Status                                                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                                                 |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                               |
+| Automated feature tests           | 74 non-browser checks pass; all 90 real cross-feature Playwright cases pass; the 12 remediated cases pass on desktop and mobile Chromium |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                     |
+| Feature implementation            | All 18 feature areas have locally deployed implementation surfaces; all 90 named cross-feature acceptance cases pass                     |
 
 Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
 
-The rapid implementation pass uses a shared tenant-scoped record/workflow kernel for masters, operations, POD, finance, governance, and configuration, with PostgreSQL-backed control-tower, alert, import, and integration modules. The cross-feature desktop/mobile smoke passes; feature status remains `In progress` until the deeper feature-specific acceptance suites pass.
+The rapid implementation pass uses a shared tenant-scoped record/workflow kernel for masters, operations, POD, finance, governance, and configuration, with PostgreSQL-backed control-tower, alert, import, and integration modules. The cross-feature ledger records all 90 real-browser acceptance cases as Passed; the 12 previously failing cases are resolved in `BUGS.md`.
 
 ## Engineering baseline
 
@@ -72,18 +72,18 @@ The skill starts the required multi-agent team, creates the feature specificatio
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `make bootstrap` | Validate prerequisites, configure hooks, and install dependencies when present. |
-| `make postgres-up` | Create/start central PostgreSQL and provision this project's databases/schemas. |
-| `make postgres-provision` | Add or repair only this project's role, databases, and schemas. |
-| `make postgres-status` | Verify the shared container and project database. |
-| `make dev` | Start frontend and backend in development mode. |
-| `make check` | Run formatting, linting, type checks, and non-browser tests. |
-| `make deploy-local` | Apply migrations, build, and start frontend/backend locally. |
-| `make e2e` | Run Playwright against the local frontend/backend. |
-| `make verify` | Run final repository and application quality gates. |
-| `make status` | Show feature, test, TODO, and Git status. |
+| Command                   | Purpose                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------- |
+| `make bootstrap`          | Validate prerequisites, configure hooks, and install dependencies when present. |
+| `make postgres-up`        | Create/start central PostgreSQL and provision this project's databases/schemas. |
+| `make postgres-provision` | Add or repair only this project's role, databases, and schemas.                 |
+| `make postgres-status`    | Verify the shared container and project database.                               |
+| `make dev`                | Start frontend and backend in development mode.                                 |
+| `make check`              | Run formatting, linting, type checks, and non-browser tests.                    |
+| `make deploy-local`       | Apply migrations, build, and start frontend/backend locally.                    |
+| `make e2e`                | Run Playwright against the local frontend/backend.                              |
+| `make verify`             | Run final repository and application quality gates.                             |
+| `make status`             | Show feature, test, TODO, and Git status.                                       |
 
 ## Documentation map
 
