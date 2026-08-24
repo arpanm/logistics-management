@@ -1,0 +1,30 @@
+.DS_Store
+.env
+.env.local
+.env.*.local
+!.env.example
+
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+playwright-report/
+test-results/
+blob-report/
+traces/
+screenshots/
+
+.pnpm-store/
+*.log
+
+# Historical source artifacts are retained locally but may contain business data.
+backup/
+
+# Local service data and temporary SDLC state.
+.local/
+.sdlc/runtime/
+

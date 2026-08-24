@@ -1,0 +1,32 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repository policy
+        run: bash scripts/policy-check.sh
+      - name: Enable Corepack
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        run: corepack enable
+      - name: Set up Node
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        run: pnpm install --frozen-lockfile
+      - name: Static and non-browser tests
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        run: pnpm run check
+

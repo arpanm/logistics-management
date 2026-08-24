@@ -1,0 +1,17 @@
+{
+  "name": "logistics-control-tower",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-tenant logistics operations control tower",
+  "scripts": {
+    "policy:check": "bash scripts/policy-check.sh",
+    "check": "bash scripts/run-workspace-checks.sh",
+    "dev": "bash scripts/run-app-command.sh dev",
+    "build": "bash scripts/run-app-command.sh build",
+    "start:local": "bash scripts/run-app-command.sh start:local",
+    "db:migrate": "bash scripts/run-app-command.sh db:migrate",
+    "test:e2e": "bash scripts/e2e.sh",
+    "verify": "bash scripts/verify.sh"
+  }
+}
+

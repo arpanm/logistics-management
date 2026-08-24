@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature SDLC"
+  short_description: "Feature delivery with multi-agent quality gates"
+  default_prompt: "Use $feature-sdlc to implement the requested feature through specification, development, local deployment, Playwright, review, and local commit."

@@ -1,0 +1,9 @@
+# Project-scoped Codex configuration. This layer is used only when the
+# repository is trusted by the local Codex client.
+project_doc_max_bytes = 65536
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 4
+interrupt_message = true
+
