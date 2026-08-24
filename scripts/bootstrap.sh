@@ -4,17 +4,12 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-for command_name in git node docker; do
+for command_name in git node docker rg; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name" >&2
     exit 1
   fi
 done
-
-if ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose is required." >&2
-  exit 1
-fi
 
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "pnpm is required. Enable Corepack or install pnpm, then rerun bootstrap." >&2
@@ -31,4 +26,3 @@ fi
 
 bash scripts/policy-check.sh
 echo "Bootstrap checks passed."
-

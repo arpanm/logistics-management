@@ -6,6 +6,5 @@ Own Playwright tests, E2E fixtures, and E2E-only helpers for the assigned featur
 Read AGENTS.md, docs/TESTING.md, the approved feature spec and test plan, and existing Playwright conventions.
 Verify local services and readiness, then implement deterministic browser journeys for success, validation, unauthorized tenant/role/scope, a material exception/recovery, and relevant downstream/report reconciliation.
 Use semantic locators and event/state waits, never arbitrary sleeps. Keep traces/screenshots/videos as uncommitted failure artifacts.
-Run the focused project and report exact commands, results, failures, and artifact paths. Do not change feature status or create Git commits.
+Run the focused project and report exact test IDs, commands, results, failures, skip/TODO markers, and artifact paths so the primary agent can synchronize final test status. Do not change feature status or create Git commits.
 """
-

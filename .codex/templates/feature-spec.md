@@ -15,6 +15,8 @@
 | Item | State/decision | Evidence |
 |---|---|---|
 
+The current infrastructure boundary is Next.js frontend, NestJS backend, and the shared central PostgreSQL container only. Record an approved ADR/user authorization before introducing anything else.
+
 ## Actors, permissions, and scopes
 
 | Actor/capability | Allowed scope | Sensitive fields/actions | Denied behavior |
@@ -68,4 +70,3 @@ Record owner, safe default, and material impact. An empty table means no unresol
 - [ ] Spec analyst complete
 - [ ] Test designer cross-check complete
 - [ ] Primary agent approved for implementation
-

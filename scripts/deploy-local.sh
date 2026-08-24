@@ -5,10 +5,10 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime_dir="$repo_dir/.sdlc/runtime"
 cd "$repo_dir"
 
-bash scripts/infra-up.sh
+bash scripts/postgres-up.sh
 
-if [[ ! -d apps/web ]]; then
-  echo "Infrastructure is healthy, but application deployment requires FND-01." >&2
+if [[ ! -d apps/frontend || ! -d apps/backend ]]; then
+  echo "Shared PostgreSQL is healthy, but frontend/backend deployment requires FND-01." >&2
   exit 1
 fi
 
@@ -24,5 +24,4 @@ nohup pnpm run start:local >"$runtime_dir/app.log" 2>&1 &
 echo "$!" >"$runtime_dir/app.pid"
 
 bash scripts/health.sh
-echo "Local application deployed at ${APP_URL:-http://127.0.0.1:3000}."
-
+echo "Frontend deployed at ${FRONTEND_URL:-http://127.0.0.1:3000}; backend at ${BACKEND_URL:-http://127.0.0.1:4000}."

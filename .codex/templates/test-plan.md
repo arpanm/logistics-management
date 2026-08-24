@@ -1,6 +1,7 @@
 # <FEATURE-ID> — Test Plan
 
-**Status:** Draft | Approved | Executed
+**Plan status:** Draft | Approved | Executed
+**Overall test status:** Not started | Planned | Implemented | Passing | Failing | Blocked
 **Related spec:** `specs/<FEATURE-ID>/spec.md`
 
 ## Risks
@@ -11,8 +12,8 @@ Define two tenants, scoped roles, deterministic time, currency/timezone, record 
 
 ## Acceptance-to-test matrix
 
-| Test ID | Acceptance/risk | Layer | Preconditions | Action | Expected result |
-|---|---|---|---|---|---|
+| Test ID | Acceptance/risk | Layer | Preconditions | Action | Expected result | Status | Evidence |
+|---|---|---|---|---|---|---|---|
 
 ## Unit tests
 
@@ -57,3 +58,9 @@ make verify
 - [ ] Required fixtures are deterministic and tenant-isolated
 - [ ] Primary agent approved
 
+## Final execution synchronization
+
+- [ ] Every test ID has a final status and evidence
+- [ ] No unexplained skipped/only/quarantined test remains
+- [ ] Test file names and IDs match this plan
+- [ ] `FEATURES.md`, `README.md`, `TODO.md`, and `completion.md` show the same result

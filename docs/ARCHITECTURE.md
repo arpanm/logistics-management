@@ -2,42 +2,58 @@
 
 ## System shape
 
-The platform is a modular monolith first, with explicit domain boundaries and an event/outbox seam. This keeps local development and transactions simple while allowing high-volume or integration-heavy modules to be extracted later without changing product semantics.
+The current platform baseline uses three deployable/runtime components only:
+
+1. Next.js frontend
+2. NestJS backend
+3. PostgreSQL
+
+The application begins as a modular backend with clear domain boundaries. No Redis, external queue, object-store container, mail container, or separate worker deployment is part of the current baseline.
 
 ```mermaid
 flowchart LR
-    U["Internal and external users"] --> W["Next.js web and API"]
-    W --> A["Application services and authorization"]
+    U["Internal and external users"] --> F["Next.js frontend"]
+    F --> B["NestJS backend"]
+    E["Approved external APIs and imports"] --> B
+    B --> A["Application services and authorization"]
     A --> D["Domain modules"]
-    D --> P[("PostgreSQL")]
-    D --> O["Transactional outbox"]
-    O --> Q["Redis-backed workers"]
-    Q --> X["Notifications and integrations"]
-    D --> S["S3-compatible document storage"]
-    E["GPS, accounting, import, and webhook adapters"] --> W
+    D --> P[("Shared PostgreSQL container")]
+    P --> S1["app schema"]
+    P --> S2["audit schema"]
+    P --> S3["reporting schema"]
 ```
 
-## Planned repository layout
+## Repository layout
 
-`FND-01` establishes this layout unless the feature spec records a better compatible organization:
+`FND-01` establishes this layout:
 
 ```text
 apps/
-  web/                 Next.js UI and HTTP/API boundary
-  worker/              Background jobs and outbox consumers
+  frontend/            Next.js UI
+  backend/             NestJS HTTP/API and in-process application services
 packages/
   domain/              Framework-light domain rules and types
   db/                  Prisma schema, migrations, repositories, seeds
   auth/                Capabilities, scopes, and policy evaluation
   ui/                  Shared accessible UI components
   config/              Typed tenant and runtime configuration
-  observability/       Logs, metrics, traces, audit helpers
+  observability/       Logs, metrics, and audit helpers
 tests/
   e2e/                 Playwright journeys
   fixtures/            Cross-module deterministic test data
 specs/
   <FEATURE-ID>/        Feature spec, test plan, and completion evidence
 ```
+
+## Shared PostgreSQL model
+
+- A single local Docker container named `shared-postgres` serves this and other projects.
+- The shared persistent volume belongs to the central container, not this repository.
+- Each project provisions its own login role, application database, test database, and schemas.
+- This project uses `logistics` and `logistics_test`, each with `app`, `audit`, and `reporting` schemas.
+- Project commands may create/start and provision the central container but must never stop, reset, or delete it.
+- Application migrations operate only within this project's databases/schemas.
+- Schema names may expand when a feature demonstrates a clear boundary; database/container proliferation requires an ADR.
 
 ## Domain modules
 
@@ -55,15 +71,15 @@ specs/
 - Imports, exports, integrations, and notifications
 - Audit, comments, and approvals
 
-Modules own their writes. Cross-module reads use published query services or reporting projections. Cross-module side effects use domain events persisted through a transactional outbox.
+Modules own their writes. Cross-module reads use published query services or reporting projections. Events, idempotency keys, scheduled work, and delivery attempts are persisted in PostgreSQL. Until another infrastructure decision is approved, background work runs within the backend deployment and uses PostgreSQL locking/leases for coordination.
 
 ## Data and isolation
 
-- All tenant-owned tables have a non-null tenant key and indexes beginning with tenant scope where appropriate.
-- Natural-key uniqueness is tenant-scoped, and legal-entity scope is included where numbering rules require it.
-- Repository methods require tenant context. Unscoped database access is limited to explicitly reviewed platform administration paths.
-- Tests create at least two tenants and prove negative access for every tenant-owned aggregate.
-- Files use tenant-separated object keys and authorization-checked signed access.
+- Every tenant-owned row has a non-null tenant key.
+- Natural-key uniqueness is tenant-scoped and includes legal-entity scope when required.
+- Repository methods require tenant context; unscoped access is limited to reviewed platform-administration paths.
+- Tests create at least two tenants and prove negative access for each tenant-owned aggregate.
+- Documents required by current features are stored in PostgreSQL behind a storage abstraction, with metadata, checksum, authorization, and retention controls. A future external object store requires a separate approved ADR.
 
 ## Authentication and authorization
 
@@ -76,37 +92,38 @@ allow = role grants capability
         AND no explicit policy block applies
 ```
 
-Scopes may include legal entity, region, branch, client, location, vendor, and assigned trip. Policy evaluation belongs in reusable server-side services and query builders.
+Scopes may include legal entity, region, branch, client, location, vendor, and assigned trip. Policy evaluation belongs in reusable backend services and query builders.
 
 ## Money, quantities, and time
 
 - Persist currency with ISO code and exact decimal/minor-unit amounts.
 - Persist quantities with explicit unit and exact decimal precision.
-- Persist instants in UTC. Persist local-date business concepts separately when they are dates rather than instants.
-- Resolve business boundaries in the tenant timezone and test daylight/timezone behavior even though the initial tenant uses `Asia/Kolkata`.
+- Persist instants in UTC and business dates as date values.
+- Resolve calendar boundaries in tenant timezone and test timezone behavior.
 
-## Transactions and idempotency
+## Transactions, events, and idempotency
 
-- Financial postings are append-only ledger events with compensating reversals.
-- Imports, webhook events, receipt posting, payment posting, and notification delivery use stable idempotency keys.
-- Business transaction and outbox event commit atomically.
-- Workers are safe under at-least-once delivery.
+- Financial postings are append-only ledger rows with compensating reversals.
+- Imports, external events, receipt posting, payment posting, and notification requests use stable idempotency keys.
+- Domain change and event/outbox row commit in one PostgreSQL transaction.
+- The backend dispatcher uses PostgreSQL row locking/leases and is safe under retry.
 
 ## Reporting
 
-Operational record screens read canonical transaction models. Dashboard aggregates may use database views/materialized projections, but every KPI must reconcile to permission-scoped detail rows and expose data freshness.
+Operational screens read canonical transaction models. Dashboards may use PostgreSQL views/materialized views in the `reporting` schema. Every KPI must reconcile to permission-scoped details and expose freshness.
 
-## Observability
+## Backend and frontend deployment
 
-Use structured logs with request/job correlation IDs, metrics for business and technical health, traces around integrations and background jobs, and immutable audit events for governed changes. Never log secrets, full tokens, unmasked bank data, or unnecessarily sensitive personal data.
+- Frontend and backend are independently buildable and startable from the monorepo.
+- Frontend uses only the documented backend API; it never connects directly to PostgreSQL.
+- Backend provides liveness/readiness endpoints and verifies database connectivity/migration state.
+- Local deployment starts both processes against central PostgreSQL and Playwright tests through the frontend.
 
 ## Security baseline
 
-- Validate all external input.
-- Apply least privilege and server-side scope checks.
-- Protect state-changing browser requests against cross-site request forgery where relevant.
-- Use secure cookie/session settings and content-security headers.
-- Scan uploads and restrict type/size.
-- Rate-limit authentication, public portals, imports, and externally callable APIs.
-- Keep dependencies patched and lockfiles committed.
-
+- Validate all external input and enforce authorization server-side.
+- Protect browser state changes against cross-site request forgery where relevant.
+- Use secure session/cookie and content-security settings.
+- Restrict upload size/type and store current-phase files in PostgreSQL with authorization checks.
+- Rate-limit authentication, portals, imports, and external APIs in the backend using PostgreSQL-backed counters only where required; do not add new infrastructure silently.
+- Never log secrets, tokens, full bank data, or unnecessary personal data.

@@ -1,32 +1,32 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap infra-up infra-down infra-reset dev check policy-check deploy-local health e2e verify status
+.PHONY: help bootstrap postgres-up postgres-provision postgres-status dev check policy-check deploy-local health e2e verify status
 
 help:
-	@echo "bootstrap      Validate tools, configure hooks, and install dependencies"
-	@echo "infra-up       Start local PostgreSQL, Redis, MinIO, and Mailpit"
-	@echo "infra-down     Stop local infrastructure and keep volumes"
-	@echo "infra-reset    Delete local infrastructure volumes with explicit confirmation"
-	@echo "dev            Start application development processes"
-	@echo "check          Run application static checks and non-browser tests"
-	@echo "deploy-local   Build and start a production-style local application"
-	@echo "health         Verify local infrastructure and application readiness"
-	@echo "e2e            Run Playwright end-to-end tests"
-	@echo "verify         Run all final non-destructive quality gates"
-	@echo "status         Show feature and Git status"
+	@echo "bootstrap           Validate tools, configure hooks, and install dependencies"
+	@echo "postgres-up         Create/start the central shared PostgreSQL and provision this project"
+	@echo "postgres-provision  Add this project's role, databases, and schemas to shared PostgreSQL"
+	@echo "postgres-status     Verify shared PostgreSQL and the project database"
+	@echo "dev                 Start frontend and backend development processes"
+	@echo "check               Run application static checks and non-browser tests"
+	@echo "deploy-local        Build and start frontend/backend against shared PostgreSQL"
+	@echo "health              Verify PostgreSQL, backend, and frontend readiness"
+	@echo "e2e                 Run Playwright end-to-end tests"
+	@echo "verify              Run all final non-destructive quality gates"
+	@echo "status              Show feature, test, TODO, and Git status"
 
 bootstrap:
 	@bash scripts/bootstrap.sh
 
-infra-up:
-	@bash scripts/infra-up.sh
+postgres-up:
+	@bash scripts/postgres-up.sh
 
-infra-down:
-	@docker compose down --remove-orphans
+postgres-provision:
+	@bash scripts/postgres-provision.sh
 
-infra-reset:
-	@bash scripts/infra-reset.sh
+postgres-status:
+	@bash scripts/postgres-status.sh
 
 dev:
 	@pnpm run dev
@@ -51,4 +51,3 @@ verify:
 
 status:
 	@bash scripts/sdlc-status.sh
-

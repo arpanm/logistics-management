@@ -6,10 +6,9 @@ cd "$repo_dir"
 
 bash scripts/run-workspace-checks.sh
 
-if [[ -d apps/web ]]; then
+if [[ -d apps/frontend && -d apps/backend ]]; then
   bash scripts/health.sh
   bash scripts/e2e.sh
 else
-  echo "Scaffold verification complete. FND-01 must add application, deployment, and E2E gates."
+  echo "Scaffold verification complete. FND-01 must add frontend, backend, deployment, and E2E gates."
 fi
-

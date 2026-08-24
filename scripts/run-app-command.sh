@@ -5,20 +5,20 @@ requested_command="${1:?application command is required}"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-if [[ ! -d apps/web ]]; then
-  echo "Application baseline is not present. Implement FND-01 before running '$requested_command'." >&2
+if [[ ! -d apps/frontend || ! -d apps/backend ]]; then
+  echo "Frontend/backend baseline is not present. Implement FND-01 before running '$requested_command'." >&2
   exit 1
 fi
 
 case "$requested_command" in
   dev)
-    pnpm --parallel --filter './apps/*' run dev
+    pnpm --parallel --filter './apps/frontend' --filter './apps/backend' run dev
     ;;
   build)
-    pnpm -r --filter './packages/*' --filter './apps/*' --if-present run build
+    pnpm -r --filter './packages/*' --filter './apps/frontend' --filter './apps/backend' --if-present run build
     ;;
   start:local)
-    pnpm --parallel --filter './apps/*' --if-present run start
+    pnpm --parallel --filter './apps/frontend' --filter './apps/backend' run start
     ;;
   db:migrate)
     pnpm --filter @logistics/db run db:migrate
@@ -28,4 +28,3 @@ case "$requested_command" in
     exit 1
     ;;
 esac
-

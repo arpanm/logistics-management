@@ -1,34 +1,34 @@
-# ADR 0001 — Application Baseline
+# ADR 0001 — Frontend, Backend, and PostgreSQL Baseline
 
-**Status:** Accepted for bootstrap
+**Status:** Accepted
 
 ## Context
 
-The repository begins from detailed requirements without an application stack. The product needs tenant-safe transactional workflows, accessible web and mobile-responsive screens, background jobs, document storage, imports, reporting, and browser end-to-end testing. Local setup must remain straightforward for Codex-driven feature work.
+The repository begins from detailed requirements without application code. Local development must be resource-conscious while supporting multi-tenant transactional workflows, browser testing, and independent frontend/backend deployment. The workstation also hosts other projects.
 
 ## Decision
 
 Use a TypeScript `pnpm` monorepo with:
 
-- Next.js for web UI and server HTTP/API boundary
-- PostgreSQL and Prisma for transactional persistence and migrations
-- Redis with a repository-selected queue library for workers, outbox delivery, caching, and job coordination
-- S3-compatible storage through a provider-neutral adapter, backed by MinIO locally
-- Mailpit locally behind a provider-neutral notification adapter
-- Vitest for unit and integration tests
+- Next.js frontend in `apps/frontend`
+- NestJS backend in `apps/backend`
+- PostgreSQL and Prisma for transactional persistence, migrations, audit, reporting projections, idempotency, and current-phase scheduled/background coordination
+- Vitest for unit/integration tests
 - Playwright for browser end-to-end tests
-- Docker Compose for local dependencies
+- One central Docker PostgreSQL container shared across local projects
 
-Begin as a modular monolith with separate worker process and clear domain packages. Use a transactional outbox rather than synchronous cross-module/provider coupling.
+This repository provisions only its role, databases, and schemas inside the central container. It does not own the shared container lifecycle beyond safe create/start and project provisioning.
+
+No Redis, external queue, object-store container, Mailpit, or separate worker deployment is included. When a current feature needs document bytes, event delivery state, leases, or job state, store them in PostgreSQL behind interfaces that allow a later infrastructure change.
 
 ## Consequences
 
-- One language and type system covers most product code and tests.
-- Local infrastructure closely resembles production dependencies without prescribing a production cloud.
-- Strong module discipline is required to prevent the modular monolith from becoming a tightly coupled codebase.
-- Heavy analytics may later need dedicated projections or a separate analytical store, introduced through another ADR when evidence requires it.
+- Local resource consumption remains small and predictable.
+- Frontend and backend have explicit deployment and API boundaries.
+- PostgreSQL becomes the current coordination and persistence system, so queries, locks, retention, and table growth must be designed carefully.
+- Project scripts must never stop or delete central PostgreSQL because other projects may depend on it.
+- Any new infrastructure component requires a superseding ADR and explicit user approval.
 
 ## Change policy
 
-An agent may refine package choices during `FND-01`, but replacing the core framework/database or introducing microservices requires a superseding ADR with migration impact and user approval when materially divergent.
-
+Agents may refine package-level libraries during `FND-01`, but replacing Next.js, NestJS, PostgreSQL, the shared-container policy, or adding infrastructure requires a superseding ADR and user authorization.

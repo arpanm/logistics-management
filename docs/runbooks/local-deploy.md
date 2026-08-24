@@ -1,11 +1,12 @@
-# Runbook — Local Deployment Verification
+# Runbook — Local Frontend/Backend Deployment
 
 ## Preconditions
 
 - `.env` exists from `.env.example`.
 - Docker engine is running.
+- Central PostgreSQL settings identify the shared workstation container.
 - Dependencies are installed.
-- No unrelated local migration process is active.
+- No unrelated migration is active for this project's databases.
 
 ## Deploy
 
@@ -16,20 +17,20 @@ make deploy-local
 ## Verify
 
 ```bash
+make postgres-status
 make health
 make e2e
 make verify
 ```
 
-Confirm PostgreSQL, Redis, MinIO, Mailpit, web, and worker readiness. Confirm the browser test uses local endpoints.
+Confirm project database/schema access, backend readiness, frontend availability, and local-only Playwright endpoints.
 
 ## Failure triage
 
-1. Inspect `docker compose ps` and health states.
-2. Inspect bounded service logs; do not print environment secrets.
-3. Confirm ports and `.env` local URLs.
-4. Verify migrations against the local database.
+1. Run `make postgres-status` and inspect bounded `shared-postgres` logs.
+2. Confirm this project's role/database/schema configuration and migrations.
+3. Inspect `.sdlc/runtime/app.log` without printing secrets.
+4. Verify backend and frontend ports and URLs.
 5. Re-run the smallest failing check.
 
-Do not use `infra-reset` until local data deletion is intended and explicitly confirmed.
-
+Do not stop, reset, or delete the shared PostgreSQL container/volume from this project.

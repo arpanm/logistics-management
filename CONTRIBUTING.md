@@ -2,7 +2,7 @@
 
 ## Unit of delivery
 
-The unit of delivery is one feature ID from `FEATURES.md`. Each feature has a specification, test plan, implementation, local deployment evidence, Playwright coverage, independent review, and local commit.
+The unit of delivery is one feature ID from `FEATURES.md`. Each feature has a specification, test plan with per-test status, implementation, local deployment evidence, Playwright coverage, independent review, synchronized README/TODO/status artifacts, and local commit.
 
 ## Before changing code
 
@@ -49,3 +49,15 @@ The commit body should state important behavior and migration implications. Do n
 
 Correctness, data isolation, authorization, financial integrity, idempotency, migration safety, auditability, accessibility, and missing end-to-end coverage take precedence over cosmetic preferences.
 
+## Final status synchronization
+
+Before commit, update all artifacts affected by the feature:
+
+- `FEATURES.md` register and section implementation/test status
+- `README.md` current-status and next-feature summary
+- `TODO.md` completed/remaining work
+- `specs/<FEATURE-ID>/spec.md`, `test-plan.md`, and `completion.md`
+- Executable test cases/fixtures and any TODO/FIXME/skip markers
+- Relevant architecture, API, deployment, runbook, and package documentation
+
+The cached diff must include these updates or explicitly prove that an artifact was unaffected.

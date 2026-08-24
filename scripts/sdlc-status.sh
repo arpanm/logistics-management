@@ -7,6 +7,8 @@ cd "$repo_dir"
 echo "Feature register:"
 rg '^\| (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md
 echo
+echo "Active TODO queue:"
+sed -n '/^## Active/,/^## Blocked/p' TODO.md
+echo
 echo "Git state:"
 git status --short --branch
-

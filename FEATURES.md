@@ -26,6 +26,8 @@ When sources conflict:
 
 ## 3. Status legend
 
+Implementation status:
+
 | Status | Meaning |
 |---|---|
 | Prototype only | Demonstrated in static/local HTML or sample data, but no production persistence, authorization, API, or automated tests exist. |
@@ -35,21 +37,39 @@ When sources conflict:
 | Complete | Implemented, authorized, persisted, observable, and all listed end-to-end acceptance tests pass. |
 | Blocked | A named unresolved decision or external dependency prevents completion. |
 
+Test status:
+
+| Status | Meaning |
+|---|---|
+| Not started | No approved feature test plan or executable feature tests exist. |
+| Planned | Acceptance criteria are mapped to approved test IDs, but executable coverage is incomplete. |
+| Implemented | Required tests exist but the full local acceptance suite is not currently passing. |
+| Failing | The required suite ran and has one or more named failures. |
+| Passing | Required unit/integration/contract/security/migration and Playwright acceptance tests pass against the locally deployed feature. |
+| Blocked | A named blocker prevents the required test suite from running or passing. |
+
 ## 4. Product-wide rules
 
 ### 4.1 Tenant isolation and configuration
 
-- Every business record carries `tenantId`; queries, jobs, files, notifications, search indexes, caches, and exports are tenant-scoped.
+- Every business record carries `tenantId`; queries, PostgreSQL-backed jobs/events, documents, notifications, reporting projections, and exports are tenant-scoped.
 - Tenant administrators configure branding, locale, timezone, currency, numbering patterns, enabled modules, status thresholds, reason lists, document requirements, notification channels, and approval policies.
 - Never hard-code Juri Gari, PHANI, NAND, a client name, a GSTIN, a branch, or a threshold in application logic.
 
-### 4.2 Roles and scope
+### 4.2 Current infrastructure boundary
+
+- Deploy a Next.js frontend and NestJS backend backed only by PostgreSQL.
+- Reuse the workstation's central `shared-postgres` Docker container. Provision project-owned roles, databases, and `app`, `audit`, and `reporting` schemas; never start a project-specific PostgreSQL container.
+- Do not add Redis, a message broker, external queue, object-storage container, Mailpit, or a separate worker deployment without an approved superseding ADR and explicit user authorization.
+- Persist current-phase events, idempotency keys, job/lease state, audit, reporting projections, and required document bytes in PostgreSQL behind replaceable interfaces.
+
+### 4.3 Roles and scope
 
 Baseline roles are Platform Admin, Tenant Owner, MIS Executive, Regional Manager, Key Account Manager, Traffic/Placement Executive, Finance Executive, Collection Executive, Loading Executive, Unloading Executive, Vendor Owner, Driver, Client Viewer, and Auditor.
 
 Access can be scoped by tenant, legal entity, region, branch, client, location, vendor, or assigned trip. Deny by default. A user may hold multiple roles. Sensitive fields such as PAN, GSTIN, bank details, mobile numbers, commercial rates, and payment data require explicit permission.
 
-### 4.3 Record, event, and audit conventions
+### 4.4 Record, event, and audit conventions
 
 - Use stable internal IDs plus tenant-unique human-readable codes.
 - Use optimistic concurrency or record versions for edits.
@@ -57,13 +77,13 @@ Access can be scoped by tenant, legal entity, region, branch, client, location, 
 - Use soft deactivation for referenced masters. Transaction deletion requires elevated permission and a reason; financial postings should be reversed, not deleted.
 - All list screens support server-side pagination, sorting, filtering, saved views, and permission-aware export.
 
-### 4.4 Canonical lifecycle
+### 4.5 Canonical lifecycle
 
 `Contract/rate card → indent → vendor allocation → vehicle/driver placement → trip milestones → delivery → POD → client invoice → receipt/collection → vendor bill → vendor payment → closure`
 
 Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle, loading delay, shortage, damage, missing POD, invoice hold, deduction, short receipt, disputed vendor charge, and failed payment.
 
-### 4.5 Canonical computed rules
+### 4.6 Canonical computed rules
 
 - Placement commitment defaults to `indentReceivedAt + applicable placement TAT`; an authorized user may override it with a reason.
 - Placement variance hours = `actualPlacementAt or now − committedPlacementAt`.
@@ -78,26 +98,26 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 ## 5. Feature register
 
-| ID | Feature | Evidence | Status | Depends on |
-|---|---|---|---|---|
-| FND-01 | Multi-tenant product foundation | Product objective | Proposed | — |
-| FND-02 | Identity, roles, and scoped access | Operating-model roles | Proposed | FND-01 |
-| MST-01 | Organization, employee, and geography masters | Workbook managers; stated hierarchy | Proposed | FND-01, FND-02 |
-| MST-02 | Client, contract, lane, SLA, and rate-card masters | Client/location forms; contract business model | Prototype only / gap | MST-01 |
-| MST-03 | Vendor, vehicle, driver, and compliance masters | Vendor form; vendor/driver actors | Prototype only / gap | MST-01 |
-| OPS-01 | Indent capture and lifecycle | Indent form/workbook | Prototype only | MST-02 |
-| OPS-02 | Vendor allocation and placement | Placement form/dashboard | Prototype only | OPS-01, MST-03 |
-| OPS-03 | Trip execution, loading, transit, and unloading | Stated actors; dashboard mentions GPS | Proposed | OPS-02 |
-| DOC-01 | POD and delivery-document workflow | POD form/dashboard | Prototype only | OPS-03 |
-| FIN-01 | Client billing and invoice workflow | Invoice form/workbook | Prototype only / gap | DOC-01, MST-02 |
-| FIN-02 | Receipts, reconciliation, and collections | Receipt/invoice forms/dashboard | Prototype only | FIN-01 |
-| FIN-03 | Vendor bills, deductions, and payments | Stated vendor-payment need | Proposed | OPS-03, MST-03 |
-| CTL-01 | Control tower dashboards and drill-down reports | Dashboard prototype | Prototype only | Transaction modules |
-| ALT-01 | Alerts, escalation, and work queues | Traffic lights and operating need | Specified only | Transaction modules, FND-02 |
-| DAT-01 | Bulk import, validation, correction, and export | Workbook/read-me/forms queue | Prototype only | Masters and transactions |
-| GOV-01 | Documents, comments, audit, and approvals | Audit trail notes and regulated data | Proposed | FND-02 |
-| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note | Proposed | FND-01, GOV-01 |
-| CFG-01 | No-code tenant configuration and white-labeling | Resale objective | Proposed | FND-01 |
+| ID | Feature | Evidence | Implementation status | Test status | Depends on |
+|---|---|---|---|---|---|
+| FND-01 | Multi-tenant product foundation | Product objective | Proposed | Not started | — |
+| FND-02 | Identity, roles, and scoped access | Operating-model roles | Proposed | Not started | FND-01 |
+| MST-01 | Organization, employee, and geography masters | Workbook managers; stated hierarchy | Proposed | Not started | FND-01, FND-02 |
+| MST-02 | Client, contract, lane, SLA, and rate-card masters | Client/location forms; contract business model | Client/location prototype only; contract, lane, and rate card proposed | Not started | MST-01 |
+| MST-03 | Vendor, vehicle, driver, and compliance masters | Vendor form; vendor/driver actors | Vendor prototype only; vehicle, driver, bank, and compliance proposed | Not started | MST-01 |
+| OPS-01 | Indent capture and lifecycle | Indent form/workbook | Prototype only | Not started | MST-02 |
+| OPS-02 | Vendor allocation and placement | Placement form/dashboard | Prototype only | Not started | OPS-01, MST-03 |
+| OPS-03 | Trip execution, loading, transit, and unloading | Stated actors; dashboard mentions GPS | Proposed | Not started | OPS-02 |
+| DOC-01 | POD and delivery-document workflow | POD form/dashboard | Prototype only | Not started | OPS-03 |
+| FIN-01 | Client billing and invoice workflow | Invoice form/workbook | Prototype only for invoice register/calculations; generation and approval proposed | Not started | DOC-01, MST-02 |
+| FIN-02 | Receipts, reconciliation, and collections | Receipt/invoice forms/dashboard | Prototype only | Not started | FIN-01 |
+| FIN-03 | Vendor bills, deductions, and payments | Stated vendor-payment need | Proposed | Not started | OPS-03, MST-03 |
+| CTL-01 | Control tower dashboards and drill-down reports | Dashboard prototype | Prototype only | Not started | Transaction modules |
+| ALT-01 | Alerts, escalation, and work queues | Traffic lights and operating need | Specified only | Not started | Transaction modules, FND-02 |
+| DAT-01 | Bulk import, validation, correction, and export | Workbook/read-me/forms queue | Prototype only | Not started | Masters and transactions |
+| GOV-01 | Documents, comments, audit, and approvals | Audit trail notes and regulated data | Proposed | Not started | FND-02 |
+| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note | Proposed | Not started | FND-01, GOV-01 |
+| CFG-01 | No-code tenant configuration and white-labeling | Resale objective | Proposed | Not started | FND-01 |
 
 ## 6. Common Codex build contract
 
@@ -112,7 +132,7 @@ Every feature prompt below includes this contract by reference. Codex must:
 7. Add idempotency for retried writes, imports, webhooks, financial posting, and notifications where applicable.
 8. Preserve unrelated user changes. Avoid destructive migration behavior. Include rollback-safe migrations.
 9. Run focused tests plus the relevant full suite, typecheck, lint, and production build. Fix failures caused by the change.
-10. Update this feature's status only after every acceptance criterion passes. In the handoff, report changed files, commands run, test results, decisions, and remaining risks. Do not provide schedule estimates.
+10. As the final pre-commit gate, synchronize implementation status and test status in the feature register and feature section, `README.md`, `TODO.md`, `specs/<FEATURE-ID>/spec.md`, `test-plan.md`, `completion.md`, executable test/TODO files, and any affected documentation. Remove completed TODOs, record remaining TODOs with owners/reasons, and ensure every test ID has its final status/evidence. Only then report changed files, commands, test results, decisions, and remaining risks. Do not provide schedule estimates.
 
 ---
 
@@ -120,38 +140,42 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Proposed
 
+**Test status:** Not started
+
 **Outcome:** One deployable product can safely serve multiple logistics companies, each with isolated data, branding, configuration, and legal entities.
 
 ### UX flow and details
 
 1. Platform Admin creates a tenant from a protected admin console.
 2. Enter tenant name, code, legal name, GSTIN/tax identifier, registered address, timezone, locale, currency, fiscal-year start, default legal entity, support contact, and active state.
-3. The system creates an owner invitation, default roles, default reason lists, default thresholds, and an isolated file namespace.
+3. The system creates an owner invitation, default roles, default reason lists, default thresholds, and tenant-scoped PostgreSQL records.
 4. Tenant Owner completes a setup checklist: organization, users, branches, clients, vendors, commercial settings, imports, and branding.
-5. Tenant switcher appears only for users explicitly assigned to more than one tenant; switching clears tenant-specific caches and navigation state.
+5. Tenant switcher appears only for users explicitly assigned to more than one tenant; switching clears tenant-specific frontend/session state.
 
 ### Reports and alerts
 
-- Platform report: active tenants, user counts, storage, integration health, background-job failures, and last activity; no cross-tenant business data by default.
+- Platform report: active tenants, user counts, PostgreSQL storage, integration health, backend job/event failures, and last activity; no cross-tenant business data by default.
 - Alert Platform Admin on provisioning failure, tenant-scope invariant failure, storage boundary failure, or repeated job failure.
 
 ### Acceptance criteria and end-to-end tests
 
 - Creating Tenant A provisions defaults and sends exactly one expiring owner invitation.
-- A Tenant A user cannot retrieve, search, mutate, export, guess an ID for, or receive an alert about Tenant B data through UI, API, websocket, job, file URL, cache, or bulk export.
+- A Tenant A user cannot retrieve, search, mutate, export, guess an ID for, or receive an alert about Tenant B data through UI, API, websocket, PostgreSQL-backed job/event, document endpoint, reporting projection, or bulk export.
 - A multi-tenant user switches from A to B and sees only B branding, settings, counts, and recent records.
 - Tenant deactivation blocks login and jobs without deleting records; reactivation restores access.
 - Automated isolation tests run for every tenant-owned table/resource.
 
 ### Master prompt for Codex
 
-> Implement **FND-01 Multi-tenant product foundation** from `FEATURES.md`, following the Common Codex build contract. Build tenant schema and request context, secure tenant provisioning, owner invitation, tenant switcher, tenant-aware persistence/file paths/jobs/cache/search, setup checklist, platform health view, and automated cross-tenant isolation tests. Seed configurable defaults rather than Juri Gari constants. Do not implement business transaction modules except the minimum tenant-owned example needed to prove isolation. Update FND-01 status only when all listed end-to-end tests pass.
+> Implement **FND-01 Multi-tenant product foundation** from `FEATURES.md`, following the Common Codex build contract. Bootstrap the Next.js frontend and NestJS backend against the central shared PostgreSQL container; build tenant schema/request context, secure provisioning, owner invitation, tenant switcher, tenant-scoped PostgreSQL persistence/documents/events/reporting, setup checklist, platform health view, and automated cross-tenant isolation tests. Do not add Redis, object storage, a message broker, Mailpit, or a separate worker. Seed configurable defaults rather than Juri Gari constants. Do not implement business transaction modules except the minimum tenant-owned example needed to prove isolation. Complete the final cross-file implementation/test status synchronization only when all listed end-to-end tests pass.
 
 ---
 
 ## FND-02 — Identity, roles, and scoped access
 
 **Status:** Proposed
+
+**Test status:** Not started
 
 **Outcome:** Every person sees and changes only the data and actions required for their role and operational scope.
 
@@ -186,6 +210,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Proposed
 
+**Test status:** Not started
+
 **Outcome:** Configurable organization structure drives ownership, routing, permissions, filters, and escalations.
 
 ### UX flow and form fields
@@ -217,6 +243,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 ## MST-02 — Client, contract, lane, SLA, and rate-card masters
 
 **Status:** Client/location prototype only; contract, lane, and rate card proposed
+
+**Test status:** Not started
 
 **Outcome:** Commercial and service commitments are versioned once and applied consistently to indents, billing, reporting, and alerts.
 
@@ -259,6 +287,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Vendor prototype only; vehicle, driver, bank, and compliance proposed
 
+**Test status:** Not started
+
 **Outcome:** Operations can allocate only eligible supply, while finance can settle verified vendors securely.
 
 ### UX flow and form fields
@@ -291,6 +321,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 ## OPS-01 — Indent capture and lifecycle
 
 **Status:** Prototype only
+
+**Test status:** Not started
 
 **Outcome:** Every customer truck requirement becomes a traceable, assigned, SLA-bound indent rather than a WhatsApp message.
 
@@ -325,6 +357,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 ## OPS-02 — Vendor allocation and placement
 
 **Status:** Prototype only
+
+**Test status:** Not started
 
 **Outcome:** Placement teams allocate demand to eligible vendors, capture vehicle/driver reporting, measure fill and delay, and escalate NTP consistently.
 
@@ -361,6 +395,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Proposed
 
+**Test status:** Not started
+
 **Outcome:** Field events replace WhatsApp updates and create an auditable trip record from gate-in through delivery.
 
 ### UX flow and form fields
@@ -395,6 +431,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Prototype only
 
+**Test status:** Not started
+
 **Outcome:** Each LR has traceable delivery proof, discrepancy evidence, submission acknowledgement, and POD ageing.
 
 ### UX flow and form fields
@@ -416,18 +454,20 @@ Every feature prompt below includes this contract by reference. Codex must:
 - Boundary tests produce Green through 7 days, Yellow above 7 through 15, and Red above 15; unreceived prior-calendar-period records follow configured carryover policy.
 - Received POD stops ageing at receipt date; correcting receipt date recalculates with audit.
 - Value at risk uses linked invoice value without double counting invoices linked to multiple POD rows.
-- Files are malware/type/size checked, permission protected, and accessible through expiring authorized URLs.
+- Files are malware/type/size checked, stored in PostgreSQL for the current infrastructure phase, permission protected, and accessible through expiring authorized backend URLs.
 - POD submission requirements derive from the contract snapshot.
 
 ### Master prompt for Codex
 
-> Implement **DOC-01 POD and delivery-document workflow** from `FEATURES.md` under the Common Codex build contract. Preserve all workbook fields; add document storage, OCR-confirmation seam, status/review/correction/submission workflow, multi-invoice/LR relations, contract document requirements, exact ageing/carryover calculations, value-at-risk deduplication, reports, alerts, secure file access, and end-to-end boundary/security/reconciliation tests.
+> Implement **DOC-01 POD and delivery-document workflow** from `FEATURES.md` under the Common Codex build contract. Preserve all workbook fields; add PostgreSQL-backed document storage behind an abstraction, an OCR-confirmation seam without adding new local infrastructure, status/review/correction/submission workflow, multi-invoice/LR relations, contract document requirements, exact ageing/carryover calculations, value-at-risk deduplication, reports, alerts, secure backend file access, and end-to-end boundary/security/reconciliation tests.
 
 ---
 
 ## FIN-01 — Client billing and invoice workflow
 
 **Status:** Prototype only for invoice register/calculations; generation and approval proposed
+
+**Test status:** Not started
 
 **Outcome:** Completed eligible services become accurate, approved, submitted client invoices with traceable commercial calculations.
 
@@ -462,6 +502,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 ## FIN-02 — Receipts, reconciliation, and collections
 
 **Status:** Prototype only
+
+**Test status:** Not started
 
 **Outcome:** Each bank credit is allocated transparently, invoice balances are derived, deductions remain visible, and collection owners work prioritized queues.
 
@@ -498,6 +540,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Proposed
 
+**Test status:** Not started
+
 **Outcome:** Vendor obligations are calculated from performed services, approved against evidence, and paid with full reconciliation and margin visibility.
 
 ### UX flow and form fields
@@ -532,6 +576,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 ## CTL-01 — Control tower dashboards and drill-down reports
 
 **Status:** Prototype only
+
+**Test status:** Not started
 
 **Outcome:** Owners and managers move from portfolio risk to the exact actionable record without separate Excel preparation.
 
@@ -570,6 +616,8 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Specified only
 
+**Test status:** Not started
+
 **Outcome:** Computed risk becomes assigned, deduplicated action with escalation rather than passive dashboard colour.
 
 ### UX flow and configuration fields
@@ -598,17 +646,19 @@ Every feature prompt below includes this contract by reference. Codex must:
 - Exactly-at-boundary calculations match feature rules and tenant timezone.
 - Recipients are derived from current record ownership and escalation hierarchy and never escape tenant/scope.
 - Acknowledgement does not resolve the business condition; fixing the source condition resolves it automatically where configured.
-- Channel retries are idempotent and delivery status is observable.
+- Channel retries are idempotent, persisted/leased in PostgreSQL, and delivery status is observable.
 
 ### Master prompt for Codex
 
-> Implement **ALT-01 Alerts, escalation, and work queues** from `FEATURES.md` using the Common Codex build contract. Build configurable rule definitions, idempotent evaluation/deduplication, ownership/escalation routing, unified queue/detail/actions, state-based auto-resolution, channel delivery outbox, quiet-hour/repeat policy, baseline catalog adapters for available modules, alert analytics, and exact boundary/security/retry end-to-end tests.
+> Implement **ALT-01 Alerts, escalation, and work queues** from `FEATURES.md` using the Common Codex build contract. Build configurable rule definitions, idempotent evaluation/deduplication, ownership/escalation routing, unified queue/detail/actions, state-based auto-resolution, a PostgreSQL-backed delivery outbox/lease mechanism inside the backend deployment, quiet-hour/repeat policy, baseline catalog adapters for available modules, alert analytics, and exact boundary/security/retry end-to-end tests. Do not add a queue/broker container.
 
 ---
 
 ## DAT-01 — Bulk import, validation, correction, and export
 
 **Status:** Prototype only
+
+**Test status:** Not started
 
 **Outcome:** Existing Excel-based operations migrate safely while users receive row-level feedback and retained history.
 
@@ -619,7 +669,7 @@ Every feature prompt below includes this contract by reference. Codex must:
 3. Map by exact header text by default, not column position. Preview recognized/missing/unknown/duplicate headers and sample normalized values.
 4. Validate the complete file before commit: required fields, data types, exact code lists, formats, cross-file references, uniqueness, dates, amounts, state combinations, and permissions.
 5. Show row/column errors with downloadable error file. User corrects and retries or excludes allowed warnings.
-6. Commit as an idempotent job. For legacy workbook mode, treat each upload as a full current file: upsert by natural key, preserve history, and correct re-sent rows without deleting historical events. Explicitly report records created, updated, unchanged, deactivated/missing, rejected, and warned.
+6. Commit as an idempotent PostgreSQL-backed backend job. For legacy workbook mode, treat each upload as a full current file: upsert by natural key, preserve history, and correct re-sent rows without deleting historical events. Explicitly report records created, updated, unchanged, deactivated/missing, rejected, and warned.
 7. Export current view or full permitted dataset with stable headers and formatting.
 
 ### Exact workbook compatibility
@@ -646,13 +696,15 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ### Master prompt for Codex
 
-> Implement **DAT-01 Bulk import, validation, correction, and export** from `FEATURES.md` with the Common Codex build contract. Use the supplied workbook as executable compatibility fixtures. Build template downloads, header-name mapping, preview, full-file validation, row/column errors, cross-reference and code-list validation, idempotent background commit, full-file correction semantics with retained history, reconciliation/history UI, freshness alerts, and permission-aware exports. Add fixture-driven end-to-end tests for all seven datasets and every listed failure class.
+> Implement **DAT-01 Bulk import, validation, correction, and export** from `FEATURES.md` with the Common Codex build contract. Use the supplied workbook as executable compatibility fixtures. Build template downloads, header-name mapping, preview, full-file validation, row/column errors, cross-reference and code-list validation, idempotent PostgreSQL-backed backend commit processing, full-file correction semantics with retained history, reconciliation/history UI, freshness alerts, and permission-aware exports. Add fixture-driven end-to-end tests for all seven datasets and every listed failure class without introducing new local infrastructure.
 
 ---
 
 ## GOV-01 — Documents, comments, audit, and approvals
 
 **Status:** Proposed
+
+**Test status:** Not started
 
 **Outcome:** Operational and financial decisions have secure evidence, discussion, authorization, and an immutable history.
 
@@ -671,7 +723,7 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ### Acceptance criteria and end-to-end tests
 
-- File access is tenant/scope/visibility protected, malware/type/size checked, checksum tracked, and delivered via expiring authorization.
+- File access is tenant/scope/visibility protected, malware/type/size checked, checksum tracked, stored in PostgreSQL for the current phase, and delivered through expiring backend authorization.
 - Approval decisions include actor, role, timestamp, comment, and exact submitted snapshot; changing material data invalidates/restarts approval.
 - Maker-checker segregation is enforced server-side.
 - Audit events cannot be edited through product APIs and contain before/after values for governed fields.
@@ -679,7 +731,7 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ### Master prompt for Codex
 
-> Implement **GOV-01 Documents, comments, audit, and approvals** from `FEATURES.md` following the Common Codex build contract. Add secure versioned document storage/metadata, record activity and visibility-aware comments, configurable snapshot-based approval workflows with segregation/delegation/rejection, immutable audit events/view/export, reports and alerts, and comprehensive tenant/scope/file-security/material-change tests. Provide reusable components/services consumed by all modules.
+> Implement **GOV-01 Documents, comments, audit, and approvals** from `FEATURES.md` following the Common Codex build contract. Add secure versioned PostgreSQL document storage/metadata behind a replaceable interface, record activity and visibility-aware comments, configurable snapshot-based approval workflows with segregation/delegation/rejection, immutable audit events/view/export, reports and alerts, and comprehensive tenant/scope/file-security/material-change tests. Provide reusable components/services consumed by all modules and do not add object-storage infrastructure.
 
 ---
 
@@ -687,13 +739,15 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Proposed
 
+**Test status:** Not started
+
 **Outcome:** The platform integrates with existing systems and communication habits without making WhatsApp or spreadsheets the system of record.
 
 ### UX flow and integration details
 
 1. Admin creates an integration with type, name, environment, endpoint/account, encrypted credential reference, scopes, allowed events, mapping version, rate limits, retry/dead-letter policy, and active state.
 2. API clients use scoped credentials, idempotency keys, correlation IDs, pagination, versioned schemas, and auditable access.
-3. Webhooks use signed payloads, event IDs, retries, delivery logs, and replay controls.
+3. Webhooks use signed payloads, event IDs, PostgreSQL-persisted retries/delivery logs, and replay controls.
 4. Notification templates support in-app, email, SMS, and approved WhatsApp provider channels. Operational action links require authenticated authorization.
 5. GPS adapters normalize provider pings into trip events and report provider/device freshness.
 6. Accounting adapters export/import posted invoices, receipts, vendor bills, payments, tax/TDS data, and reconciliation results.
@@ -714,13 +768,15 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ### Master prompt for Codex
 
-> Implement **INT-01 APIs, notifications, GPS, accounting, and migration connectors** from `FEATURES.md` and the Common Codex build contract. Build the reusable integration registry, encrypted secret references, scoped/versioned API foundation, signed idempotent webhooks with outbox/retry/dead-letter/replay, notification template/channel abstraction, GPS and accounting adapter contracts, health/reconciliation views, alerts, and security/idempotency/failure-path tests. Add only safe stub adapters unless real provider credentials/specifications are already present.
+> Implement **INT-01 APIs, notifications, GPS, accounting, and migration connectors** from `FEATURES.md` and the Common Codex build contract. Build the reusable integration registry, encrypted secret references, scoped/versioned API foundation, signed idempotent webhooks with PostgreSQL-backed outbox/retry/dead-letter/replay state inside the backend deployment, notification template/channel abstraction, GPS and accounting adapter contracts, health/reconciliation views, alerts, and security/idempotency/failure-path tests. Add only safe stub adapters unless real provider credentials/specifications are already present, and add no new local infrastructure.
 
 ---
 
 ## CFG-01 — No-code tenant configuration and white-labeling
 
 **Status:** Proposed
+
+**Test status:** Not started
 
 **Outcome:** The same product supports different logistics operators without forks or customer-specific constants.
 
@@ -743,11 +799,11 @@ Every feature prompt below includes this contract by reference. Codex must:
 - Published configuration versions are snapshotted or referenced by transactions so historical calculations remain reproducible.
 - Invalid/ambiguous threshold ranges, duplicate active codes, and unsafe numbering patterns are rejected.
 - Rollback is audited and does not rewrite historical transaction snapshots.
-- Changing branding/config invalidates only the correct tenant caches.
+- Changing branding/config invalidates only the correct tenant frontend/backend state and PostgreSQL-derived projections.
 
 ### Master prompt for Codex
 
-> Implement **CFG-01 No-code tenant configuration and white-labeling** from `FEATURES.md` using the Common Codex build contract. Build tenant branding/locale/module/code-list/reason/threshold/document/numbering/approval configuration, draft-preview-impact-publish-version workflow, transaction reproducibility, safe rollback-as-new-version, cache isolation, configuration audit/reports/alerts, and multi-tenant end-to-end tests proving different tenants operate without code forks or leakage.
+> Implement **CFG-01 No-code tenant configuration and white-labeling** from `FEATURES.md` using the Common Codex build contract. Build tenant branding/locale/module/code-list/reason/threshold/document/numbering/approval configuration, draft-preview-impact-publish-version workflow, transaction reproducibility, safe rollback-as-new-version, tenant state/projection isolation, configuration audit/reports/alerts, and multi-tenant end-to-end tests proving different tenants operate without code forks or leakage.
 
 ---
 

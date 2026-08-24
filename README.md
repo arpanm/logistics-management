@@ -2,76 +2,97 @@
 
 A configurable, multi-tenant B2B logistics platform for managing client contracts, truck indents, vendor placement, trips, POD, client billing and collections, vendor payables, alerts, and control-tower reporting.
 
-The product requirements are maintained in [FEATURES.md](FEATURES.md). The supplied Juri Gari prototypes and workbook are preserved in `backup/` as read-only reference material and are intentionally excluded from Git.
+The product requirements and per-feature implementation/test status are maintained in [FEATURES.md](FEATURES.md). The active execution queue is [TODO.md](TODO.md). Supplied Juri Gari prototypes and the workbook are preserved in `backup/` as read-only reference material and intentionally excluded from Git.
 
-## Repository state
+## Current project status
 
-This repository currently contains the product specification and the agentic SDLC scaffold. Application code is created feature-by-feature. `FND-01` is the bootstrap feature that establishes the executable application baseline.
+| Item | Status |
+|---|---|
+| Agentic SDLC scaffold | Complete |
+| Application bootstrap | Not started — `FND-01` is next |
+| Automated feature tests | Not started |
+| Local frontend/backend deployment | Not available until `FND-01` |
 
-## Chosen engineering baseline
+Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
+
+## Engineering baseline
 
 - TypeScript monorepo managed with `pnpm`
-- Next.js web application and API boundary
+- Next.js frontend in `apps/frontend`
+- NestJS backend in `apps/backend`
 - PostgreSQL with Prisma migrations
-- Redis for queues, caching, and idempotent jobs
-- S3-compatible object storage; MinIO locally
-- Mailpit locally for email inspection
 - Vitest for unit/integration tests
 - Playwright for browser end-to-end tests
-- Docker Compose for local infrastructure
+- One central Docker PostgreSQL container shared by this and other local projects
 
-The decision and permitted alternatives are documented in [docs/decisions/0001-application-baseline.md](docs/decisions/0001-application-baseline.md).
+Redis, queues, object storage, Mailpit, and other supporting containers are intentionally excluded. PostgreSQL is the only local infrastructure dependency for now. The decision is documented in [ADR 0001](docs/decisions/0001-application-baseline.md).
 
-## Start here
+## Central PostgreSQL
 
-Prerequisites: Git, Node.js 22+, Corepack/pnpm, and Docker with Compose.
+The project reuses one container named `shared-postgres` and one shared volume. It provisions project-specific roles, databases, and schemas inside that container. Project scripts never stop, reset, or delete the shared container or volume.
 
 ```bash
+cp .env.example .env
 make bootstrap
-make infra-up
+make postgres-up
 ```
 
-After `FND-01` creates the application packages:
+Default project resources:
+
+- Databases: `logistics`, `logistics_test`
+- Schemas in each database: `app`, `audit`, `reporting`
+- Application role: `logistics_app`
+
+Other projects may use the same container with their own database/schema names.
+
+## Application commands
+
+After `FND-01` creates the frontend and backend packages:
 
 ```bash
 make dev
-make verify
+make check
+make deploy-local
 make e2e
+make verify
 ```
 
-See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for environment setup and [docs/SDLC.md](docs/SDLC.md) for the feature execution workflow.
+See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup and [docs/SDLC.md](docs/SDLC.md) for the feature workflow.
 
-## Run the agentic feature workflow
+## Run a feature
 
-Open the repository as a trusted Codex project, then invoke the repo-local skill:
+Open the repository as a trusted Codex project and invoke:
 
 ```text
 $feature-sdlc Implement FND-01.
 ```
 
-Repeat with the next dependency-ready feature from `FEATURES.md`. Execute one feature per primary workflow unless the feature register explicitly says a pair is inseparable.
+The skill starts the required multi-agent team, creates the feature specification and test plan, develops the vertical slice, deploys frontend/backend locally against shared PostgreSQL, runs Playwright, performs independent review, synchronizes all status/test/TODO artifacts, and creates a focused local commit only after the gates pass.
 
-## Important commands
+## Commands
 
 | Command | Purpose |
 |---|---|
-| `make bootstrap` | Validate prerequisites, install dependencies when present, and configure hooks. |
-| `make infra-up` | Start PostgreSQL, Redis, MinIO, and Mailpit. |
-| `make infra-down` | Stop local infrastructure without deleting volumes. |
-| `make dev` | Start the application in development mode. |
+| `make bootstrap` | Validate prerequisites, configure hooks, and install dependencies when present. |
+| `make postgres-up` | Create/start central PostgreSQL and provision this project's databases/schemas. |
+| `make postgres-provision` | Add or repair only this project's role, databases, and schemas. |
+| `make postgres-status` | Verify the shared container and project database. |
+| `make dev` | Start frontend and backend in development mode. |
 | `make check` | Run formatting, linting, type checks, and non-browser tests. |
-| `make deploy-local` | Start infrastructure, apply migrations, and build/start the local application. |
-| `make e2e` | Run Playwright against the configured local base URL. |
-| `make verify` | Run repository policy and application quality gates. |
+| `make deploy-local` | Apply migrations, build, and start frontend/backend locally. |
+| `make e2e` | Run Playwright against the local frontend/backend. |
+| `make verify` | Run final repository and application quality gates. |
+| `make status` | Show feature, test, TODO, and Git status. |
 
 ## Documentation map
 
 - [AGENTS.md](AGENTS.md) — binding instructions for Codex and subagents
 - `.agents/skills/feature-sdlc/SKILL.md` — reusable feature execution workflow
-- [FEATURES.md](FEATURES.md) — product scope, status, acceptance criteria, and feature prompts
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system boundaries and engineering invariants
+- [FEATURES.md](FEATURES.md) — scope, implementation status, test status, acceptance criteria, and prompts
+- [TODO.md](TODO.md) — active execution queue and unresolved work
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — boundaries and engineering invariants
 - [docs/SDLC.md](docs/SDLC.md) — specification-to-commit lifecycle
-- [docs/TESTING.md](docs/TESTING.md) — test strategy and Playwright expectations
-- [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) — local deployment and troubleshooting
-- [CONTRIBUTING.md](CONTRIBUTING.md) — branch, commit, and review conventions
+- [docs/TESTING.md](docs/TESTING.md) — test strategy and status conventions
+- [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) — shared PostgreSQL and local deployment
+- [CONTRIBUTING.md](CONTRIBUTING.md) — commit and review conventions
 - [specs/README.md](specs/README.md) — per-feature artifact layout

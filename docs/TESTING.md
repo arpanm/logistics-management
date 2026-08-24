@@ -11,6 +11,19 @@
 | End to end | Real browser behavior against locally deployed services | `tests/e2e/` |
 | Reconciliation | KPI/ledger/report totals against canonical transactions | Domain/report integration and E2E |
 
+## Test status vocabulary
+
+| Status | Meaning |
+|---|---|
+| Planned | Test ID exists in the approved test plan but executable coverage is incomplete. |
+| Implemented | Executable test exists but the full required local suite is not passing. |
+| Passing | Test passed against the final locally deployed feature/build. |
+| Failing | Test ran and failed; include failure evidence. |
+| Blocked | Test cannot run because of a named blocker and unblock condition. |
+| N/A | Requirement is demonstrably not applicable; include justification and reviewer approval. |
+
+Every test ID in `specs/<FEATURE-ID>/test-plan.md` must have a final status and evidence before commit. Test status in `FEATURES.md`, README, TODO, completion evidence, and executable test files must agree.
+
 ## Mandatory domain coverage
 
 - Two-tenant negative-access fixtures for every tenant-owned resource.
@@ -56,3 +69,4 @@
 
 `completion.md` records commands and concise results. Do not commit videos, traces, screenshots, database dumps, or HTML reports unless a small artifact is expressly required as permanent documentation.
 
+Before completion, search for and resolve or explicitly record `TODO`, `FIXME`, `.skip`, `.only`, quarantine markers, and stale feature/test names in tests and fixtures.

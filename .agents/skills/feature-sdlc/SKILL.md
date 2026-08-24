@@ -20,10 +20,11 @@ Execute the requested feature completely. Follow `AGENTS.md`; it is the binding 
 9. Spawn `e2e_tester` with ownership limited to Playwright tests and E2E fixtures. Require success, validation, unauthorized tenant/role/scope, exception/recovery, and reconciliation journeys. Send production defects to `implementation_worker`.
 10. Spawn `reviewer` for an independent read-only review of the complete diff and evidence. Fix all blocking findings and request a targeted re-review.
 11. Run `make verify`. Inspect the final diff, generated files, and secret/policy checks.
-12. Create `completion.md` from `.codex/templates/completion.md`. Map every acceptance criterion to passing evidence.
-13. Update the feature status in `FEATURES.md` only when every criterion passes.
-14. Stage only feature files, review the cached diff, and create one local Conventional Commit with the feature ID as scope. Never push, amend, rebase, or tag unless explicitly asked.
-15. Report commit hash, local URL, test results, major decisions, and non-blocking follow-up. Do not provide schedule estimates.
+12. Perform the final synchronization gate: update implementation and test status in the `FEATURES.md` register and feature section; update the `README.md` status summary and `TODO.md`; update `spec.md`, `test-plan.md`, `completion.md`, executable test cases/fixtures, code TODO/FIXME/skip markers, and all affected architecture/API/runbook/package docs. Every test ID must have a final status and evidence.
+13. Search for stale status text, unchecked completion items, unresolved TODO/FIXME markers, and skipped/only tests. Resolve them or record them explicitly with owner/reason. Run policy/verification again.
+14. Mark the feature Complete and tests Passing only when every acceptance criterion and required test passes locally.
+15. Stage only feature files, review the cached diff, and create one local Conventional Commit with the feature ID as scope. Never push, amend, rebase, or tag unless explicitly asked.
+16. Report commit hash, local frontend/backend URLs, test results, synchronized artifacts, major decisions, and non-blocking follow-up. Do not provide schedule estimates.
 
 ## Enforce ownership
 
@@ -47,4 +48,5 @@ Stop before status completion or commit when any required gate fails, local depl
 - Independent review with no unresolved blocking finding
 - Passing `make verify`
 - Accurate `FEATURES.md` status and `completion.md`
+- Synchronized `README.md`, `TODO.md`, specs, executable test status, and affected documentation
 - One focused local commit and no push

@@ -34,8 +34,15 @@ Parallelize read-heavy specification, exploration, and review work. Do not let m
 8. Deploy locally using `make deploy-local` and verify health.
 9. Run Playwright end to end using `make e2e`. Capture traces/screenshots only for failures or required evidence; do not commit bulky generated output.
 10. Run `make verify` and an independent reviewer pass. Fix all blocking findings and repeat affected gates.
-11. Update the feature status in `FEATURES.md` only when every acceptance criterion passes. Record completion evidence in `specs/<FEATURE-ID>/completion.md` using the template.
-12. Create one focused local Git commit using the approved convention. Do not push unless the user explicitly asks.
+11. Perform the mandatory status/documentation synchronization gate after implementation, deployment, Playwright, and review are final:
+    - Update implementation status and test status in both the `FEATURES.md` register and feature section.
+    - Update `README.md` current status/next feature summary.
+    - Update `TODO.md`: remove completed items and record every remaining item with feature, owner/reason, and state.
+    - Update `specs/<FEATURE-ID>/spec.md`, `test-plan.md`, and `completion.md`; every test ID must show `Planned`, `Implemented`, `Passing`, `Failing`, `Blocked`, or `N/A` with evidence.
+    - Update executable test files, fixture TODOs, code TODOs, API/architecture/runbook documents, and package-level documentation affected by the feature.
+    - Search for stale feature status, unchecked completion items, unresolved TODO/FIXME markers, skipped/only tests, and outdated test names. Resolve them or document them explicitly.
+12. Run synchronization/policy verification again. Only mark implementation Complete and tests Passing when every acceptance criterion and required test is passing locally.
+13. Create one focused local Git commit using the approved convention. Do not push unless the user explicitly asks.
 
 ## Definition of done
 
@@ -51,6 +58,7 @@ A feature is not done because code exists. It is done only when:
 - Playwright proves the primary happy path, permissions, validation, and a material exception path.
 - No secrets, backup source artifacts, generated test output, or unrelated changes enter the commit.
 - `make verify` passes and reviewer has no unresolved blocking finding.
+- Feature/test statuses, README summary, TODO queue, specs, completion evidence, and executable test case status are mutually consistent.
 
 ## Architecture invariants
 
@@ -64,6 +72,7 @@ A feature is not done because code exists. It is done only when:
 - Status colours and totals are computed from canonical events, never user-uploaded summaries.
 - Secrets stay in environment/secret stores and must never be logged or committed.
 - Avoid customer-specific forks and hard-coded Juri Gari constants; use tenant configuration.
+- Use only the shared central PostgreSQL container for local infrastructure. Do not add or start project-specific PostgreSQL, Redis, queue, object-store, Mailpit, or worker containers.
 
 ## Code and repository conventions
 
@@ -82,6 +91,7 @@ Prefer repository commands over ad hoc equivalents:
 
 ```bash
 make policy-check
+make postgres-status
 make check
 make deploy-local
 make e2e

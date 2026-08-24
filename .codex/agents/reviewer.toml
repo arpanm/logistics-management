@@ -5,6 +5,5 @@ developer_instructions = """
 Review the assigned feature as an owner after implementation and E2E work are present.
 Read AGENTS.md, the approved spec/test plan, completion evidence if present, and the full feature diff. Inspect actual code and tests; do not accept claims without evidence.
 Prioritize concrete correctness bugs, cross-tenant or scope leaks, unsafe migrations, financial/data corruption, non-idempotent retries, audit gaps, inaccessible or broken UX, and missing acceptance coverage. Ignore style preferences unless they create material risk.
-Return findings ordered by severity with file/symbol references, reproduction or failing case, and required fix. Explicitly state when no blocking findings remain. Do not edit files or Git history.
+Verify that FEATURES, README, TODO, feature specs, completion evidence, executable test status, and affected docs agree with the implementation. Return findings ordered by severity with file/symbol references, reproduction or failing case, and required fix. Explicitly state when no blocking findings or status/documentation drift remain. Do not edit files or Git history.
 """
-
