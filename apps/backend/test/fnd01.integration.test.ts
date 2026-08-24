@@ -74,16 +74,20 @@ describe.sequential(
       expect(migrations.map((row) => row.migration_name)).toEqual([
         "202608240001_fnd01_foundation",
         "202608240002_fnd01_security_hardening",
+        "202608240003_fnd02_identity_access",
       ]);
       await expect(service.ready()).resolves.toMatchObject({
         status: "ready",
         migration: "ready",
-        migrationCount: 2,
+        migrationCount: 3,
       });
     });
 
     it("FND01-A-006: every live tenant table has forced RLS, a policy, tenant-leading index and declared nullability", async () => {
       const expected: Record<string, boolean> = {
+        "app.access_invitations": false,
+        "app.authorization_probe_records": false,
+        "app.authorization_scope_nodes": false,
         "app.idempotency_records": true,
         "app.job_runs": true,
         "app.legal_entities": false,
@@ -91,12 +95,19 @@ describe.sequential(
         "app.owner_invitations": false,
         "app.platform_alerts": true,
         "app.setup_checklist_items": false,
+        "app.roles": false,
+        "app.role_capabilities": false,
+        "app.membership_role_assignments": false,
+        "app.scope_grants": false,
+        "app.security_alerts": false,
+        "app.security_events": false,
         "app.stored_documents": false,
         "app.tenant_configuration": false,
         "app.tenant_memberships": false,
         "app.tenant_probe_records": false,
         "audit.audit_events": true,
         "reporting.tenant_activity_projection": false,
+        "reporting.identity_activity_projection": false,
       };
       const rows = await service.db.$queryRawUnsafe<
         Array<{
@@ -119,7 +130,9 @@ describe.sequential(
         JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped
         WHERE n.nspname IN ('app','audit','reporting') AND c.relkind='r'
         ORDER BY table_key`);
-      expect(rows.map((row) => row.table_key)).toEqual(Object.keys(expected));
+      expect(rows.map((row) => row.table_key)).toEqual(
+        Object.keys(expected).sort(),
+      );
       for (const row of rows) {
         expect(row.nullable, `${row.table_key} nullability`).toBe(
           expected[row.table_key],

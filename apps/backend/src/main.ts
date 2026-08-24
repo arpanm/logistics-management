@@ -29,17 +29,20 @@ app.enableCors({
 });
 app.use(
   (
-    req: { headers: Record<string, string | undefined> },
+    req: {
+      headers: Record<string, string | undefined>;
+      correlationId?: string;
+    },
     res: { setHeader: (k: string, v: string) => void },
     next: () => void,
   ) => {
     const incoming = req.headers["x-correlation-id"];
-    res.setHeader(
-      "X-Correlation-Id",
+    const correlationId =
       typeof incoming === "string" && incoming.length <= 100
         ? incoming
-        : crypto.randomUUID(),
-    );
+        : crypto.randomUUID();
+    req.correlationId = correlationId;
+    res.setHeader("X-Correlation-Id", correlationId);
     next();
   },
 );

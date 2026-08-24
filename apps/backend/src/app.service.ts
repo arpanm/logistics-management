@@ -73,6 +73,7 @@ export class AppService implements OnModuleDestroy {
       const required = [
         "202608240001_fnd01_foundation",
         "202608240002_fnd01_security_hardening",
+        "202608240003_fnd02_identity_access",
       ];
       if (
         !required.every((name) =>
@@ -98,28 +99,67 @@ export class AppService implements OnModuleDestroy {
 
   async session(
     sessionToken?: string,
+    allowRestricted = false,
   ): Promise<SessionActor & { sessionId: string }> {
     if (!sessionToken)
       throw new AppError(401, "UNAUTHENTICATED", "Authentication required");
     const rows = await withPlatform(this.db, (tx) =>
       tx.$queryRawUnsafe<Array<Row>>(
         `
-      SELECT s.id AS "sessionId",u.id AS "userId",u.email,u.is_platform_admin AS "platformAdmin",s.active_tenant_id AS "activeTenantId",s.context_version AS "contextVersion",s.csrf_hash AS "csrfHash"
+      SELECT s.id AS "sessionId",u.id AS "userId",coalesce(u.email,u.mobile_e164) AS email,u.is_platform_admin AS "platformAdmin",s.active_tenant_id AS "activeTenantId",s.context_version AS "contextVersion",s.csrf_hash AS "csrfHash",
+        s.user_auth_version AS "sessionUserVersion",u.auth_version AS "userAuthVersion",s.membership_id AS "membershipId",s.membership_auth_version AS "sessionMembershipVersion",m.authorization_version AS "membershipAuthVersion",
+        u.status AS "userStatus",m.status AS "membershipStatus",t.status AS "tenantStatus",s.assurance_level AS "assuranceLevel",s.revoked_at AS "revokedAt",s.revoked_reason AS "revokedReason",s.expires_at AS "expiresAt"
       FROM app.sessions s JOIN app.users u ON u.id=s.user_id
       LEFT JOIN app.tenants t ON t.id=s.active_tenant_id
-      WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='ACTIVE'
-        AND (s.active_tenant_id IS NULL OR (
-          t.status='ACTIVE' AND EXISTS (
-            SELECT 1 FROM app.tenant_memberships m
-            WHERE m.tenant_id=s.active_tenant_id AND m.user_id=s.user_id AND m.status='ACTIVE'
-          )
-        ))`,
+      LEFT JOIN app.tenant_memberships m ON m.id=s.membership_id AND m.tenant_id=s.active_tenant_id
+      WHERE s.token_hash=$1`,
         hash(sessionToken),
       ),
     );
     const row = rows[0];
     if (!row)
       throw new AppError(401, "UNAUTHENTICATED", "Authentication required");
+    if (row.revokedAt || new Date(String(row.expiresAt)) <= new Date()) {
+      const changedReasons = new Set([
+        "ACCESS_CHANGED",
+        "MEMBERSHIP_SUSPENDED",
+        "MEMBERSHIP_REACTIVATED",
+        "ADMIN_RESET",
+        "TRIP_REASSIGNED",
+        "TENANT_DEACTIVATED",
+        "MFA_COMPLETED",
+        "MFA_RESET",
+      ]);
+      throw new AppError(
+        401,
+        changedReasons.has(String(row.revokedReason))
+          ? "SESSION_STALE"
+          : "UNAUTHENTICATED",
+        changedReasons.has(String(row.revokedReason))
+          ? "Your access changed; sign in again"
+          : "Authentication required",
+      );
+    }
+    const stale =
+      row.userStatus !== "ACTIVE" ||
+      Number(row.sessionUserVersion) !== Number(row.userAuthVersion) ||
+      (row.activeTenantId !== null &&
+        (row.tenantStatus !== "ACTIVE" ||
+          row.membershipStatus !== "ACTIVE" ||
+          Number(row.sessionMembershipVersion) !==
+            Number(row.membershipAuthVersion)));
+    if (stale)
+      throw new AppError(
+        401,
+        "SESSION_STALE",
+        "Your access changed; sign in again",
+      );
+    if (row.assuranceLevel === "RESTRICTED_MFA" && !allowRestricted)
+      throw new AppError(
+        401,
+        "MFA_REQUIRED",
+        "Complete multi-factor authentication",
+      );
     return {
       sessionId: String(row.sessionId),
       userId: String(row.userId),
@@ -128,6 +168,18 @@ export class AppService implements OnModuleDestroy {
       activeTenantId: row.activeTenantId ? String(row.activeTenantId) : null,
       contextVersion: Number(row.contextVersion),
       csrfToken: String(row.csrfHash),
+      membershipId: row.membershipId ? String(row.membershipId) : null,
+      userAuthVersion: Number(row.userAuthVersion),
+      membershipAuthVersion:
+        row.membershipAuthVersion === null
+          ? null
+          : Number(row.membershipAuthVersion),
+      assuranceLevel:
+        row.assuranceLevel === "MFA"
+          ? "MFA"
+          : row.assuranceLevel === "RESTRICTED_MFA"
+            ? "RESTRICTED_MFA"
+            : "PASSWORD",
     };
   }
 
@@ -155,22 +207,41 @@ export class AppService implements OnModuleDestroy {
     return actor.activeTenantId;
   }
 
-  private async newSession(
+  async newSession(
     tx: Tx,
     userId: string,
     activeTenantId: string | null,
     previousContext = 0,
+    assuranceLevel: "PASSWORD" | "MFA" | "RESTRICTED_MFA" = "PASSWORD",
   ) {
     const sessionToken = token(),
       csrf = token();
+    const snapshots = await tx.$queryRawUnsafe<Array<Row>>(
+      `SELECT u.auth_version AS "userVersion",m.id AS "membershipId",m.authorization_version AS "membershipVersion"
+       FROM app.users u LEFT JOIN app.tenant_memberships m ON m.user_id=u.id AND m.tenant_id=$2::uuid AND m.status='ACTIVE'
+       WHERE u.id=$1::uuid`,
+      userId,
+      activeTenantId,
+    );
+    const snapshot = one(snapshots);
+    if (activeTenantId && !snapshot.membershipId)
+      throw new AppError(
+        401,
+        "SESSION_STALE",
+        "Tenant membership is not active",
+      );
     await tx.$executeRawUnsafe(
-      `INSERT INTO app.sessions(token_hash,csrf_hash,user_id,active_tenant_id,context_version,expires_at) VALUES($1,$2,$3::uuid,$4::uuid,$5,now()+($6||' hours')::interval)`,
+      `INSERT INTO app.sessions(token_hash,csrf_hash,user_id,active_tenant_id,context_version,expires_at,user_auth_version,membership_id,membership_auth_version,assurance_level,mfa_satisfied_at) VALUES($1,$2,$3::uuid,$4::uuid,$5,now()+($6||' hours')::interval,$7,$8::uuid,$9,$10,CASE WHEN $10='MFA' THEN now() END)`,
       hash(sessionToken),
       hash(csrf),
       userId,
       activeTenantId,
       previousContext + 1,
       String(this.config.SESSION_TTL_HOURS),
+      Number(snapshot.userVersion),
+      snapshot.membershipId ?? null,
+      snapshot.membershipVersion ?? null,
+      assuranceLevel,
     );
     return {
       sessionToken,
@@ -208,12 +279,12 @@ export class AppService implements OnModuleDestroy {
   }
 
   async login(
-    email: string,
+    identifier: string,
     password: string,
     tenantCode: string | undefined,
     correlationId: string,
   ) {
-    const normalized = email.trim().toLowerCase();
+    const normalized = identifier.trim().toLowerCase();
     const identityHash = hash(normalized);
     const outcome = await withPlatform(this.db, async (tx) => {
       const attempts = await tx.$queryRawUnsafe<Array<Row>>(
@@ -227,7 +298,7 @@ export class AppService implements OnModuleDestroy {
           "Sign in is temporarily unavailable",
         );
       const users = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT id,email,display_name AS "displayName",password_hash AS "passwordHash",is_platform_admin AS "platformAdmin" FROM app.users WHERE email=$1 AND status='ACTIVE'`,
+        `SELECT id,email,mobile_e164 AS mobile,display_name AS "displayName",password_hash AS "passwordHash",is_platform_admin AS "platformAdmin" FROM app.users WHERE (email=$1 OR mobile_e164=$1) AND status='ACTIVE'`,
         normalized,
       );
       const user = users[0];
@@ -235,13 +306,43 @@ export class AppService implements OnModuleDestroy {
         !user ||
         !(await argon2.verify(String(user.passwordHash), password))
       ) {
-        await tx.$executeRawUnsafe(
-          `INSERT INTO app.login_attempts(identity_hash,window_start) VALUES($1,date_trunc('minute',now())) ON CONFLICT(identity_hash,window_start) DO UPDATE SET attempts=app.login_attempts.attempts+1,updated_at=now()`,
+        const failed = await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.login_attempts(identity_hash,window_start) VALUES($1,date_trunc('minute',now())) ON CONFLICT(identity_hash,window_start) DO UPDATE SET attempts=app.login_attempts.attempts+1,updated_at=now() RETURNING attempts,window_start AS "windowStart"`,
           identityHash,
         );
+        if (user) {
+          const memberships = await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT tenant_id AS "tenantId",id FROM app.tenant_memberships WHERE user_id=$1::uuid AND status='ACTIVE'`,
+            String(user.id),
+          );
+          for (const membership of memberships) {
+            await tx.$executeRawUnsafe(
+              `INSERT INTO app.security_events(tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id)
+               VALUES($1::uuid,$2::uuid,$3::uuid,'LOGIN_FAILED','DENIED',$4,$5::jsonb,$6)`,
+              membership.tenantId,
+              user.id,
+              membership.id,
+              identityHash.slice(0, 24),
+              JSON.stringify({ attempt: Number(failed[0]?.attempts ?? 1) }),
+              correlationId,
+            );
+            if (Number(failed[0]?.attempts ?? 1) >= 5)
+              await tx.$executeRawUnsafe(
+                `INSERT INTO app.security_alerts(tenant_id,alert_type,severity,deduplication_key,user_id,membership_id)
+                 VALUES($1::uuid,'REPEATED_LOGIN_FAILURES','HIGH',$2,$3::uuid,$4::uuid)
+                 ON CONFLICT(tenant_id,deduplication_key) DO UPDATE SET occurrence_count=app.security_alerts.occurrence_count+1,last_seen_at=now(),updated_at=now()`,
+                membership.tenantId,
+                `login:${identityHash}:${String(failed[0]?.windowStart)}`,
+                user.id,
+                membership.id,
+              );
+          }
+        }
         return { invalidCredentials: true } as const;
       }
       let activeTenantId: string | null = null;
+      let mfaRequired = false;
+      let mfaEnrolled = false;
       if (!Boolean(user.platformAdmin)) {
         const memberships = await tx.$queryRawUnsafe<Array<Row>>(
           `SELECT t.id,t.code,t.name FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id WHERE m.user_id=$1::uuid AND m.status='ACTIVE' AND t.status='ACTIVE' ORDER BY t.name`,
@@ -252,6 +353,8 @@ export class AppService implements OnModuleDestroy {
           : memberships.length === 1
             ? memberships[0]
             : undefined;
+        if (memberships.length === 0)
+          return { invalidCredentials: true } as const;
         if (!chosen && memberships.length > 1)
           return {
             requiresTenantSelection: true as const,
@@ -266,11 +369,31 @@ export class AppService implements OnModuleDestroy {
             },
           };
         activeTenantId = chosen ? String(chosen.id) : null;
+        if (activeTenantId) {
+          const mfa = await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT coalesce((SELECT value->>'mfaPolicy' FROM app.tenant_configuration WHERE tenant_id=$1::uuid AND namespace='security'),'OFF') policy,
+              EXISTS(SELECT 1 FROM app.tenant_memberships m JOIN app.membership_role_assignments a ON a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE m.tenant_id=$1::uuid AND m.user_id=$2::uuid AND r.privilege_level IN ('PRIVILEGED','PROTECTED')) privileged,
+              EXISTS(SELECT 1 FROM app.mfa_factors f WHERE f.user_id=$2::uuid AND f.verified_at IS NOT NULL AND f.disabled_at IS NULL) enrolled`,
+            activeTenantId,
+            String(user.id),
+          );
+          const policy = String(mfa[0]?.policy ?? "OFF");
+          const privileged = Boolean(mfa[0]?.privileged);
+          mfaRequired =
+            policy === "ALL" || (policy === "PRIVILEGED" && privileged);
+          mfaEnrolled = Boolean(mfa[0]?.enrolled);
+        }
       }
       const created = await this.newSession(
         tx,
         String(user.id),
         activeTenantId,
+        0,
+        mfaRequired ? "RESTRICTED_MFA" : "PASSWORD",
+      );
+      await tx.$executeRawUnsafe(
+        `UPDATE app.users SET last_login_at=now(),updated_at=now() WHERE id=$1::uuid`,
+        String(user.id),
       );
       await this.audit(tx, {
         actorId: String(user.id),
@@ -288,6 +411,8 @@ export class AppService implements OnModuleDestroy {
           platformAdmin: Boolean(user.platformAdmin),
         },
         activeTenantId,
+        mfaRequired,
+        mfaEnrolled,
       };
     });
     if ("invalidCredentials" in outcome)
@@ -470,10 +595,74 @@ export class AppService implements OnModuleDestroy {
             keys[i]![0] === "branding" ? "COMPLETE" : "NOT_AVAILABLE",
           );
         const membershipRows = await tx.$queryRawUnsafe<Array<Row>>(
-          `INSERT INTO app.tenant_memberships(tenant_id,invited_email,invited_name,role,status) VALUES($1::uuid,$2,$3,'TENANT_OWNER','INVITED') RETURNING id`,
+          `INSERT INTO app.tenant_memberships(tenant_id,invited_email,invited_name,employee_code,role,status) VALUES($1::uuid,$2,$3,$4,'TENANT_OWNER','INVITED') RETURNING id`,
           tenantId,
           input.owner.email,
           input.owner.name,
+          `OWNER-${input.code}`.slice(0, 30),
+        );
+        const ownerMembershipId = String(membershipRows[0]!.id);
+        const root = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.authorization_scope_nodes(tenant_id,scope_type,code,name) VALUES($1::uuid,'TENANT','TENANT','Entire tenant') RETURNING id`,
+            tenantId,
+          )
+        )[0]!;
+        const ownerRole = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.roles(tenant_id,code,name,description,portal_audiences,privilege_level,protected) VALUES($1::uuid,'TENANT_OWNER','Tenant Owner','Protected tenant administrator',ARRAY['INTERNAL']::text[],'PROTECTED',true) RETURNING id`,
+            tenantId,
+          )
+        )[0]!;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.role_capabilities(tenant_id,role_id,capability_code) SELECT $1::uuid,$2::uuid,code FROM app.capability_catalog WHERE active`,
+          tenantId,
+          ownerRole.id,
+        );
+        const ownerAssignment = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.membership_role_assignments(tenant_id,membership_id,role_id) VALUES($1::uuid,$2::uuid,$3::uuid) RETURNING id`,
+            tenantId,
+            ownerMembershipId,
+            ownerRole.id,
+          )
+        )[0]!;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.scope_grants(tenant_id,assignment_id,scope_node_id,action) VALUES($1::uuid,$2::uuid,$3::uuid,'ADMIN')`,
+          tenantId,
+          ownerAssignment.id,
+          root.id,
+        );
+        await tx.$executeRawUnsafe(
+          `WITH templates(code,name,audience,level) AS (VALUES
+            ('MIS_EXECUTIVE','MIS Executive','INTERNAL','STANDARD'),
+            ('REGIONAL_MANAGER','Regional Manager','INTERNAL','STANDARD'),
+            ('KEY_ACCOUNT_MANAGER','Key Account Manager','INTERNAL','STANDARD'),
+            ('TRAFFIC_PLACEMENT_EXECUTIVE','Traffic / Placement Executive','INTERNAL','STANDARD'),
+            ('FINANCE_EXECUTIVE','Finance Executive','INTERNAL','PRIVILEGED'),
+            ('COLLECTION_EXECUTIVE','Collection Executive','INTERNAL','PRIVILEGED'),
+            ('LOADING_EXECUTIVE','Loading Executive','INTERNAL','STANDARD'),
+            ('UNLOADING_EXECUTIVE','Unloading Executive','INTERNAL','STANDARD'),
+            ('VENDOR_OWNER','Vendor Owner','VENDOR','STANDARD'),
+            ('DRIVER','Driver','DRIVER','STANDARD'),
+            ('CLIENT_VIEWER','Client Viewer','CLIENT','STANDARD'),
+            ('AUDITOR','Auditor','INTERNAL','PRIVILEGED'))
+           INSERT INTO app.roles(tenant_id,code,name,description,portal_audiences,privilege_level)
+           SELECT $1::uuid,code,name,'Baseline role template',ARRAY[audience]::text[],level FROM templates`,
+          tenantId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.role_capabilities(tenant_id,role_id,capability_code)
+           SELECT r.tenant_id,r.id,c.code FROM app.roles r CROSS JOIN app.capability_catalog c
+           WHERE r.tenant_id=$1::uuid AND r.code<>'TENANT_OWNER' AND (
+             (r.code IN ('MIS_EXECUTIVE','AUDITOR') AND c.code IN ('identity.user.read','identity.role.read','identity.report.read','identity.audit.read','probe.read','probe.export'))
+             OR (r.code IN ('REGIONAL_MANAGER','KEY_ACCOUNT_MANAGER','TRAFFIC_PLACEMENT_EXECUTIVE') AND c.code IN ('probe.read','probe.create','probe.update','probe.export'))
+             OR (r.code IN ('FINANCE_EXECUTIVE','COLLECTION_EXECUTIVE') AND c.code IN ('probe.read','probe.approve','probe.export','sensitive.payment.read','sensitive.bank_detail.read'))
+             OR (r.code IN ('LOADING_EXECUTIVE','UNLOADING_EXECUTIVE') AND c.code IN ('probe.read','probe.update'))
+             OR (r.code='VENDOR_OWNER' AND c.code IN ('probe.read','probe.update','sensitive.payment.read'))
+             OR (r.code='DRIVER' AND c.code IN ('probe.read','probe.update'))
+             OR (r.code='CLIENT_VIEWER' AND c.code='probe.read'))`,
+          tenantId,
         );
         const inviteToken = token(),
           expiresAt = new Date(
@@ -482,7 +671,7 @@ export class AppService implements OnModuleDestroy {
         const inviteRows = await tx.$queryRawUnsafe<Array<Row>>(
           `INSERT INTO app.owner_invitations(tenant_id,membership_id,email,token_hash,expires_at,delivery_state) VALUES($1::uuid,$2::uuid,$3,$4,$5,$6) RETURNING id`,
           tenantId,
-          String(membershipRows[0]!.id),
+          ownerMembershipId,
           input.owner.email,
           hash(inviteToken),
           expiresAt,
@@ -1214,5 +1403,393 @@ export class AppService implements OnModuleDestroy {
       });
       return rows[0];
     });
+  }
+
+  async createFnd02Fixture(
+    actor: SessionActor,
+    input: {
+      namespace: string;
+      scenario: "SCOPES_ONLY" | "ACCESS_MATRIX" | "PORTALS" | "REPORTS";
+    },
+    idempotencyKey: string,
+    correlationId: string,
+  ) {
+    this.requirePlatform(actor);
+    if (this.config.ENABLE_TEST_HOOKS !== "true")
+      throw new AppError(404, "NOT_FOUND", "Resource not found");
+    if (
+      !idempotencyKey ||
+      idempotencyKey.length < 8 ||
+      idempotencyKey.length > 200
+    )
+      throw new AppError(
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "A valid Idempotency-Key is required",
+      );
+    const operation = `test.fnd02.fixture:${input.scenario}`;
+    const keyHash = hash(idempotencyKey);
+    const requestHash = hash(JSON.stringify(input));
+    const fixturePassword = "FixturePassword!234";
+    const replay = await withPlatform(
+      this.db,
+      async (tx) =>
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT request_hash AS "requestHash",response_json AS response FROM app.idempotency_records WHERE actor_id=$1::uuid AND operation=$2 AND key_hash=$3`,
+            actor.userId,
+            operation,
+            keyHash,
+          )
+        )[0],
+    );
+    const withPasswords = (response: Record<string, unknown>) => ({
+      ...response,
+      actors: Object.fromEntries(
+        Object.entries(
+          (response.actors ?? {}) as Record<string, Record<string, unknown>>,
+        ).map(([name, value]) => [
+          name,
+          { ...value, password: fixturePassword },
+        ]),
+      ),
+    });
+    if (replay) {
+      if (replay.requestHash !== requestHash)
+        throw new AppError(
+          409,
+          "IDEMPOTENCY_CONFLICT",
+          "Idempotency key was already used with different input",
+        );
+      return {
+        ...withPasswords(replay.response as Record<string, unknown>),
+        replayed: true,
+      };
+    }
+
+    const suffix =
+      input.scenario === "SCOPES_ONLY"
+        ? "SCP"
+        : input.scenario === "ACCESS_MATRIX"
+          ? "ACC"
+          : input.scenario === "PORTALS"
+            ? "POR"
+            : "REP";
+    const tenantCode = `${input.namespace}-${suffix}`;
+    const ownerEmail = `${tenantCode.toLowerCase()}-owner@test.local`;
+    const provisioned = await this.provision(
+      actor,
+      {
+        name: `${tenantCode} Logistics`,
+        code: tenantCode,
+        legalName: `${tenantCode} Logistics Limited`,
+        taxIdentifier: `TAX-${tenantCode}`,
+        address: {
+          line1: "1 Fixture Road",
+          line2: "",
+          city: "Kolkata",
+          region: "West Bengal",
+          postalCode: "700001",
+          country: "IN",
+        },
+        timezone: "Asia/Kolkata",
+        locale: "en-IN",
+        currency: "INR",
+        fiscalYearStart: { month: 4, day: 1 },
+        legalEntity: { name: `${tenantCode} Entity`, code: tenantCode },
+        support: { name: "Fixture Support", email: `support-${ownerEmail}` },
+        owner: { name: "Fixture Owner", email: ownerEmail },
+        branding: {
+          shortName: tenantCode,
+          primaryColor: "#16324F",
+          accentColor: "#D97706",
+        },
+        active: true,
+      },
+      `${idempotencyKey}:tenant`,
+      correlationId,
+    );
+    if (!("invitationUrl" in provisioned) || !provisioned.invitationUrl)
+      throw new AppError(
+        409,
+        "FIXTURE_STATE_INVALID",
+        "Fixture tenant already exists without a replay record",
+      );
+    await this.acceptInvitation(
+      String(provisioned.invitationUrl).split("token=")[1]!,
+      "Fixture Owner",
+      fixturePassword,
+      correlationId,
+    );
+    const tenantId = String(provisioned.tenant.id);
+    const passwordHash = await argon2.hash(fixturePassword, {
+      type: argon2.argon2id,
+    });
+
+    const response = await withPlatform(this.db, async (tx) => {
+      if (input.scenario === "SCOPES_ONLY")
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.tenant_configuration(tenant_id,namespace,schema_version,value)
+           VALUES($1::uuid,'security',1,'{"mfaPolicy":"OFF","fixtureMfaPolicyAfterInvitation":"ALL"}'::jsonb)
+           ON CONFLICT(tenant_id,namespace) DO UPDATE SET value=EXCLUDED.value,version=app.tenant_configuration.version+1,updated_at=now()`,
+          tenantId,
+        );
+      const root = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id FROM app.authorization_scope_nodes WHERE tenant_id=$1::uuid AND scope_type='TENANT'`,
+          tenantId,
+        )
+      )[0]!;
+      const node = async (
+        scopeType: string,
+        code: string,
+        name: string,
+        parentId: string,
+      ) =>
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.authorization_scope_nodes(tenant_id,scope_type,code,name,parent_id) VALUES($1::uuid,$2,$3,$4,$5::uuid)
+           ON CONFLICT(tenant_id,scope_type,code) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+            tenantId,
+            scopeType,
+            code,
+            name,
+            parentId,
+          )
+        )[0]!;
+      const north = await node("REGION", "NORTH", "North", String(root.id));
+      const south = await node("REGION", "SOUTH", "South", String(root.id));
+      const alpha = await node(
+        "CLIENT",
+        "ALPHA",
+        "Alpha Client",
+        String(north.id),
+      );
+      const vendor = await node(
+        "VENDOR",
+        "RED",
+        "Red Vendor",
+        String(north.id),
+      );
+      const trip = await node(
+        "ASSIGNED_TRIP",
+        "TRIP-1",
+        "Assigned Trip 1",
+        String(north.id),
+      );
+      const roleRows = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT id,code FROM app.roles WHERE tenant_id=$1::uuid`,
+        tenantId,
+      );
+      const roles = Object.fromEntries(
+        roleRows.map((row) => [String(row.code), String(row.id)]),
+      );
+      const actors: Record<string, Record<string, unknown>> = {};
+      const addActor = async (
+        name: string,
+        audience: string,
+        roleGrants: Array<{ role: string; scope: string; actions: string[] }>,
+      ) => {
+        const email = `${tenantCode.toLowerCase()}-${name.toLowerCase()}@test.local`;
+        const user = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.users(email,display_name,password_hash) VALUES($1,$2,$3) RETURNING id`,
+            email,
+            `Fixture ${name}`,
+            passwordHash,
+          )
+        )[0]!;
+        const membership = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.tenant_memberships(tenant_id,user_id,invited_email,invited_name,employee_code,portal_audience,status)
+           VALUES($1::uuid,$2::uuid,$3,$4,$5,$6,'ACTIVE') RETURNING id`,
+            tenantId,
+            user.id,
+            email,
+            `Fixture ${name}`,
+            `FX-${name.toUpperCase()}`,
+            audience,
+          )
+        )[0]!;
+        for (const grant of roleGrants) {
+          const assignment = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `INSERT INTO app.membership_role_assignments(tenant_id,membership_id,role_id) VALUES($1::uuid,$2::uuid,$3::uuid) RETURNING id`,
+              tenantId,
+              membership.id,
+              roles[grant.role],
+            )
+          )[0]!;
+          for (const action of grant.actions)
+            await tx.$executeRawUnsafe(
+              `INSERT INTO app.scope_grants(tenant_id,assignment_id,scope_node_id,action) VALUES($1::uuid,$2::uuid,$3::uuid,$4)`,
+              tenantId,
+              assignment.id,
+              grant.scope,
+              action,
+            );
+        }
+        actors[name] = {
+          userId: user.id,
+          membershipId: membership.id,
+          email,
+          tenantCode,
+          home:
+            audience === "VENDOR"
+              ? "/portal/vendor"
+              : audience === "DRIVER"
+                ? "/portal/driver"
+                : audience === "CLIENT"
+                  ? "/portal/client"
+                  : "/app",
+        };
+        return user;
+      };
+      const ownerMembership = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT m.id,m.user_id AS "userId" FROM app.tenant_memberships m WHERE m.tenant_id=$1::uuid AND m.invited_email=$2`,
+          tenantId,
+          ownerEmail,
+        )
+      )[0]!;
+      actors.owner = {
+        userId: ownerMembership.userId,
+        membershipId: ownerMembership.id,
+        email: ownerEmail,
+        tenantCode,
+        home: "/app",
+      };
+      const regional = await addActor("regional", "INTERNAL", [
+        {
+          role: "REGIONAL_MANAGER",
+          scope: String(north.id),
+          actions: ["READ", "CREATE", "UPDATE", "EXPORT"],
+        },
+      ]);
+      await addActor("kam", "INTERNAL", [
+        {
+          role: "KEY_ACCOUNT_MANAGER",
+          scope: String(alpha.id),
+          actions: ["READ", "CREATE", "UPDATE", "EXPORT"],
+        },
+      ]);
+      await addActor("multiRole", "INTERNAL", [
+        {
+          role: "REGIONAL_MANAGER",
+          scope: String(north.id),
+          actions: ["READ"],
+        },
+        {
+          role: "FINANCE_EXECUTIVE",
+          scope: String(south.id),
+          actions: ["APPROVE"],
+        },
+      ]);
+      await addActor("vendor", "VENDOR", [
+        { role: "VENDOR_OWNER", scope: String(vendor.id), actions: ["READ"] },
+      ]);
+      const driverA = await addActor("driverA", "DRIVER", [
+        { role: "DRIVER", scope: String(trip.id), actions: ["READ", "UPDATE"] },
+      ]);
+      await addActor("driverB", "DRIVER", [
+        { role: "DRIVER", scope: String(trip.id), actions: ["READ", "UPDATE"] },
+      ]);
+      await addActor("client", "CLIENT", [
+        { role: "CLIENT_VIEWER", scope: String(alpha.id), actions: ["READ"] },
+      ]);
+      await addActor("auditor", "INTERNAL", [
+        {
+          role: "AUDITOR",
+          scope: String(root.id),
+          actions: ["READ", "EXPORT"],
+        },
+      ]);
+      const addResource = async (
+        label: string,
+        resourceType: string,
+        scope: string,
+        assignedUserId?: string,
+      ) =>
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.authorization_probe_records(tenant_id,label,resource_type,scope_node_ids,assigned_user_id,status,tax_identifier,bank_detail,commercial_rate_minor,payment_minor,internal_margin_minor)
+           VALUES($1::uuid,$2,$3,ARRAY[$4::uuid],$5::uuid,'OPEN','FIXTURE-TAX-1234','FIXTURE-BANK-1234',120000,125000,5000) RETURNING id,label,version`,
+            tenantId,
+            label,
+            resourceType,
+            scope,
+            assignedUserId ?? null,
+          )
+        )[0]!;
+      const resources = {
+        north: await addResource("North Work", "WORK_ITEM", String(north.id)),
+        south: await addResource("South Work", "WORK_ITEM", String(south.id)),
+        client: await addResource(
+          "Alpha Status",
+          "CLIENT_STATUS",
+          String(alpha.id),
+        ),
+        vendor: await addResource("Red Payment", "PAYMENT", String(vendor.id)),
+        trip: await addResource(
+          "Driver Trip",
+          "TRIP",
+          String(trip.id),
+          String(driverA.id),
+        ),
+      };
+      if (input.scenario === "REPORTS") {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id) VALUES($1::uuid,$2::uuid,$3::uuid,'LOGIN_FAILED','DENIED','fixture-report','{}',$4)`,
+          tenantId,
+          regional.id,
+          actors.regional!.membershipId,
+          correlationId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_alerts(tenant_id,alert_type,severity,deduplication_key,user_id,membership_id) VALUES($1::uuid,'REPEATED_LOGIN_FAILURES','HIGH',$2,$3::uuid,$4::uuid)`,
+          tenantId,
+          `fixture:${input.namespace}`,
+          regional.id,
+          actors.regional!.membershipId,
+        );
+      }
+      return {
+        scenario: input.scenario,
+        tenantA: { id: tenantId, code: tenantCode },
+        actors,
+        roles,
+        scopes: {
+          root: root.id,
+          north: north.id,
+          south: south.id,
+          alpha: alpha.id,
+          vendor: vendor.id,
+          trip: trip.id,
+        },
+        resources,
+        expected: {
+          resources: 5,
+          alerts: input.scenario === "REPORTS" ? 1 : 0,
+        },
+      };
+    });
+    const stored = {
+      ...response,
+      actors: Object.fromEntries(
+        Object.entries(response.actors).map(([name, value]) => [name, value]),
+      ),
+    };
+    await withPlatform(this.db, (tx) =>
+      tx.$executeRawUnsafe(
+        `INSERT INTO app.idempotency_records(scope,actor_id,operation,key_hash,request_hash,resource_id,response_json) VALUES('PLATFORM',$1::uuid,$2,$3,$4,$5::uuid,$6::jsonb)`,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        tenantId,
+        JSON.stringify(stored),
+      ),
+    );
+    return withPasswords(stored);
   }
 }

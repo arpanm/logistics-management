@@ -14,6 +14,8 @@ const schema = z.object({
   INVITATION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(72),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(24),
   ENABLE_TEST_HOOKS: z.enum(["true", "false"]).default("false"),
+  MFA_ENCRYPTION_KEY: z.string().default(""),
+  MFA_KEY_VERSION: z.coerce.number().int().positive().default(1),
   SUPPORTED_COUNTRIES: z.string().default("AE,GB,IN,SG,US"),
   SUPPORTED_CURRENCIES: z.string().default("AED,EUR,GBP,INR,SGD,USD"),
 });
@@ -30,5 +32,14 @@ export function loadConfig(
     throw new Error("Production secrets must be explicitly configured");
   if (cfg.APP_ENV === "production" && cfg.ENABLE_TEST_HOOKS === "true")
     throw new Error("Test hooks cannot be enabled in production");
+  if (cfg.APP_ENV === "production" && !cfg.MFA_ENCRYPTION_KEY)
+    throw new Error("MFA_ENCRYPTION_KEY is required in production");
+  if (cfg.MFA_ENCRYPTION_KEY) {
+    const key = Buffer.from(cfg.MFA_ENCRYPTION_KEY, "base64");
+    if (key.length !== 32)
+      throw new Error(
+        "MFA_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+      );
+  }
   return cfg;
 }

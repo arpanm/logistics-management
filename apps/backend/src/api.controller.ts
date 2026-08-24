@@ -4,6 +4,8 @@ import {
   Controller,
   Get,
   Headers,
+  Inject,
+  Logger,
   Param,
   Patch,
   Post,
@@ -16,6 +18,7 @@ import { ZodError } from "zod";
 import {
   checklistSchema,
   csvCell,
+  fnd02FixtureSchema,
   inviteAcceptSchema,
   lifecycleSchema,
   loginSchema,
@@ -28,14 +31,21 @@ import {
 import { AppError, AppService } from "./app.service.js";
 
 const sessionCookie = "logistics_session";
-const requestId = (req: Request) =>
-  typeof req.headers["x-correlation-id"] === "string"
-    ? req.headers["x-correlation-id"]
-    : crypto.randomUUID();
+const requestId = (req: Request) => {
+  const cached = (req as Request & { correlationId?: string }).correlationId;
+  if (cached) return cached;
+  const value =
+    typeof req.headers["x-correlation-id"] === "string"
+      ? req.headers["x-correlation-id"]
+      : crypto.randomUUID();
+  (req as Request & { correlationId?: string }).correlationId = value;
+  return value;
+};
 
 @Controller()
 export class ApiController {
-  constructor(private readonly service: AppService) {}
+  private readonly logger = new Logger(ApiController.name);
+  constructor(@Inject(AppService) private readonly service: AppService) {}
   private cookie(res: Response, value: string, csrf: string) {
     const common = {
       sameSite: "lax" as const,
@@ -82,6 +92,10 @@ export class ApiController {
           correlationId,
           fields: error.fields,
         });
+      this.logger.error(
+        "Unhandled API request failure",
+        error instanceof Error ? error.stack : undefined,
+      );
       return res.status(500).json({
         code: "INTERNAL_ERROR",
         message: "The request could not be completed",
@@ -119,7 +133,7 @@ export class ApiController {
     return this.run(res, req, async () => {
       const input = loginSchema.parse(body);
       const result = await this.service.login(
-        input.email,
+        input.identifier ?? input.email!,
         input.password,
         input.tenantCode,
         requestId(req),
@@ -130,6 +144,8 @@ export class ApiController {
         user: result.user,
         activeTenantId: result.activeTenantId,
         contextVersion: result.contextVersion,
+        mfaRequired: result.mfaRequired,
+        mfaEnrolled: result.mfaEnrolled,
       };
     });
   }
@@ -472,6 +488,29 @@ export class ApiController {
         requestId(req),
       );
     });
+  }
+
+  @Post("test/fnd02/fixtures") fnd02Fixture(
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      req,
+      async () => {
+        const actor = await this.actor(req);
+        this.csrf(req, actor);
+        return this.service.createFnd02Fixture(
+          actor,
+          fnd02FixtureSchema.parse(body),
+          key,
+          requestId(req),
+        );
+      },
+      201,
+    );
   }
 
   @All("*path") missing(@Req() req: Request, @Res() res: Response) {

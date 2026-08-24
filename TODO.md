@@ -6,7 +6,8 @@ This is the active execution queue. It is synchronized at the end of every featu
 
 | Feature | Work item | State | Owner/reason | Evidence or unblock condition |
 |---|---|---|---|---|
-| FND-02 | Implement identity, roles, and scoped access on the verified tenant/session foundation | Ready | Next dependency-ready feature after FND-01 completion | `FEATURES.md` FND-02 |
+| FND-02 | Run the preserved 16-case desktop/mobile Playwright suite during consolidated testing | Implemented | Development-first batch; browser execution intentionally deferred | `tests/e2e/fnd-02-identity-access.spec.ts` |
+| MST-01..CFG-01 | Implement the remaining feature register using reusable master, workflow, finance, reporting, and configuration modules | In progress | Rapid parallel implementation batch requested by user | `FEATURES.md` feature register |
 
 ## Blocked
 

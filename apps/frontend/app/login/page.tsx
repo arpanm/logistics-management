@@ -17,12 +17,14 @@ export default function Login() {
     try {
       const result = await api<{
         user: { platformAdmin: boolean };
+        mfaRequired?: boolean;
+        activeTenantId?: string;
         requiresTenantSelection?: boolean;
         tenants?: Array<{ code: string; name: string }>;
       }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
-          email: f.get("email"),
+          identifier: f.get("identifier"),
           password: f.get("password"),
           tenantCode: f.get("tenantCode") || undefined,
         }),
@@ -32,7 +34,11 @@ export default function Login() {
         return;
       }
       router.replace(
-        result.user.platformAdmin ? "/platform/tenants" : "/app/setup",
+        result.mfaRequired
+          ? "/mfa"
+          : result.user.platformAdmin
+            ? "/platform/tenants"
+            : "/app",
       );
     } catch (err) {
       setError((err as ApiError).message);
@@ -54,10 +60,11 @@ export default function Login() {
         )}
         <form onSubmit={submit}>
           <label>
-            Email
+            Email or mobile
             <input
-              name="email"
-              type="email"
+              name="identifier"
+              type="text"
+              inputMode="email"
               autoComplete="username"
               required
               defaultValue="admin@local.test"

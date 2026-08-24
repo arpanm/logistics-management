@@ -10,9 +10,9 @@ The product requirements and per-feature implementation/test status are maintain
 |---|---|
 | Agentic SDLC scaffold | Complete |
 | Application bootstrap | Complete — `FND-01` verified |
-| Automated feature tests | Passing — 36 non-browser checks and 14 Playwright project cases |
+| Automated feature tests | FND-01 passing; FND-02 has 69 passing non-browser checks and 16 discoverable Playwright cases pending consolidated execution |
 | Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL |
-| Next dependency-ready feature | `FND-02` identity, roles, and scoped access |
+| Active implementation batch | Remaining master, operations, finance, control, data, governance, integration, and configuration features |
 
 Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
 

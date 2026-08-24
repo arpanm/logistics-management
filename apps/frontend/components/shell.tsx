@@ -14,6 +14,16 @@ type Me = {
     primaryColor: string;
   }>;
 };
+type Effective = {
+  capabilities: string[];
+  navigation: {
+    users: boolean;
+    roles: boolean;
+    reports: boolean;
+    probes: boolean;
+  };
+  home: string;
+};
 export function Shell({
   children,
   area = "tenant",
@@ -23,12 +33,26 @@ export function Shell({
 }) {
   const [me, setMe] = useState<Me | null>(null);
   const [notice, setNotice] = useState("");
+  const [effective, setEffective] = useState<Effective | null>(null);
   const router = useRouter();
   const path = usePathname();
   useEffect(() => {
     api<Me>("/auth/me")
-      .then(setMe)
-      .catch(() => router.replace("/login"));
+      .then(async (value) => {
+        setMe(value);
+        if (value.activeTenantId)
+          setEffective(await api<Effective>("/tenant/access/effective"));
+      })
+      .catch((error: { code?: string }) => {
+        setMe(null);
+        setEffective(null);
+        sessionStorage.clear();
+        router.replace(
+          error?.code === "MFA_REQUIRED"
+            ? "/mfa"
+            : "/login?reason=access-changed",
+        );
+      });
   }, [router, path]);
   async function change(id: string) {
     if (!me) return;
@@ -81,6 +105,18 @@ export function Shell({
                 ))}
               </select>
             </label>
+          )}
+          {area === "tenant" && effective?.navigation.users && (
+            <Link href="/app/access/users">Users</Link>
+          )}
+          {area === "tenant" && effective?.navigation.roles && (
+            <Link href="/app/access/roles">Roles</Link>
+          )}
+          {area === "tenant" && effective?.navigation.probes && (
+            <Link href="/app/access/probes">Access proof</Link>
+          )}
+          {area === "tenant" && effective?.navigation.reports && (
+            <Link href="/app/access/reports">Security</Link>
           )}
           <button className="link-button" onClick={() => void logout()}>
             Sign out

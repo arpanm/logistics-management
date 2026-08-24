@@ -8,7 +8,12 @@ if (!url || !/\/logistics_test(?:\?|$)/.test(url))
 const db = createDatabase(url);
 try {
   await db.$executeRawUnsafe(
-    `TRUNCATE TABLE audit.audit_events, reporting.tenant_activity_projection, app.login_attempts, app.platform_alerts, app.job_runs, app.outbox_events, app.idempotency_records, app.stored_documents, app.tenant_probe_records, app.setup_checklist_items, app.tenant_configuration, app.owner_invitations, app.tenant_memberships, app.legal_entities, app.sessions, app.tenants, app.users RESTART IDENTITY CASCADE`,
+    `TRUNCATE TABLE audit.audit_events, reporting.identity_activity_projection, reporting.tenant_activity_projection,
+      app.security_alerts, app.security_events, app.authorization_probe_records, app.mfa_recovery_codes, app.mfa_factors,
+      app.access_invitations, app.scope_grants, app.membership_role_assignments, app.role_capabilities, app.roles, app.authorization_scope_nodes,
+      app.login_attempts, app.platform_alerts, app.job_runs, app.outbox_events, app.idempotency_records, app.stored_documents,
+      app.tenant_probe_records, app.setup_checklist_items, app.tenant_configuration, app.owner_invitations, app.tenant_memberships,
+      app.legal_entities, app.sessions, app.tenants, app.users RESTART IDENTITY CASCADE`,
   );
   console.log("Reset only logistics_test application schemas");
 } finally {

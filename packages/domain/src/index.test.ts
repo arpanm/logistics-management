@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  accessAcceptSchema,
+  accessInviteSchema,
   csvCell,
   inviteAcceptSchema,
   loginSchema,
@@ -160,4 +162,52 @@ describe("FND01-U-005 safe exports", () => {
     (value) => expect(csvCell(value)).toBe(`"'${value}"`),
   );
   it("quotes embedded quotes", () => expect(csvCell('a"b')).toBe('"a""b"'));
+});
+
+describe("FND02-U-007 invitation and authentication validation", () => {
+  const roleId = crypto.randomUUID();
+  const scopeNodeId = crypto.randomUUID();
+  const access = {
+    displayName: "Regional Manager",
+    employeeCode: "RM-001",
+    authenticationMethod: "LOCAL_PASSWORD",
+    portalAudience: "INTERNAL",
+    assignments: [
+      { roleId, grants: [{ scopeNodeId, actions: ["READ", "CREATE"] }] },
+    ],
+    expiresInHours: 72,
+  };
+  it("accepts either normalized email or E.164 mobile", () => {
+    expect(
+      accessInviteSchema.parse({ ...access, email: " USER@EXAMPLE.TEST " })
+        .email,
+    ).toBe("user@example.test");
+    expect(
+      accessInviteSchema.parse({ ...access, mobile: "+919876543210" }).mobile,
+    ).toBe("+919876543210");
+    expect(() => accessInviteSchema.parse(access)).toThrow(/Email or mobile/);
+    expect(() =>
+      accessInviteSchema.parse({ ...access, mobile: "9876" }),
+    ).toThrow();
+  });
+  it("separates new-password and existing-current-password proof", () => {
+    expect(
+      accessAcceptSchema.parse({
+        displayName: "User",
+        currentPassword: "ExistingPassword!",
+        termsAccepted: true,
+      }).currentPassword,
+    ).toBeTruthy();
+    expect(
+      accessAcceptSchema.parse({
+        displayName: "User",
+        password: "NewPassword!234",
+        passwordConfirmation: "NewPassword!234",
+        termsAccepted: true,
+      }).password,
+    ).toBeTruthy();
+    expect(() =>
+      accessAcceptSchema.parse({ displayName: "User", termsAccepted: true }),
+    ).toThrow(/Credentials/);
+  });
 });

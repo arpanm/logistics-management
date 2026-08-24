@@ -26,3 +26,34 @@ describe("FND-01 guarded test hooks", () => {
     ).toThrow("Test hooks cannot be enabled in production");
   });
 });
+
+describe("FND02-C-006 MFA encryption startup guard", () => {
+  it("requires a valid 32-byte encryption key in production", () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        APP_ENV: "production",
+        NODE_ENV: "production",
+        ENABLE_TEST_HOOKS: "false",
+      }),
+    ).toThrow("MFA_ENCRYPTION_KEY is required");
+    expect(() =>
+      loadConfig({
+        ...base,
+        APP_ENV: "production",
+        NODE_ENV: "production",
+        ENABLE_TEST_HOOKS: "false",
+        MFA_ENCRYPTION_KEY: Buffer.from("short").toString("base64"),
+      }),
+    ).toThrow("32-byte");
+    expect(
+      loadConfig({
+        ...base,
+        APP_ENV: "production",
+        NODE_ENV: "production",
+        ENABLE_TEST_HOOKS: "false",
+        MFA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+      }).MFA_KEY_VERSION,
+    ).toBe(1);
+  });
+});

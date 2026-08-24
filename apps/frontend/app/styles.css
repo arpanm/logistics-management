@@ -290,6 +290,100 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
+.access-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.access-form label,
+.auth-card form label,
+.panel > label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+.access-form input,
+.access-form select,
+.auth-card input,
+.panel > label select {
+  width: 100%;
+  padding: 0.7rem;
+  border: 1px solid #aab8c5;
+  border-radius: 0.45rem;
+  font: inherit;
+}
+.access-form fieldset {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+.access-form .check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+}
+.access-form .check input {
+  width: auto;
+}
+.responsive-list {
+  display: grid;
+  gap: 0.75rem;
+}
+.access-card {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  min-width: 0;
+}
+.access-card h3 {
+  margin: 0 0 0.2rem;
+}
+.access-card p {
+  color: var(--muted);
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+.access-card dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+}
+.access-card dd {
+  margin: 0;
+  font-weight: 700;
+}
+.safe-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f7fafc;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  max-width: 100%;
+}
+.break-word {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .topbar nav {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+  }
+  .access-form {
+    grid-template-columns: 1fr;
+  }
+  .access-form fieldset {
+    grid-column: auto;
+  }
+}
 .tenant-form fieldset {
   border: 1px solid var(--line);
   border-radius: 0.7rem;

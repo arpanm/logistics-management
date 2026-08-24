@@ -167,11 +167,16 @@ export type TenantCreateInput = z.infer<typeof tenantCreateSchema>;
 
 export const loginSchema = z
   .object({
-    email,
+    email: email.optional(),
+    identifier: z.string().trim().min(3).max(254).optional(),
     password: z.string().min(1).max(256),
     tenantCode: code.optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.email || value.identifier), {
+    path: ["identifier"],
+    message: "Email or mobile is required",
+  });
 export const inviteAcceptSchema = z
   .object({
     displayName: trimmed(2, 100),
@@ -218,12 +223,171 @@ export const membershipFixtureSchema = z
   })
   .strict();
 
+export const scopeTypeSchema = z.enum([
+  "TENANT",
+  "LEGAL_ENTITY",
+  "REGION",
+  "BRANCH",
+  "CLIENT",
+  "LOCATION",
+  "VENDOR",
+  "ASSIGNED_TRIP",
+]);
+export const scopeActionSchema = z.enum([
+  "READ",
+  "CREATE",
+  "UPDATE",
+  "APPROVE",
+  "EXPORT",
+  "ADMIN",
+]);
+const identifierFields = z
+  .object({
+    email: email.optional(),
+    mobile: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{7,14}$/)
+      .optional(),
+  })
+  .refine((v) => Boolean(v.email || v.mobile), {
+    message: "Email or mobile is required",
+    path: ["email"],
+  });
+export const accessGrantSchema = z.object({
+  scopeNodeId: z.string().uuid(),
+  actions: z.array(scopeActionSchema).min(1),
+});
+export const accessAssignmentSchema = z.object({
+  roleId: z.string().uuid(),
+  grants: z.array(accessGrantSchema).min(1),
+});
+export const accessInviteSchema = identifierFields.and(
+  z.object({
+    displayName: trimmed(2, 100),
+    employeeCode: code,
+    authenticationMethod: z.literal("LOCAL_PASSWORD").default("LOCAL_PASSWORD"),
+    portalAudience: z.enum(["INTERNAL", "VENDOR", "DRIVER", "CLIENT"]),
+    assignments: z.array(accessAssignmentSchema).min(1),
+    expiresInHours: z.number().int().min(1).max(720).default(72),
+    reason: z.string().trim().max(500).optional(),
+  }),
+);
+export const accessAcceptSchema = z
+  .object({
+    displayName: trimmed(2, 100),
+    password: z.string().min(12).max(256).optional(),
+    passwordConfirmation: z.string().optional(),
+    currentPassword: z.string().min(1).max(256).optional(),
+    termsAccepted: z.literal(true),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.password && value.password !== value.passwordConfirmation)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["passwordConfirmation"],
+        message: "Passwords do not match",
+      });
+    if (!value.password && !value.currentPassword)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["password"],
+        message: "Credentials are required",
+      });
+  });
+export const accessMutationSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  assignments: z.array(accessAssignmentSchema).min(1),
+  reason: trimmed(10, 500),
+  previewFingerprint: z.string().length(64),
+});
+export const accessPreviewSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  assignments: z.array(accessAssignmentSchema).min(1),
+});
+export const accessLifecycleSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  reason: trimmed(10, 500),
+});
+export const roleMutationSchema = z.object({
+  code,
+  name: trimmed(2, 100),
+  description: z.string().trim().max(500).default(""),
+  portalAudiences: z
+    .array(z.enum(["INTERNAL", "VENDOR", "DRIVER", "CLIENT"]))
+    .min(1),
+  capabilities: z.array(z.string().regex(/^[a-z][a-z0-9_.-]+$/)).min(1),
+  expectedVersion: z.number().int().positive().optional(),
+  reason: z.string().trim().max(500).optional(),
+});
+export const policyOperationSchema = z.object({
+  capability: z.string().regex(/^[a-z][a-z0-9_.-]+$/),
+  action: scopeActionSchema,
+  resourceId: z.string().uuid(),
+});
+export const fnd02FixtureSchema = z
+  .object({
+    namespace: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z0-9-]{2,12}$/),
+    scenario: z.enum(["SCOPES_ONLY", "ACCESS_MATRIX", "PORTALS", "REPORTS"]),
+  })
+  .strict();
+export const probeAccessCreateSchema = z
+  .object({
+    label: trimmed(2, 100),
+    resourceType: z
+      .enum(["WORK_ITEM", "ALLOCATION", "TRIP", "PAYMENT", "CLIENT_STATUS"])
+      .default("WORK_ITEM"),
+    scopeNodeIds: z.array(z.string().uuid()).min(1),
+    assignedUserId: z.string().uuid().optional(),
+    status: z.enum(["OPEN", "COMPLETED"]).default("OPEN"),
+    taxIdentifier: z.string().trim().max(32).optional(),
+    mobile: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{7,14}$/)
+      .optional(),
+    bankDetail: z.string().trim().max(64).optional(),
+    commercialRateMinor: z.number().int().safe().optional(),
+    paymentMinor: z.number().int().safe().optional(),
+    internalMarginMinor: z.number().int().safe().optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.resourceType === "TRIP" && !value.assignedUserId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["assignedUserId"],
+        message: "Assigned user is required for trip proof resources",
+      });
+  });
+export const probeAccessUpdateSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    label: trimmed(2, 100).optional(),
+    status: z.enum(["OPEN", "COMPLETED"]).optional(),
+  })
+  .strict()
+  .refine((value) => value.label !== undefined || value.status !== undefined, {
+    message: "At least one change is required",
+  });
+export const probeReassignSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    assignedUserId: z.string().uuid(),
+    reason: trimmed(10, 500),
+  })
+  .strict();
+
 export const sha256 = async (value: string): Promise<string> => {
   const { createHash } = await import("node:crypto");
   return createHash("sha256").update(value, "utf8").digest("hex");
 };
 
 export function csvCell(value: string): string {
-  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  const safe = /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${safe.replaceAll('"', '""')}"`;
 }
