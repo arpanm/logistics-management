@@ -4,5 +4,5 @@ set -euo pipefail
 repo_dir="$(git rev-parse --show-toplevel)"
 cd "$repo_dir"
 
+git diff --cached --check
 bash scripts/run-workspace-checks.sh
-
