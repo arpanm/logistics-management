@@ -1,6 +1,11 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import argon2 from "argon2";
-import { randomBytes, createHash } from "node:crypto";
+import {
+  randomBytes,
+  createCipheriv,
+  createHash,
+  createHmac,
+} from "node:crypto";
 import {
   createDatabase,
   Prisma,
@@ -94,6 +99,7 @@ export class AppService implements OnModuleDestroy {
         "202608250022_access_master_ux",
         "202608250023_operations_workbench",
         "202608250024_finance_workbenches",
+        "202608250025_password_recovery",
       ];
       if (
         !required.every((name) =>
@@ -185,6 +191,7 @@ export class AppService implements OnModuleDestroy {
         "TENANT_DEACTIVATED",
         "MFA_COMPLETED",
         "MFA_RESET",
+        "PASSWORD_RESET",
       ]);
       throw new AppError(
         401,
@@ -488,6 +495,356 @@ export class AppService implements OnModuleDestroy {
         "Email or password is incorrect",
       );
     return outcome;
+  }
+
+  private sealRecoveryToken(value: string) {
+    const key = createHash("sha256")
+      .update(this.config.MFA_ENCRYPTION_KEY || this.config.AUTH_SECRET)
+      .digest();
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    const encrypted = Buffer.concat([
+      cipher.update(value, "utf8"),
+      cipher.final(),
+    ]);
+    return [nonce, cipher.getAuthTag(), encrypted]
+      .map((part) => part.toString("base64url"))
+      .join(".");
+  }
+
+  async requestPasswordReset(
+    identifier: string,
+    tenantCode: string | undefined,
+    connectionSource: string,
+    correlationId: string,
+  ) {
+    const startedAt = Date.now();
+    const normalized = identifier.trim().toLowerCase();
+    const hmacKey = (scope: string, value: string) =>
+      createHmac("sha256", this.config.AUTH_SECRET)
+        .update(`password-reset\0${scope}\0${value}`)
+        .digest("hex");
+    const source =
+      connectionSource.trim().toLowerCase().slice(0, 256) || "unknown";
+    const globalKey = hmacKey("global", "all");
+    const sourceKey = hmacKey("source", source);
+    const identifierKey = hmacKey(
+      "identifier",
+      `${normalized}\0${tenantCode ?? ""}`,
+    );
+    try {
+      await withPlatform(this.db, async (tx) => {
+        const consumeBucket = async (
+          bucketKind: "GLOBAL" | "SOURCE" | "IDENTIFIER",
+          keyHash: string,
+        ) => {
+          const current = one(
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `INSERT INTO app.password_reset_request_limits(
+                 bucket_kind,key_hash,window_start
+               ) VALUES($1,$2,date_trunc('minute',now()))
+               ON CONFLICT(bucket_kind,key_hash,window_start) DO UPDATE
+               SET attempts=app.password_reset_request_limits.attempts+1,
+                   updated_at=now()
+               RETURNING attempts`,
+              bucketKind,
+              keyHash,
+            ),
+          );
+          const recent = one(
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT coalesce(sum(attempts),0)::int attempts
+               FROM app.password_reset_request_limits
+               WHERE bucket_kind=$1 AND key_hash=$2
+                 AND window_start>now()-interval '15 minutes'`,
+              bucketKind,
+              keyHash,
+            ),
+          );
+          return {
+            current: Number(current.attempts),
+            recent: Number(recent.attempts),
+          };
+        };
+
+        const global = await consumeBucket("GLOBAL", globalKey);
+        // Once per global minute bucket, remove only a bounded stale batch. The
+        // cleanup index supports a separate maintenance job for larger backlogs.
+        if (global.current === 1)
+          await tx.$executeRawUnsafe(
+            `WITH stale AS (
+               SELECT ctid FROM app.password_reset_request_limits
+               WHERE window_start<now()-interval '1 day'
+               ORDER BY window_start LIMIT 500
+             )
+             DELETE FROM app.password_reset_request_limits target
+             USING stale WHERE target.ctid=stale.ctid`,
+          );
+        if (global.recent > 300) return;
+
+        const sourceBucket = await consumeBucket("SOURCE", sourceKey);
+        if (sourceBucket.recent > 20) return;
+
+        const identifierBucket = await consumeBucket(
+          "IDENTIFIER",
+          identifierKey,
+        );
+        if (identifierBucket.recent > 3) return;
+
+        const candidates = await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT u.id AS "userId",u.membership_version AS "membershipVersion",
+                m.id AS "membershipId",m.tenant_id AS "tenantId",
+                coalesce(u.email,u.mobile_e164) AS destination
+         FROM app.users u
+         JOIN app.tenant_memberships m ON m.user_id=u.id AND m.status='ACTIVE'
+         JOIN app.tenants t ON t.id=m.tenant_id AND t.status='ACTIVE'
+         WHERE u.status='ACTIVE' AND (u.email=$1 OR u.mobile_e164=$1)
+           AND ($2::text IS NULL OR t.code=$2)
+         ORDER BY t.code,m.id LIMIT 1`,
+          normalized,
+          tenantCode ?? null,
+        );
+        const candidate = candidates[0];
+        if (!candidate) return;
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+          `password-reset:${candidate.userId}`,
+        );
+        const recent = await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT count(*)::int count FROM app.password_reset_tokens
+         WHERE user_id=$1::uuid AND request_source='SELF_SERVICE'
+           AND created_at>now()-interval '15 minutes'`,
+          candidate.userId,
+        );
+        if (Number(recent[0]?.count ?? 0) >= 3) return;
+        const plainToken = token();
+        const created = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.password_reset_tokens(
+             tenant_id,membership_id,user_id,user_membership_version,request_source,
+             token_hash,token_envelope,expires_at
+           ) VALUES($1::uuid,$2::uuid,$3::uuid,$4,'SELF_SERVICE',$5,$6,now()+interval '1 hour')
+           RETURNING id,expires_at AS "expiresAt"`,
+            candidate.tenantId,
+            candidate.membershipId,
+            candidate.userId,
+            candidate.membershipVersion,
+            hash(plainToken),
+            this.sealRecoveryToken(plainToken),
+          ),
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.outbox_events(
+           tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key,state
+         ) VALUES($1::uuid,'TENANT','password_reset',$2::uuid,'identity.password_reset.recorded.v1',$3::jsonb,$4,'RECORDED')`,
+          candidate.tenantId,
+          created.id,
+          JSON.stringify({
+            passwordResetId: created.id,
+            membershipId: candidate.membershipId,
+            expiresAt: created.expiresAt,
+            deliveryConfigured: false,
+          }),
+          `password-reset:${created.id}:recorded:v1`,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(
+           tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id
+         ) VALUES($1::uuid,$2::uuid,$3::uuid,'PASSWORD_RESET_REQUESTED','ACCEPTED',$4,'{}'::jsonb,$5)`,
+          candidate.tenantId,
+          candidate.userId,
+          candidate.membershipId,
+          hash(normalized).slice(0, 24),
+          correlationId,
+        );
+        await this.audit(tx, {
+          tenantId: String(candidate.tenantId),
+          action: "auth.password_reset.requested",
+          targetType: "password_reset",
+          targetId: String(created.id),
+          correlationId,
+          after: {
+            requestRecorded: true,
+            deliveryConfigured: false,
+            expiresAt: created.expiresAt,
+          },
+        });
+      });
+    } finally {
+      const remaining = Math.max(0, 75 - (Date.now() - startedAt));
+      if (remaining)
+        await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+    }
+    return {
+      accepted: true,
+      message:
+        "If eligible, a recovery request was recorded; contact your workspace administrator if delivery is unavailable.",
+    };
+  }
+
+  async passwordResetPreview(resetToken: string) {
+    return withPlatform(this.db, async (tx) => {
+      const rows = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT r.expires_at AS "expiresAt",t.name AS "tenantName",t.timezone,
+                CASE WHEN u.email IS NOT NULL
+                  THEN left(u.email,1)||'***@'||split_part(u.email,'@',2)
+                  ELSE '+••••••'||right(u.mobile_e164,2) END AS "maskedDestination"
+         FROM app.password_reset_tokens r
+         JOIN app.users u ON u.id=r.user_id AND u.status='ACTIVE'
+         JOIN app.tenant_memberships m ON m.tenant_id=r.tenant_id AND m.id=r.membership_id
+           AND m.user_id=r.user_id AND m.status='ACTIVE'
+         JOIN app.tenants t ON t.id=r.tenant_id AND t.status='ACTIVE'
+         WHERE r.token_hash=$1 AND r.used_at IS NULL AND r.revoked_at IS NULL
+           AND r.expires_at>now()
+           AND (r.request_source='SELF_SERVICE' OR (
+             r.user_membership_version=u.membership_version AND (
+               SELECT count(*) FROM app.tenant_memberships active_membership
+               JOIN app.tenants active_tenant ON active_tenant.id=active_membership.tenant_id
+                 AND active_tenant.status='ACTIVE'
+               WHERE active_membership.user_id=r.user_id
+                 AND active_membership.status='ACTIVE'
+             )=1
+           ))`,
+        hash(resetToken),
+      );
+      if (!rows[0])
+        throw new AppError(
+          404,
+          "PASSWORD_RESET_INVALID",
+          "Password reset link is invalid or expired",
+        );
+      return rows[0];
+    });
+  }
+
+  async completePasswordReset(
+    resetToken: string,
+    password: string,
+    correlationId: string,
+  ) {
+    return withPlatform(this.db, async (tx) => {
+      const candidate = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT user_id AS "userId" FROM app.password_reset_tokens WHERE token_hash=$1`,
+          hash(resetToken),
+        )
+      )[0];
+      if (!candidate)
+        throw new AppError(
+          404,
+          "PASSWORD_RESET_INVALID",
+          "Password reset link is invalid or expired",
+        );
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `password-reset:${candidate.userId}`,
+      );
+      const resets = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT r.id,r.tenant_id AS "tenantId",r.membership_id AS "membershipId",r.user_id AS "userId"
+         FROM app.password_reset_tokens r
+         JOIN app.users u ON u.id=r.user_id AND u.status='ACTIVE'
+         JOIN app.tenant_memberships m ON m.tenant_id=r.tenant_id AND m.id=r.membership_id
+           AND m.user_id=r.user_id AND m.status='ACTIVE'
+         JOIN app.tenants t ON t.id=r.tenant_id AND t.status='ACTIVE'
+         WHERE r.token_hash=$1 AND r.used_at IS NULL AND r.revoked_at IS NULL
+           AND r.expires_at>now()
+           AND (r.request_source='SELF_SERVICE' OR (
+             r.user_membership_version=u.membership_version AND (
+               SELECT count(*) FROM app.tenant_memberships active_membership
+               JOIN app.tenants active_tenant ON active_tenant.id=active_membership.tenant_id
+                 AND active_tenant.status='ACTIVE'
+               WHERE active_membership.user_id=r.user_id
+                 AND active_membership.status='ACTIVE'
+             )=1
+           ))
+         FOR UPDATE OF r,u`,
+        hash(resetToken),
+      );
+      const reset = resets[0];
+      if (!reset)
+        throw new AppError(
+          404,
+          "PASSWORD_RESET_INVALID",
+          "Password reset link is invalid or expired",
+        );
+      const passwordHash = await argon2.hash(password, {
+        type: argon2.argon2id,
+      });
+      await tx.$executeRawUnsafe(
+        `UPDATE app.users SET password_hash=$1,auth_version=auth_version+1,
+           credentials_changed_at=now(),updated_at=now(),version=version+1
+         WHERE id=$2::uuid`,
+        passwordHash,
+        reset.userId,
+      );
+      await tx.$executeRawUnsafe(
+        `UPDATE app.password_reset_tokens
+         SET used_at=CASE WHEN id=$1::uuid THEN now() ELSE used_at END,
+             revoked_at=CASE WHEN id<>$1::uuid THEN coalesce(revoked_at,now()) ELSE revoked_at END,
+             token_envelope=NULL,updated_at=now(),version=version+1
+         WHERE user_id=$2::uuid AND used_at IS NULL`,
+        reset.id,
+        reset.userId,
+      );
+      const sessions = await tx.$queryRawUnsafe<Array<Row>>(
+        `UPDATE app.sessions SET revoked_at=now(),revoked_reason='PASSWORD_RESET',
+           updated_at=now(),version=version+1
+         WHERE user_id=$1::uuid AND revoked_at IS NULL RETURNING id`,
+        reset.userId,
+      );
+      const affectedMemberships = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT m.id AS "membershipId",m.tenant_id AS "tenantId"
+         FROM app.tenant_memberships m
+         JOIN app.tenants t ON t.id=m.tenant_id AND t.status='ACTIVE'
+         WHERE m.user_id=$1::uuid AND m.status='ACTIVE'
+         ORDER BY m.tenant_id,m.id`,
+        reset.userId,
+      );
+      for (const membership of affectedMemberships) {
+        const safeMetadata = {
+          revokedSessions: sessions.length,
+          affectedMemberships: affectedMemberships.length,
+        };
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(
+             tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id
+           ) VALUES($1::uuid,$2::uuid,$3::uuid,'PASSWORD_RESET_COMPLETED','SUCCEEDED',$4,$5::jsonb,$6)`,
+          membership.tenantId,
+          reset.userId,
+          membership.membershipId,
+          hash(String(reset.id)).slice(0, 24),
+          JSON.stringify(safeMetadata),
+          correlationId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.outbox_events(
+             tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key
+           ) VALUES($1::uuid,'TENANT','user',$2::uuid,'identity.password.changed.v1',$3::jsonb,$4)`,
+          membership.tenantId,
+          reset.userId,
+          JSON.stringify({
+            userId: reset.userId,
+            membershipId: membership.membershipId,
+            ...safeMetadata,
+          }),
+          `password-reset:${reset.id}:${membership.membershipId}:completed:v1`,
+        );
+        await this.audit(tx, {
+          tenantId: String(membership.tenantId),
+          actorId: String(reset.userId),
+          action: "auth.password_reset.completed",
+          targetType: "user",
+          targetId: String(reset.userId),
+          correlationId,
+          after: safeMetadata,
+        });
+      }
+      return {
+        ok: true,
+        revokedSessions: sessions.length,
+        affectedMemberships: affectedMemberships.length,
+      };
+    });
   }
 
   async logout(

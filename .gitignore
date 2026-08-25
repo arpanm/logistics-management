@@ -28,3 +28,5 @@ backup/
 .local/
 .sdlc/runtime/
 
+aws/*
+

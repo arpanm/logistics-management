@@ -22,6 +22,9 @@ import {
   inviteAcceptSchema,
   lifecycleSchema,
   loginSchema,
+  passwordResetCompleteSchema,
+  passwordResetPreviewSchema,
+  passwordResetRequestSchema,
   membershipFixtureSchema,
   probeCreateSchema,
   probeUpdateSchema,
@@ -30,6 +33,7 @@ import {
   tenantCreateSchemaFor,
 } from "@logistics/domain";
 import { AppError, AppService } from "./app.service.js";
+import { trustedConnectionSource } from "./network-trust.js";
 
 const sessionCookie = "logistics_session";
 const requestId = (req: Request) => {
@@ -42,7 +46,6 @@ const requestId = (req: Request) => {
   (req as Request & { correlationId?: string }).correlationId = value;
   return value;
 };
-
 @Controller()
 export class ApiController {
   private readonly logger = new Logger(ApiController.name);
@@ -148,6 +151,48 @@ export class ApiController {
         mfaRequired: result.mfaRequired,
         mfaEnrolled: result.mfaEnrolled,
       };
+    });
+  }
+  @Post("auth/password-reset/request") passwordResetRequest(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(res, req, async () => {
+      const input = passwordResetRequestSchema.parse(body);
+      return this.service.requestPasswordReset(
+        input.identifier,
+        input.tenantCode,
+        trustedConnectionSource(req),
+        requestId(req),
+      );
+    });
+  }
+  @Post("auth/password-reset/preview") passwordResetPreview(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(res, req, () => {
+      const input = passwordResetPreviewSchema.parse(body);
+      return this.service.passwordResetPreview(input.token);
+    });
+  }
+  @Post("auth/password-reset/complete") passwordResetComplete(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(res, req, async () => {
+      const input = passwordResetCompleteSchema.parse(body);
+      return this.service.completePasswordReset(
+        input.token,
+        input.password,
+        requestId(req),
+      );
     });
   }
   @Post("auth/logout") logout(@Req() req: Request, @Res() res: Response) {

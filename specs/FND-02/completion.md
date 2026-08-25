@@ -1,6 +1,6 @@
 # FND-02 UX remediation completion evidence
 
-**Status:** Core remediation implemented locally; broader follow-ups remain in `TODO.md`.
+**Status:** Product remediation implemented locally; new password-recovery tests are Implemented / Not Run.
 
 ## Delivered
 
@@ -9,17 +9,21 @@
 - Administrative controls use server-evaluated tenant-root action flags; read-only directory users do not trigger admin-only role/scope requests.
 - “Access Proof” was removed from normal navigation and reframed as an explained, non-mutating Permission tester.
 - “Security” was renamed to **Activity & audit**, with typed searchable access/audit/security tables and separate actionable security alerts.
+- Activated users can sign in again with the password created during invitation acceptance. The generic forgot-password boundary records a provider-delivery request without enumerating identities; provider-free deployments use the copy-once tenant-admin link for a single-tenant identity. Shared cross-tenant identities require a configured verified-delivery provider. Reset completion revokes all sessions and reset tokens.
 
 ## Verification
 
-| Evidence                     | Status  | Result                                                                                                                         |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Backend FND-02 integration   | Passing | 14/14, including concurrent activation rotation, stale-version loser, old-token invalidation and token-free idempotency replay |
-| Backend/frontend type checks | Passing | `pnpm --filter @logistics/backend typecheck`; `pnpm --filter @logistics/frontend typecheck`                                    |
-| Local deployment and health  | Passing | `make deploy-local`; `make health`; shared `shared-postgres` only                                                              |
-| `E2E-FND02-07`               | Passing | Structured user administration and one-time activation-link copy                                                               |
-| `E2E-FND02-08`               | Passing | Explained permission test creates no business mutation                                                                         |
-| `E2E-FND02-09`               | Passing | Searchable Activity & audit tables, scoped real APIs, separate alert actions, no raw JSON                                      |
+| Evidence                     | Status                | Result                                                                                                                                                                  |
+| ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend FND-02 integration   | Passing               | 14/14, including concurrent activation rotation, stale-version loser, old-token invalidation and token-free idempotency replay                                          |
+| Backend/frontend type checks | Passing               | `pnpm --filter @logistics/backend typecheck`; `pnpm --filter @logistics/frontend typecheck`                                                                             |
+| Local deployment and health  | Passing               | `make deploy-local`; `make health`; shared `shared-postgres` only                                                                                                       |
+| `E2E-FND02-07`               | Passing               | Structured user administration and one-time activation-link copy                                                                                                        |
+| `E2E-FND02-08`               | Passing               | Explained permission test creates no business mutation                                                                                                                  |
+| `E2E-FND02-09`               | Passing               | Searchable Activity & audit tables, scoped real APIs, separate alert actions, no raw JSON                                                                               |
+| `FND02-AUTH-REC-U01`         | Implemented / Not Run | Password-recovery request, confirmation, and administrator input boundaries                                                                                             |
+| `FND02-AUTH-REC-001..003`    | Implemented / Not Run | Generic/rate-limited request, migration/RLS evidence, copy-once cross-tenant denial, single-use reset and session revocation                                            |
+| `E2E-FND02-10`               | Implemented / Not Run | Client activation, repeat login, generic request, administrator copy-once reset, fragment scrubbing, credential rotation, replay denial, and shared-identity protection |
 
 ## Explicit follow-ups
 

@@ -918,9 +918,169 @@ export class AccessService {
       keyHash,
       requestHash,
       result.id ?? null,
-      JSON.stringify({ ...result, invitationUrl: undefined }),
+      JSON.stringify({
+        ...result,
+        invitationUrl: undefined,
+        resetUrl: undefined,
+      }),
     );
     return result;
+  }
+
+  async issuePasswordReset(
+    actor: SessionActor,
+    membershipId: string,
+    input: {
+      expectedVersion: number;
+      reason: string;
+      expiresInHours: number;
+    },
+    key: string,
+    correlationId: string,
+  ) {
+    const tenantId = this.tenant(actor);
+    return withPlatform(this.app.db, async (tx) => {
+      await this.authorizeRoot(
+        tx,
+        actor,
+        "identity.user.admin",
+        "ADMIN",
+        correlationId,
+      );
+      return this.idempotent(
+        tx,
+        actor,
+        `access.password-reset:${tenantId}:${membershipId}`,
+        key,
+        input,
+        async () => {
+          const discovered = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT user_id AS "userId" FROM app.tenant_memberships
+               WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+              tenantId,
+              membershipId,
+            )
+          )[0];
+          if (!discovered?.userId)
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+            `password-reset:${discovered.userId}`,
+          );
+          const memberships = await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT m.id,m.user_id AS "userId",m.version,m.status,
+                    u.membership_version AS "membershipVersion",
+                    CASE WHEN u.email IS NOT NULL
+                      THEN left(u.email,1)||'***@'||split_part(u.email,'@',2)
+                      ELSE '+••••••'||right(u.mobile_e164,2) END AS "maskedDestination"
+             FROM app.tenant_memberships m
+             JOIN app.users u ON u.id=m.user_id AND u.status='ACTIVE'
+             WHERE m.tenant_id=$1::uuid AND m.id=$2::uuid FOR UPDATE OF m,u`,
+            tenantId,
+            membershipId,
+          );
+          const membership = memberships[0];
+          if (!membership)
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          if (membership.status !== "ACTIVE")
+            throw new AppError(
+              409,
+              "PASSWORD_RESET_STATE_INVALID",
+              "Password reset is available only for active users",
+            );
+          if (Number(membership.version) !== input.expectedVersion)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "User changed; reload and retry",
+            );
+          const activeMemberships = await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT count(*)::int count FROM app.tenant_memberships m
+             JOIN app.tenants t ON t.id=m.tenant_id AND t.status='ACTIVE'
+             WHERE m.user_id=$1::uuid AND m.status='ACTIVE'`,
+            membership.userId,
+          );
+          if (Number(activeMemberships[0]?.count ?? 0) !== 1)
+            throw new AppError(
+              409,
+              "SHARED_IDENTITY_SELF_SERVICE_REQUIRED",
+              "This identity belongs to multiple workspaces; the user must use self-service password recovery",
+            );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.password_reset_tokens
+             SET revoked_at=now(),token_envelope=NULL,updated_at=now(),version=version+1
+             WHERE user_id=$1::uuid AND used_at IS NULL AND revoked_at IS NULL`,
+            membership.userId,
+          );
+          const plainToken = opaqueToken();
+          const reset = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `INSERT INTO app.password_reset_tokens(
+                 tenant_id,membership_id,user_id,user_membership_version,
+                 requested_by,request_source,token_hash,expires_at
+               ) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,'TENANT_ADMIN',$6,
+                 now()+($7||' hours')::interval)
+               RETURNING id,expires_at AS "expiresAt"`,
+              tenantId,
+              membershipId,
+              membership.userId,
+              membership.membershipVersion,
+              actor.userId,
+              sha(plainToken),
+              String(input.expiresInHours),
+            )
+          )[0]!;
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.security_events(
+               tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id
+             ) VALUES($1::uuid,$2::uuid,$3::uuid,'PASSWORD_RESET_ADMIN_ISSUED','SUCCEEDED',$4,$5::jsonb,$6)`,
+            tenantId,
+            membership.userId,
+            membershipId,
+            sha(String(reset.id)).slice(0, 24),
+            JSON.stringify({ requestedBy: actor.userId }),
+            correlationId,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.outbox_events(
+               tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key
+             ) VALUES($1::uuid,'TENANT','password_reset',$2::uuid,'identity.password_reset.admin_issued.v1',$3::jsonb,$4)`,
+            tenantId,
+            reset.id,
+            JSON.stringify({
+              passwordResetId: reset.id,
+              membershipId,
+              expiresAt: reset.expiresAt,
+              delivery: "ADMIN_COPY_ONCE",
+            }),
+            `password-reset:${reset.id}:admin-issued:v1`,
+          );
+          await this.audit(
+            tx,
+            actor,
+            "identity.password_reset.admin_issued",
+            "membership",
+            membershipId,
+            correlationId,
+            input.reason,
+            null,
+            {
+              resetId: reset.id,
+              expiresAt: reset.expiresAt,
+              maskedDestination: membership.maskedDestination,
+            },
+          );
+          return {
+            id: String(reset.id),
+            membershipId,
+            expiresAt: reset.expiresAt,
+            maskedDestination: membership.maskedDestination,
+            resetUrl: `${this.app.config.FRONTEND_URL}/reset-password#token=${plainToken}`,
+          };
+        },
+      );
+    });
   }
 
   private async audit(

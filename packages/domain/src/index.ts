@@ -159,6 +159,33 @@ export const loginSchema = z
     path: ["identifier"],
     message: "Email or mobile is required",
   });
+export const passwordResetRequestSchema = z
+  .object({
+    identifier: z.string().trim().min(3).max(254),
+    tenantCode: code.optional(),
+  })
+  .strict();
+export const passwordResetCompleteSchema = z
+  .object({
+    token: z.string().min(32).max(256),
+    password: z.string().min(12).max(256),
+    passwordConfirmation: z.string().max(256),
+  })
+  .strict()
+  .refine((value) => value.password === value.passwordConfirmation, {
+    path: ["passwordConfirmation"],
+    message: "Passwords do not match",
+  });
+export const passwordResetPreviewSchema = z
+  .object({ token: z.string().min(32).max(256) })
+  .strict();
+export const adminPasswordResetSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    reason: trimmed(10, 500),
+    expiresInHours: z.number().int().min(1).max(24).default(1),
+  })
+  .strict();
 export const inviteAcceptSchema = z
   .object({
     displayName: trimmed(2, 100),

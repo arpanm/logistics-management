@@ -957,6 +957,237 @@ test("E2E-FND02-09: searchable activity and audit tables are separate from actio
   await owner.context.close();
 });
 
+test("E2E-FND02-10: client repeat login, password recovery, reset rotation, replay rejection, and shared-identity protection", async ({
+  browser,
+  page,
+}, testInfo) => {
+  test.slow();
+  const fixture = await seedFnd02(page, testInfo, "ACCESS_MATRIX");
+  const owner = await actorPage(browser, fixture.actors.owner);
+  await owner.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const suffix = fixture.namespace.slice(-7).toLowerCase();
+  const email = `recovery-client-${suffix}@test.local`;
+  const firstPassword = "ClientRecovery!234";
+  const replacementPassword = "ClientReplacement!234";
+  const employeeCode = `CR-${suffix}`.toUpperCase();
+
+  const invited = await inviteThroughUi(owner.page, {
+    displayName: `Recovery Client ${suffix}`,
+    employeeCode,
+    email,
+    portalAudience: "CLIENT",
+    roleName: "Client Viewer",
+    scopePath: "Alpha",
+    actions: ["READ"],
+  });
+  expect(invited.response.status(), await invited.response.text()).toBe(201);
+  const pendingCard = owner.page
+    .locator("article.access-card")
+    .filter({ hasText: employeeCode });
+  await pendingCard.getByRole("button", { name: "View details" }).click();
+  const pendingDetails = owner.page.getByRole("dialog");
+  await expect(
+    pendingDetails.getByRole("heading", { name: "Pending activation" }),
+  ).toBeVisible();
+  const activationResponse = owner.page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response
+        .url()
+        .endsWith(
+          `/api/v1/tenant/access/users/${invited.body.membershipId}/invitations/resend`,
+        ),
+  );
+  await pendingDetails
+    .getByRole("button", { name: "Generate new activation link" })
+    .click();
+  expect((await activationResponse).status()).toBe(200);
+  const activationUrl = await pendingDetails
+    .getByLabel("New activation link")
+    .inputValue();
+  expect(activationUrl).toMatch(/\/accept-access\?token=/);
+  await pendingDetails
+    .getByRole("button", { name: "Close user details" })
+    .click();
+
+  const clientContext = await browser.newContext();
+  const client = await clientContext.newPage();
+  await client.goto(activationUrl);
+  await expect(
+    client.getByRole("heading", { name: "Accept access invitation" }),
+  ).toBeVisible();
+  await client.getByLabel("Display name").fill(`Recovery Client ${suffix}`);
+  await expect(
+    client.getByText(/Create a password you will remember/i),
+  ).toBeVisible();
+  await client.getByLabel("Create password").fill(firstPassword);
+  await client.getByLabel("Confirm password").fill(firstPassword);
+  await client.getByRole("checkbox", { name: /I accept/i }).check();
+  await client.getByRole("button", { name: "Accept invitation" }).click();
+  await expect(client).toHaveURL(/\/portal\/client$/);
+
+  await client.getByRole("button", { name: "Sign out" }).click();
+  await expect(client).toHaveURL(/\/login$/);
+  await client.getByLabel("Email or mobile").fill(email);
+  await client.getByLabel("Password").fill(firstPassword);
+  await client.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(client).toHaveURL(/\/portal\/client$/);
+
+  await client.getByRole("button", { name: "Sign out" }).click();
+  await client.getByRole("link", { name: "Forgot your password?" }).click();
+  await expect(client).toHaveURL(/\/forgot-password$/);
+  const requestReset = async (identifier: string) => {
+    await client.getByLabel("Email or mobile").fill(identifier);
+    await client.getByLabel(/Workspace code/).fill(fixture.tenantA.code);
+    const responsePromise = client.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v1/auth/password-reset/request"),
+    );
+    await client
+      .getByRole("button", { name: "Request password reset" })
+      .click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(200);
+    expect(response.headers()["cache-control"]).toContain("no-store");
+    return (await client.getByRole("status").textContent())?.trim();
+  };
+  const knownMessage = await requestReset(email);
+  const unknownMessage = await requestReset(`missing-${suffix}@test.local`);
+  expect(knownMessage).toBe(
+    "If eligible, a recovery request was recorded; contact your workspace administrator if delivery is unavailable.",
+  );
+  expect(unknownMessage).toBe(knownMessage);
+
+  await owner.page.goto("/app/access/users");
+  const activeCard = owner.page
+    .locator("article.access-card")
+    .filter({ hasText: employeeCode });
+  await activeCard.getByRole("button", { name: "View details" }).click();
+  const activeDetails = owner.page.getByRole("dialog");
+  await expect(
+    activeDetails.getByRole("heading", { name: "Password recovery" }),
+  ).toBeVisible();
+  const adminResetResponse = owner.page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response
+        .url()
+        .endsWith(
+          `/api/v1/tenant/access/users/${invited.body.membershipId}/password-reset`,
+        ),
+  );
+  await activeDetails
+    .getByRole("button", { name: "Generate password reset link" })
+    .click();
+  const generatedResponse = await adminResetResponse;
+  expect(generatedResponse.status(), await generatedResponse.text()).toBe(200);
+  expect(generatedResponse.headers()["cache-control"]).toContain("no-store");
+  const resetInput = activeDetails.getByLabel("One-time password reset link");
+  const resetUrl = await resetInput.inputValue();
+  expect(resetUrl).toMatch(/\/reset-password#token=/);
+  await activeDetails
+    .getByRole("button", { name: "Copy password reset link" })
+    .click();
+  await expect(activeDetails.getByRole("status")).toHaveText(
+    "Password reset link copied.",
+  );
+  expect(await owner.page.evaluate(() => navigator.clipboard.readText())).toBe(
+    resetUrl,
+  );
+  await activeDetails.getByRole("button", { name: "Done" }).click();
+  await expect(
+    activeDetails.getByLabel("One-time password reset link"),
+  ).toHaveCount(0);
+
+  const previewResetResponse = client.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/v1/auth/password-reset/preview"),
+  );
+  await client.goto(resetUrl);
+  const previewResponse = await previewResetResponse;
+  expect(previewResponse.status(), await previewResponse.text()).toBe(200);
+  expect(previewResponse.url()).not.toContain("token=");
+  await expect(
+    client.getByRole("heading", { name: "Create a new password" }),
+  ).toBeVisible();
+  await expect(client).toHaveURL(/\/reset-password$/);
+  await client.getByLabel("New password").fill(replacementPassword);
+  await client.getByLabel("Confirm new password").fill(replacementPassword);
+  const completeResetResponse = client.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/v1/auth/password-reset/complete"),
+  );
+  await client.getByRole("button", { name: "Reset password" }).click();
+  const completeResponse = await completeResetResponse;
+  expect(completeResponse.status(), await completeResponse.text()).toBe(200);
+  expect(completeResponse.url()).not.toContain("token=");
+  await expect(client.getByRole("status")).toContainText(
+    "Password reset complete",
+  );
+
+  const replay = await clientContext.newPage();
+  await replay.goto(resetUrl);
+  await expect(replay.getByRole("alert")).toContainText(
+    "Password reset link is invalid or expired",
+  );
+  await replay.close();
+
+  await client.getByRole("link", { name: "Sign in" }).click();
+  await client.getByLabel("Email or mobile").fill(email);
+  await client.getByLabel("Password").fill(firstPassword);
+  await client.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(client.getByRole("alert")).toContainText(
+    "Email or password is incorrect",
+  );
+  await client.getByLabel("Password").fill(replacementPassword);
+  await client.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(client).toHaveURL(/\/portal\/client$/);
+
+  const secondFixture = await seedFnd02(page, testInfo, "ACCESS_MATRIX");
+  const secondOwner = await actorPage(browser, secondFixture.actors.owner);
+  const sharedInvite = await inviteThroughUi(secondOwner.page, {
+    displayName: `Shared Recovery ${suffix}`,
+    employeeCode: `SH-${suffix}`.toUpperCase(),
+    email,
+    portalAudience: "CLIENT",
+    roleName: "Client Viewer",
+    scopePath: "Alpha",
+    actions: ["READ"],
+  });
+  expect(
+    sharedInvite.response.status(),
+    await sharedInvite.response.text(),
+  ).toBe(201);
+  expect(sharedInvite.body.invitationUrl).toMatch(/\/accept-access\?token=/);
+  const sharedContext = await browser.newContext();
+  const shared = await sharedContext.newPage();
+  await shared.goto(String(sharedInvite.body.invitationUrl));
+  await expect(shared.getByLabel("Current password")).toBeVisible();
+  await shared.getByLabel("Display name").fill(`Shared Recovery ${suffix}`);
+  await shared.getByLabel("Current password").fill(replacementPassword);
+  await shared.getByRole("checkbox", { name: /I accept/i }).check();
+  await shared.getByRole("button", { name: "Accept invitation" }).click();
+  await expect(shared).toHaveURL(/\/portal\/client$/);
+
+  await activeDetails
+    .getByRole("button", { name: "Generate password reset link" })
+    .click();
+  await expect(owner.page.locator("main [role=alert]")).toContainText(
+    "multiple workspaces",
+  );
+  await expect(
+    activeDetails.getByLabel("One-time password reset link"),
+  ).toHaveCount(0);
+
+  await sharedContext.close();
+  await secondOwner.context.close();
+  await clientContext.close();
+  await owner.context.close();
+});
+
 test("FND02-X-001: access screens expose keyboard focus, names, errors, dialogs, and status semantics", async ({
   browser,
   page,

@@ -5,6 +5,10 @@ import {
   csvCell,
   inviteAcceptSchema,
   loginSchema,
+  passwordResetCompleteSchema,
+  passwordResetRequestSchema,
+  passwordResetPreviewSchema,
+  adminPasswordResetSchema,
   probeCreateSchema,
   sha256,
   tenantCreateSchema,
@@ -249,5 +253,36 @@ describe("FND02-U-007 invitation and authentication validation", () => {
     expect(() =>
       accessAcceptSchema.parse({ displayName: "User", termsAccepted: true }),
     ).toThrow(/Credentials/);
+  });
+  it("FND02-AUTH-REC-U01 validates generic request and strong matching replacement passwords", () => {
+    expect(
+      passwordResetRequestSchema.parse({
+        identifier: " USER@EXAMPLE.TEST ",
+        tenantCode: "tenant-a",
+      }),
+    ).toEqual({ identifier: "USER@EXAMPLE.TEST", tenantCode: "TENANT-A" });
+    expect(
+      passwordResetCompleteSchema.parse({
+        token: "t".repeat(43),
+        password: "Replacement!234",
+        passwordConfirmation: "Replacement!234",
+      }).password,
+    ).toBe("Replacement!234");
+    expect(() =>
+      passwordResetCompleteSchema.parse({
+        token: "t".repeat(43),
+        password: "Replacement!234",
+        passwordConfirmation: "DifferentPass!234",
+      }),
+    ).toThrow(/Passwords do not match/);
+    expect(
+      adminPasswordResetSchema.parse({
+        expectedVersion: 1,
+        reason: "User requested recovery assistance",
+      }).expiresInHours,
+    ).toBe(1);
+    expect(
+      passwordResetPreviewSchema.parse({ token: "t".repeat(43) }).token,
+    ).toHaveLength(43);
   });
 });

@@ -124,14 +124,14 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 The register above records the canonical backend/contract baseline. A browser-level product audit on 2026-08-25 identified the following user-facing gaps. Implementation completion and test verification are tracked separately; focused Playwright evidence is required only to label a remediation row verified/passing.
 
-| Feature slice                         | Remediation state              | Test state                                                                                 | Remaining product gap                                                                                      |
-| ------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Access UX (`FND-02`)                  | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
+| Feature slice                         | Remediation state   | Test state            | Remaining product gap                                     |
+| ------------------------------------- | ------------------- | --------------------- | --------------------------------------------------------- |
+| Access UX (`FND-02`)                  | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
 | Address UX (`FND-01`, `MST-01/02/03`) | Implemented locally | Implemented / Not Run | Unknown-PIN exception behavior remains a product decision |
-| Masters UX (`MST-01/02/03`, `CFG-01`) | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
-| Operations UX (`OPS-01/02/03`)        | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
-| Finance UX (`FIN-01/02/03`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
-| Control-tower UX (`CTL-01`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
+| Masters UX (`MST-01/02/03`, `CFG-01`) | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
+| Operations UX (`OPS-01/02/03`)        | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
+| Finance UX (`FIN-01/02/03`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
+| Control-tower UX (`CTL-01`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
 
 ### 5.1 Implemented delivery map
 
@@ -241,6 +241,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 3. User accepts invitation, verifies identity, sets up MFA if policy requires it, and lands on a role-appropriate home/work queue.
 4. Admin can suspend access, reset sessions, change scope, and review effective permissions before saving.
 5. Vendor, driver, and client users use limited portals with no access to internal margins, unrelated parties, or unrestricted exports.
+6. The password created during activation is used for every later login. Forgot-password records a generic request for a configured verified-delivery provider; provider-free deployments use a tenant-root copy-once reset link for a single-tenant identity. Successful reset revokes all sessions and reset tokens.
 
 ### Reports and alerts
 
@@ -254,6 +255,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 - Removing scope invalidates active sessions or permission caches immediately.
 - Effective-permission preview matches server authorization for representative create/read/update/export/approve operations.
 - Sensitive fields are masked unless the permission explicitly allows them.
+- Password recovery does not reveal whether an identity exists, stores no plaintext token, denies tenant-admin takeover of a shared cross-tenant identity, and makes every reset URL expiring and single-use.
 
 ### Master prompt for Codex
 

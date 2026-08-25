@@ -4,9 +4,11 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module.js";
 import { isRequestOriginAllowed, loadConfig } from "@logistics/config";
+import { configureLoopbackProxyTrust } from "./network-trust.js";
 
 const config = loadConfig();
 const app = await NestFactory.create(AppModule, { rawBody: false });
+configureLoopbackProxyTrust(app);
 app.setGlobalPrefix("api/v1");
 app.use(cookieParser());
 app.use(

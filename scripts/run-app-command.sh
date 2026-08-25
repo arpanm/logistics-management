@@ -5,7 +5,11 @@ requested_command="${1:?application command is required}"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-if [[ -f .env ]]; then
+if [[ "${APP_ENV:-}" == "production" ]]; then
+  # Production configuration is supplied by the service/deployment environment.
+  # Never replace it with the repository's local PostgreSQL defaults.
+  :
+elif [[ -f .env ]]; then
   set -a
   source .env
   set +a

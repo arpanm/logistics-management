@@ -43,6 +43,8 @@ git checkout --detach "$commit_sha"
 source "$repo_dir/scripts/tooling.sh"
 resolve_pnpm
 
+bash "$repo_dir/scripts/validate-production-env.sh" "$env_file"
+
 set -a
 # shellcheck disable=SC1090
 source "$env_file"
@@ -74,7 +76,7 @@ if [[ ! -r "$POSTAL_DIRECTORY_FILE" ]]; then
 fi
 
 run_pnpm install --frozen-lockfile
-run_pnpm run db:migrate
+run_pnpm --filter @logistics/db run db:migrate
 run_pnpm --filter @logistics/db postal:verify-ownership
 run_pnpm --filter @logistics/db postal:import -- \
   --file "$POSTAL_DIRECTORY_FILE" \

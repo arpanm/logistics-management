@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api, ApiError } from "../../components/api";
 export default function Login() {
   const router = useRouter();
@@ -67,7 +68,6 @@ export default function Login() {
               inputMode="email"
               autoComplete="username"
               required
-              defaultValue="admin@local.test"
             />
           </label>
           <label>
@@ -103,6 +103,9 @@ export default function Login() {
                 : "Sign in"}
           </button>
         </form>
+        <p>
+          <Link href="/forgot-password">Forgot your password?</Link>
+        </p>
       </section>
     </main>
   );

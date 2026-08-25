@@ -167,6 +167,12 @@ export function UsersPage() {
     ),
     [copyStatus, setCopyStatus] = useState(""),
     [activationPending, setActivationPending] = useState(false),
+    [passwordResetLink, setPasswordResetLink] = useState(""),
+    [passwordResetReason, setPasswordResetReason] = useState(
+      "User requested account recovery assistance",
+    ),
+    [passwordResetPending, setPasswordResetPending] = useState(false),
+    [passwordResetStatus, setPasswordResetStatus] = useState(""),
     [accessReason, setAccessReason] = useState(
       "Access updated after administrator review",
     );
@@ -193,9 +199,22 @@ export function UsersPage() {
     );
     return () => window.clearTimeout(timer);
   }, [activationLink]);
+  useEffect(() => {
+    if (!passwordResetLink) return;
+    const timer = window.setTimeout(
+      () => {
+        setPasswordResetLink("");
+        setPasswordResetStatus("Password reset link cleared for security.");
+      },
+      5 * 60 * 1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [passwordResetLink]);
   function closeUser() {
     setActivationLink("");
     setCopyStatus("");
+    setPasswordResetLink("");
+    setPasswordResetStatus("");
     setPreview(null);
     setDetail(null);
     setDossier(null);
@@ -468,6 +487,52 @@ export function UsersPage() {
       input?.focus();
       input?.select();
       setCopyStatus(
+        "Copy was blocked. The link is selected; press Control+C or Command+C.",
+      );
+    }
+  }
+  async function issuePasswordReset() {
+    if (!detail) return;
+    setPasswordResetPending(true);
+    setPasswordResetStatus("");
+    try {
+      const result = await api<{
+        resetUrl?: string;
+        expiresAt: string;
+        replayed?: boolean;
+      }>(`/tenant/access/users/${detail.id}/password-reset`, {
+        method: "POST",
+        headers: { "Idempotency-Key": newKey() },
+        body: JSON.stringify({
+          expectedVersion: detail.version,
+          reason: passwordResetReason,
+          expiresInHours: 1,
+        }),
+      });
+      setPasswordResetLink(result.resetUrl ?? "");
+      setSuccess(
+        result.resetUrl
+          ? "A one-time password reset link was generated. Older reset links are now invalid."
+          : "This request was already processed; its bearer link cannot be displayed again.",
+      );
+    } catch (value) {
+      setError(value as ApiError);
+    } finally {
+      setPasswordResetPending(false);
+    }
+  }
+  async function copyPasswordResetLink() {
+    if (!passwordResetLink) return;
+    try {
+      await navigator.clipboard.writeText(passwordResetLink);
+      setPasswordResetStatus("Password reset link copied.");
+    } catch {
+      const input = document.getElementById(
+        "password-reset-link",
+      ) as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+      setPasswordResetStatus(
         "Copy was blocked. The link is selected; press Control+C or Command+C.",
       );
     }
@@ -1337,6 +1402,72 @@ export function UsersPage() {
               )}
             </section>
           )}
+          {canAdminUsers && detail.status === "ACTIVE" && (
+            <section aria-labelledby="password-recovery-heading">
+              <h3 id="password-recovery-heading">Password recovery</h3>
+              <p className="muted">
+                Generate a one-time link when this active user cannot sign in.
+                The link is shown only once, expires after one hour, and resets
+                the shared login identity across its workspaces. Completing the
+                reset signs that identity out of every active session. For
+                identities active in more than one workspace, administrator link
+                generation is blocked and the user must use self-service
+                recovery from the sign-in page.
+              </p>
+              <label>
+                Reason
+                <input
+                  minLength={10}
+                  value={passwordResetReason}
+                  onChange={(event) =>
+                    setPasswordResetReason(event.target.value)
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                disabled={
+                  passwordResetPending || passwordResetReason.trim().length < 10
+                }
+                onClick={() => void issuePasswordReset()}
+              >
+                {passwordResetPending
+                  ? "Generating…"
+                  : "Generate password reset link"}
+              </button>
+              {passwordResetLink && (
+                <div>
+                  <label htmlFor="password-reset-link">
+                    One-time password reset link
+                  </label>
+                  <input
+                    id="password-reset-link"
+                    readOnly
+                    value={passwordResetLink}
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                  <div className="actions">
+                    <button
+                      type="button"
+                      onClick={() => void copyPasswordResetLink()}
+                    >
+                      Copy password reset link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasswordResetLink("");
+                        setPasswordResetStatus("Password reset link cleared.");
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                  <p role="status">{passwordResetStatus}</p>
+                </div>
+              )}
+            </section>
+          )}
         </section>
       )}
     </Shell>
@@ -2010,6 +2141,10 @@ export function AcceptAccessPage() {
                 </label>
               ) : (
                 <>
+                  <p className="field-help">
+                    Create a password you will remember. It is not sent or
+                    shared by the platform and will be required after logout.
+                  </p>
                   <label>
                     Create password
                     <input

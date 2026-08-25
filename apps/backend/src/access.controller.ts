@@ -15,6 +15,7 @@ import type { Request, Response } from "express";
 import { ZodError, z } from "zod";
 import {
   accessAcceptSchema,
+  adminPasswordResetSchema,
   accessInviteSchema,
   accessLifecycleSchema,
   accessMutationSchema,
@@ -286,6 +287,27 @@ export class AccessController {
     return this.run(res, req, async () =>
       this.access.userDetail(await this.actor(req), id, requestId(req)),
     );
+  }
+  @Post("tenant/access/users/:id/password-reset")
+  passwordReset(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      return this.access.issuePasswordReset(
+        actor,
+        id,
+        adminPasswordResetSchema.parse(body),
+        key,
+        requestId(req),
+      );
+    });
   }
   @Post("tenant/access/users/:id/preview")
   preview(

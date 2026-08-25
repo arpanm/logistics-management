@@ -6,13 +6,13 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                                                                         |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                                                                                       |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                     |
-| Automated feature tests           | Implemented / Not Run for the rapid remediation tree; execution is deferred to an explicitly requested batch/release test phase                            |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                           |
-| Feature implementation            | Canonical backend and product-UX remediation complete; external adoption decisions remain in `TODO.md`                                                         |
+| Item                              | Status                                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                                        |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                      |
+| Automated feature tests           | Implemented / Not Run for the rapid remediation tree; execution is deferred to an explicitly requested batch/release test phase |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                            |
+| Feature implementation            | Canonical backend and product-UX remediation complete; external adoption decisions remain in `TODO.md`                          |
 
 Agents synchronize this summary, `FEATURES.md`, `TODO.md`, affected specs, and executable test-case status once per implementation batch. New or changed tests remain `Implemented / Not Run` until an explicitly requested batch/release test phase executes them.
 
@@ -28,16 +28,16 @@ The implementation includes normalized canonical stores and actionable workbench
 | MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | PIN-derived client locations, searchable references, versioned contracts, lanes, SLA rules, and effective rate cards                                                                |
 | MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | PIN-derived vendor/driver addresses, configured truck/body/cargo catalogs, compliance, eligibility, secure bank versions, and overrides                                             |
 | OPS-01  | `/app/operations`, `/app/operations/indents`                                                            | Searchable open-indent dashboard with create/update/allocate CTAs, snapshots, cancellation, lifecycle, reports, and alerts                                                          |
-| OPS-02  | `/app/operations/allocations`                                                                           | Allocation queue, scoped vendor eligibility reasons, manual allocation, and auto-allocation rule create/preview/execute/disable                                                      |
+| OPS-02  | `/app/operations/allocations`                                                                           | Allocation queue, scoped vendor eligibility reasons, manual allocation, and auto-allocation rule create/preview/execute/disable                                                     |
 | OPS-03  | `/app/operations/trips`, `/portal/driver`                                                               | Trip creation and actionable accept/start/load/transit/unload/end queues plus immutable milestone and offline/GPS evidence                                                          |
 | DOC-01  | `/app/pod`, governed evidence panels                                                                    | POD tasks, review/submission, secure versioned documents, scoped downloads, ageing, and value-at-risk                                                                               |
-| FIN-01  | `/app/finance`, `/app/finance/invoices`                                                                 | Unbilled and invoice queues with exact minor-unit creation, approve/post/acknowledge/reverse CTAs                                                                                    |
+| FIN-01  | `/app/finance`, `/app/finance/invoices`                                                                 | Unbilled and invoice queues with exact minor-unit creation, approve/post/acknowledge/reverse CTAs                                                                                   |
 | FIN-02  | `/app/finance/receipts`                                                                                 | Collection-priority and unallocated-receipt queues, follow-ups, allocation ledger, reconciliation, reversal, and balances                                                           |
 | FIN-03  | `/app/finance/vendor-bills`                                                                             | Vendor unbilled/bill/payment-run queues, maker/checker controls, verified-bank enforcement, disputes, deductions, and reversals                                                     |
-| CTL-01  | `/app/control`                                                                                          | Placement/POD/collection/trip/payable lenses with KPIs, G/Y/R search, hierarchy drill, ageing, saved filters, visible CSV, record links, and freshness                               |
+| CTL-01  | `/app/control`                                                                                          | Placement/POD/collection/trip/payable lenses with KPIs, G/Y/R search, hierarchy drill, ageing, saved filters, visible CSV, record links, and freshness                              |
 | ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts                                                          |
 | DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation                                                             |
-| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Structured policy administration plus documents, visibility-aware comments, role-sequenced approvals, immutable audit, and segregation                                             |
+| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Structured policy administration plus documents, visibility-aware comments, role-sequenced approvals, immutable audit, and segregation                                              |
 | INT-01  | `/app/integrations`                                                                                     | API clients, credential rotation, signed webhooks, mapping versions, delivery attempts, dead letters, and replay                                                                    |
 | CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds                                                                        |
 
@@ -136,9 +136,11 @@ Local `make deploy-local` applies migrations and runs the deterministic seed. Un
 | Email    | `admin@local.test`      |
 | Password | `LocalAdmin!234`        |
 
-This is the **Platform Admin** account used to provision and manage tenants. It is not a Tenant Owner account. Each tenant's first Tenant Owner sets their own credentials through the invitation created during tenant provisioning; Vendor, Driver, Client, and employee users likewise use their individual invitation credentials.
+This is the **Platform Admin** account used to provision and manage tenants. It is not a Tenant Owner account. Each tenant's first Tenant Owner sets their own password through the invitation created during tenant provisioning; Vendor, Driver, Client, and employee users do the same. The password is never emailed or displayed later: after logout, the user signs in with the invitation email/mobile and the password they created.
 
-Local and default self-hosted adapters do not send real email. If the initial owner link is missed, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link. After activation, the Tenant Owner manages users, roles, scopes, invitation resend/revoke, suspension, MFA, and session resets at `/app/access/users`; Platform Admin does not impersonate tenant administrators.
+Local and default self-hosted adapters do not send real email. If the initial owner link is missed, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link. After activation, the Tenant Owner manages users, roles, scopes, invitation resend/revoke, suspension, MFA, sessions, and password recovery at `/app/access/users`; Platform Admin does not impersonate tenant administrators.
+
+An activated user who forgets their password selects **Forgot your password?** at `/login`. The public request always returns the same non-enumerating response and records a rate-limited delivery request; the current provider-free deployment does not claim that email or SMS was sent. A tenant-root identity administrator can instead open the active user in `/app/access/users`, enter an audit reason, select **Generate password reset link**, and copy the one-time link through a trusted channel. Administrator-copy recovery is intentionally blocked for identities active in multiple tenants because changing their shared platform password would affect every workspace; those users require a configured verified delivery provider. Completing any reset invalidates the link, changes the password, and signs the identity out of every active session.
 
 `make deploy-local` reseeds the Platform Admin and therefore resets its password to the current `PLATFORM_ADMIN_PASSWORD` value in `.env`. Never use the committed local default in AWS or any shared environment.
 
@@ -217,19 +219,78 @@ The default VPC is adequate for this first deployment. Create:
 ### 4. Create PostgreSQL RDS
 
 1. RDS → Create database → Standard create → PostgreSQL.
-2. Choose the Free-Tier-marked template/class, Single-AZ, 20 GiB `gp3`, database name `logistics`, and a generated master password.
+2. Choose the Free-Tier-marked template/class, Single-AZ, 20 GiB `gp3`, and a generated master password. Under **Additional configuration**, set **Initial database name** to `logistics`. The DB instance identifier (for example `database-1`) is not the PostgreSQL database name.
 3. Place it in the same VPC, attach `logistics-rds-sg`, disable public access, enable deletion protection, automated backups, and encryption at rest.
-4. Record the private RDS endpoint. Application connections use TLS (`sslmode=require`; use `verify-full` with the RDS CA bundle for stricter certificate verification).
+4. Record the exact private RDS **Endpoint** from **Connectivity & security** (for example `database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com`) and port `5432`. The “Connected compute resources” panel confirms security-group routing only; it does not configure the application's database URL.
 
-After EC2 exists, connect through Session Manager and create separate non-master runtime and postal-import roles. Use different generated passwords; the backend never receives the importer credential:
+After EC2 exists, connect through Session Manager and verify DNS/network/TLS from that EC2 instance. Keep the download URL and `export` on separate commands; the correct CA URL ends in `.pem`, not `.pemexport`:
+
+```bash
+curl -fsSLo /tmp/aws-rds-global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+sudo install -o root -g root -m 0644 \
+  /tmp/aws-rds-global-bundle.pem /etc/ssl/certs/aws-rds-global-bundle.pem
+rm -f /tmp/aws-rds-global-bundle.pem
+sudo test -r /etc/ssl/certs/aws-rds-global-bundle.pem
+sudo -u logistics test -r /etc/ssl/certs/aws-rds-global-bundle.pem
+ls -l /etc/ssl/certs/aws-rds-global-bundle.pem
+
+export RDSHOST='database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com'
+getent hosts "$RDSHOST"
+pg_isready -h "$RDSHOST" -p 5432 -t 10
+```
+
+Replace the example endpoint with the exact endpoint from your RDS console. `pg_isready` should report `accepting connections`. If it times out, then inspect VPC/security-group/routing; if it succeeds, networking is working and any later failure is credentials, database name, TLS, or application configuration.
+
+Connect as the RDS master user with certificate verification. The console's sample command uses the default `postgres` database; first confirm whether the required application database exists:
+
+```bash
+read -rsp 'RDS master password: ' PGPASSWORD; echo
+export PGPASSWORD
+psql "host=$RDSHOST port=5432 dbname=postgres user=postgres sslmode=verify-full sslrootcert=/etc/ssl/certs/aws-rds-global-bundle.pem" -v ON_ERROR_STOP=1 -c "SELECT current_database(), current_user, inet_server_addr();"
+psql "host=$RDSHOST port=5432 dbname=postgres user=postgres sslmode=verify-full sslrootcert=/etc/ssl/certs/aws-rds-global-bundle.pem" -tAc "SELECT datname FROM pg_database WHERE datname='logistics';"
+```
+
+Run these as literal shell commands, not as Markdown-escaped text: do not add a standalone `\`, do not change a line continuation to `\\`, and use `pg_database` rather than `pg\_database`. The one-line `psql` commands above avoid line-continuation copy errors.
+
+If the second command prints nothing because **Initial database name** was left blank, create it once:
+
+```bash
+createdb --maintenance-db="host=$RDSHOST port=5432 dbname=postgres user=postgres sslmode=verify-full sslrootcert=/etc/ssl/certs/aws-rds-global-bundle.pem" logistics
+```
+
+Then connect to `logistics` and create separate non-master runtime and postal-import roles. The block is safe to repeat. Use PostgreSQL's interactive `\password` command afterward so credentials do not enter SQL history; the backend never receives the importer credential:
 
 ```sql
-CREATE ROLE logistics_postal_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-CREATE ROLE logistics_app LOGIN PASSWORD 'GENERATE_A_LONG_UNIQUE_PASSWORD';
-CREATE ROLE logistics_postal_importer LOGIN PASSWORD 'GENERATE_A_DIFFERENT_LONG_PASSWORD'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+DO $roles$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'logistics_postal_owner') THEN
+    CREATE ROLE logistics_postal_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'logistics_app') THEN
+    CREATE ROLE logistics_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'logistics_postal_importer') THEN
+    CREATE ROLE logistics_postal_importer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+  END IF;
+END
+$roles$;
+ALTER ROLE logistics_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT;
+ALTER ROLE logistics_postal_importer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 GRANT CONNECT, TEMPORARY, CREATE ON DATABASE logistics TO logistics_app;
 GRANT CONNECT ON DATABASE logistics TO logistics_postal_importer;
+\password logistics_app
+\password logistics_postal_importer
+```
+
+Use two different generated passwords. Hexadecimal output from `openssl rand -hex 32` is already URL-safe; otherwise percent-encode special characters before placing a password in a PostgreSQL URL. A Prisma `P1000` error means the URL password does not match the role password (or the login role is absent), not that RDS networking or TLS failed.
+
+Run the SQL through the verified master connection from the EC2 Session Manager shell (the prompt should resemble `ubuntu@ip-172-31-...`), not from a local macOS/zsh terminal. The RDS endpoint is private to the VPC. Then clear the master password:
+
+```bash
+psql "host=$RDSHOST port=5432 dbname=logistics user=postgres sslmode=verify-full sslrootcert=/etc/ssl/certs/aws-rds-global-bundle.pem" \
+  -v ON_ERROR_STOP=1
+unset PGPASSWORD
 ```
 
 ### 5. Create and bootstrap EC2
@@ -285,7 +346,26 @@ sudo systemctl daemon-reload
 sudo systemctl enable logistics-backend.service logistics-frontend.service
 ```
 
-Set `FRONTEND_URL` to the final HTTPS origin, keep `BACKEND_URL=http://127.0.0.1:4000`, set `APP_ENV=production`, keep `ENABLE_TEST_HOOKS=false`, URL-encode both database passwords, and use the private RDS endpoint in `DATABASE_URL` and `POSTAL_IMPORT_DATABASE_URL`. The two URLs must use `logistics_app` and `logistics_postal_importer` respectively.
+Set `FRONTEND_URL` to the final HTTPS origin, keep `BACKEND_URL=http://127.0.0.1:4000`, set `APP_ENV=production`, keep `ENABLE_TEST_HOOKS=false`, URL-encode both database passwords, and use the private RDS endpoint in `DATABASE_URL` and `POSTAL_IMPORT_DATABASE_URL`. The two URLs must use `logistics_app` and `logistics_postal_importer` respectively. Do not copy `.env.example`, because it contains local `127.0.0.1` database URLs.
+
+For the endpoint shown in the example above, the relevant lines would have this shape (replace both encoded passwords):
+
+```dotenv
+DATABASE_URL='postgresql://logistics_app:ENCODED_RUNTIME_PASSWORD@database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com:5432/logistics?schema=app&sslmode=require&sslcert=/etc/ssl/certs/aws-rds-global-bundle.pem&sslaccept=strict'
+POSTAL_IMPORT_DATABASE_URL='postgresql://logistics_postal_importer:ENCODED_IMPORT_PASSWORD@database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com:5432/logistics?schema=app&sslmode=require&sslcert=/etc/ssl/certs/aws-rds-global-bundle.pem&sslaccept=strict'
+SSL_CERT_FILE=/etc/ssl/certs/aws-rds-global-bundle.pem
+```
+
+Prisma uses `sslcert` for the server CA file, whereas `psql`/libpq uses `sslrootcert`. `SSL_CERT_FILE` also supplies the CA to Prisma's migration/runtime OpenSSL process. Keep `sslaccept=strict`; do not use `sslmode=no-verify` in production.
+
+The file is sourced by Bash. Every comment must start with `#`; `:#` is treated as a command and causes `:#: command not found`. Keep URLs/secrets inside single quotes, do not add spaces around `=`, and do not paste Markdown formatting into the file. Validate the file before any install/migration/build command:
+
+```bash
+sudo -u logistics /opt/logistics-management/scripts/validate-production-env.sh \
+  /etc/logistics-management.env
+```
+
+The validator reports the malformed line without printing secrets and rejects `localhost`, `127.0.0.1`, placeholder endpoints, incorrect database users, missing TLS verification, and an incorrect database name.
 
 Download the current authorized **All India Pincode Directory** CSV from the Department of Posts/Open Government Data catalog on an administrator workstation, review its license/source metadata, compute SHA-256, and copy the exact file to the protected path configured by `POSTAL_DIRECTORY_FILE` (the example uses `/opt/logistics-secrets/india-post-pincode-directory.csv`). Do not commit it and do not let the application download it at runtime.
 
@@ -313,7 +393,8 @@ logistics ALL=(root) NOPASSWD: /usr/bin/systemctl restart logistics-backend.serv
 Before the first seed, replace `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` in `/etc/logistics-management.env`. Use a real operations mailbox and a unique password of at least 12 characters; production startup rejects the committed local password. Then apply migrations as the application role. Using a temporary RDS-master connection that is never written to the application environment, perform the one-time idempotent ownership handoff; this moves the reference tables and guard into `postal_reference`, owned by the NOLOGIN role, so the runtime cannot disable the immutability controls.
 
 ```bash
-sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && pnpm run db:migrate'
+sudo -u logistics /opt/logistics-management/scripts/validate-production-env.sh /etc/logistics-management.env
+sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && corepack pnpm run db:migrate'
 
 # Run interactively from the Session Manager shell. Do not save the master URL.
 read -rsp 'RDS master PostgreSQL URL: ' RDS_MASTER_URL; echo
@@ -323,6 +404,12 @@ unset RDS_MASTER_URL
 
 sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && pnpm --filter @logistics/db postal:verify-ownership && pnpm --filter @logistics/db postal:import -- --file "$POSTAL_DIRECTORY_FILE" --version "$POSTAL_DIRECTORY_VERSION" --sha256 "$POSTAL_DIRECTORY_SHA256" --source-name "$POSTAL_DIRECTORY_SOURCE_NAME" --source-uri "$POSTAL_DIRECTORY_SOURCE_URI" --imported-by "$POSTAL_DIRECTORY_IMPORTED_BY" --activate true && pnpm run build && pnpm run db:seed'
 sudo systemctl start logistics-backend.service logistics-frontend.service
+```
+
+`APP_ENV=production` makes the workspace command wrapper preserve the variables sourced from `/etc/logistics-management.env`; it must never reload the repository's local `.env`, whose PostgreSQL host is normally `127.0.0.1`. On an older checkout that predates this protection, bypass the wrapper for the migration:
+
+```bash
+sudo -u logistics bash -lc 'set -euo pipefail; cd /opt/logistics-management; set -a; source /etc/logistics-management.env; set +a; corepack pnpm --filter @logistics/db run db:migrate'
 ```
 
 The handoff is required once for a blank RDS database and is safe to repeat. Recurring GitHub deployments verify ownership and stop before import/restart if it is missing; they do not require or store the RDS master password.

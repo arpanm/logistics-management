@@ -5,9 +5,16 @@ import { tenantCreateSchema } from "@logistics/domain";
 import { withPlatform, withTenant } from "@logistics/db";
 import { NestFactory } from "@nestjs/core";
 import type { INestApplication } from "@nestjs/common";
+import type {
+  NextFunction,
+  Request as ExpressRequest,
+  Response as ExpressResponse,
+} from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import { AppModule } from "../src/app.module.js";
+import { createHash, createHmac } from "node:crypto";
+import { configureLoopbackProxyTrust } from "../src/network-trust.js";
 
 const tenantInput = (code: string, owner: string) =>
   tenantCreateSchema.parse({
@@ -56,6 +63,7 @@ describe.sequential(
     let regionalRole = "",
       regionalMembership = "",
       regionalToken = "";
+    let sharedRecoveryMembership = "";
     let regional: Awaited<ReturnType<AppService["session"]>>;
     let northProbe = "",
       southProbe = "";
@@ -141,6 +149,18 @@ describe.sequential(
         );
       });
       http = await NestFactory.create(AppModule, { logger: false });
+      configureLoopbackProxyTrust(http);
+      http.use(
+        (req: ExpressRequest, _res: ExpressResponse, next: NextFunction) => {
+          const simulated = req.headers["x-test-remote-address"];
+          if (typeof simulated === "string")
+            Object.defineProperty(req.socket, "remoteAddress", {
+              configurable: true,
+              value: simulated,
+            });
+          next();
+        },
+      );
       http.setGlobalPrefix("api/v1");
       http.use(cookieParser());
       await http.init();
@@ -152,8 +172,8 @@ describe.sequential(
 
     it("FND02-M-001: clean migration and runtime provisioning create deterministic owner authorization", async () => {
       await expect(app.ready()).resolves.toMatchObject({
-        latestMigration: "202608250021_mst01_exception_scope_reconciliation",
-        migrationCount: 20,
+        latestMigration: "202608250025_password_recovery",
+        migrationCount: 24,
       });
       const facts = await withTenant(app.db, tenantA, (tx) =>
         tx.$queryRawUnsafe<
@@ -1634,6 +1654,568 @@ describe.sequential(
           "fnd02-final-owner",
         ),
       ).rejects.toMatchObject({ code: "FINAL_OWNER_REQUIRED" });
+    });
+
+    it("FND02-AUTH-REC-001: self-service recovery is non-enumerating, HMAC-limited and records unavailable delivery honestly", async () => {
+      const known = await app.requestPasswordReset(
+        "fnd02-owner-a@test.local",
+        "FND02-A",
+        "service-known-source",
+        "fnd02-password-request-known",
+      );
+      const unknown = await app.requestPasswordReset(
+        "missing-user@test.local",
+        "FND02-A",
+        "service-unknown-source",
+        "fnd02-password-request-unknown",
+      );
+      expect(known).toEqual(unknown);
+      const httpKnown = await request(http.getHttpServer())
+        .post("/api/v1/auth/password-reset/request")
+        .send({ identifier: "fnd02-owner-a@test.local", tenantCode: "FND02-A" })
+        .expect("Cache-Control", /no-store/)
+        .expect(200);
+      const httpUnknown = await request(http.getHttpServer())
+        .post("/api/v1/auth/password-reset/request")
+        .send({
+          identifier: "another-missing-user@test.local",
+          tenantCode: "FND02-A",
+        })
+        .expect("Cache-Control", /no-store/)
+        .expect(200);
+      expect(httpKnown.body).toEqual(httpUnknown.body);
+      expect(httpKnown.body.message).toContain("recovery request was recorded");
+      for (const suffix of ["second", "third", "throttled"])
+        await expect(
+          app.requestPasswordReset(
+            "fnd02-owner-a@test.local",
+            "FND02-A",
+            "service-known-source",
+            `fnd02-password-request-${suffix}`,
+          ),
+        ).resolves.toEqual(known);
+      const limiterRows = () =>
+        withPlatform(app.db, (tx) =>
+          tx.$queryRawUnsafe<Array<{ kind: string; count: number }>>(
+            `SELECT bucket_kind AS kind,count(*)::int count
+             FROM app.password_reset_request_limits
+             GROUP BY bucket_kind`,
+          ),
+        );
+      const countKind = (
+        rows: Array<{ kind: string; count: number }>,
+        kind: string,
+      ) => rows.find((row) => row.kind === kind)?.count ?? 0;
+      const sourceLimiterKey = (source: string) =>
+        createHmac("sha256", app.config.AUTH_SECRET)
+          .update(`password-reset\0source\0${source}`)
+          .digest("hex");
+
+      const beforeServiceSpray = await limiterRows();
+      for (let index = 0; index < 25; index += 1)
+        await expect(
+          app.requestPasswordReset(
+            `service-spray-${index}@missing.test`,
+            "FND02-A",
+            "198.51.100.41",
+            `fnd02-password-service-spray-${index}`,
+          ),
+        ).resolves.toEqual(known);
+      const afterServiceSpray = await limiterRows();
+      expect(
+        countKind(afterServiceSpray, "IDENTIFIER") -
+          countKind(beforeServiceSpray, "IDENTIFIER"),
+      ).toBeLessThanOrEqual(20);
+      expect(
+        countKind(afterServiceSpray, "SOURCE") -
+          countKind(beforeServiceSpray, "SOURCE"),
+      ).toBeLessThanOrEqual(2);
+
+      const beforeHttpSpray = await limiterRows();
+      for (let index = 0; index < 25; index += 1) {
+        const response = await request(http.getHttpServer())
+          .post("/api/v1/auth/password-reset/request")
+          // The left value is attacker-supplied; the right value represents the
+          // address observed and appended by the trusted loopback proxy.
+          .set("X-Forwarded-For", `203.0.113.${index + 1}, 198.51.100.77`)
+          .send({
+            identifier: `http-spray-${index}@missing.test`,
+            tenantCode: "FND02-A",
+          })
+          .expect("Cache-Control", /no-store/)
+          .expect(200);
+        expect(response.body).toEqual(httpKnown.body);
+      }
+      const afterHttpSpray = await limiterRows();
+      expect(
+        countKind(afterHttpSpray, "IDENTIFIER") -
+          countKind(beforeHttpSpray, "IDENTIFIER"),
+      ).toBeLessThanOrEqual(20);
+      expect(
+        countKind(afterHttpSpray, "SOURCE") -
+          countKind(beforeHttpSpray, "SOURCE"),
+      ).toBeLessThanOrEqual(2);
+
+      const beforeOtherProxyClient = await limiterRows();
+      const otherProxyClient = await request(http.getHttpServer())
+        .post("/api/v1/auth/password-reset/request")
+        .set("X-Forwarded-For", "198.51.100.78")
+        .send({
+          identifier: "other-proxy-client@missing.test",
+          tenantCode: "FND02-A",
+        })
+        .expect(200);
+      expect(otherProxyClient.body).toEqual(httpKnown.body);
+      const afterOtherProxyClient = await limiterRows();
+      expect(
+        countKind(afterOtherProxyClient, "IDENTIFIER") -
+          countKind(beforeOtherProxyClient, "IDENTIFIER"),
+      ).toBe(1);
+
+      const directNonProxy = await request(http.getHttpServer())
+        .post("/api/v1/auth/password-reset/request")
+        .set("X-Test-Remote-Address", "192.0.2.45")
+        .set("X-Forwarded-For", "203.0.113.250")
+        .send({
+          identifier: "direct-non-proxy@missing.test",
+          tenantCode: "FND02-A",
+        })
+        .expect(200);
+      expect(directNonProxy.body).toEqual(httpKnown.body);
+      const sourceEvidence = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<Array<{ keyHash: string; attempts: number }>>(
+          `SELECT key_hash AS "keyHash",sum(attempts)::int attempts
+           FROM app.password_reset_request_limits
+           WHERE bucket_kind='SOURCE' AND key_hash=ANY($1::text[])
+           GROUP BY key_hash`,
+          [
+            sourceLimiterKey("198.51.100.77"),
+            sourceLimiterKey("198.51.100.78"),
+            sourceLimiterKey("192.0.2.45"),
+            sourceLimiterKey("203.0.113.1"),
+            sourceLimiterKey("203.0.113.250"),
+          ],
+        ),
+      );
+      const attemptsFor = (source: string) =>
+        sourceEvidence.find((row) => row.keyHash === sourceLimiterKey(source))
+          ?.attempts ?? 0;
+      expect(attemptsFor("198.51.100.77")).toBe(25);
+      expect(attemptsFor("198.51.100.78")).toBe(1);
+      expect(attemptsFor("192.0.2.45")).toBe(1);
+      expect(attemptsFor("203.0.113.1")).toBe(0);
+      expect(attemptsFor("203.0.113.250")).toBe(0);
+      const evidence = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{
+            tokenHash: string;
+            tokenEnvelope: string;
+            outboxCount: number;
+            totalRequests: number;
+            liveTokens: number;
+            eventState: string;
+          }>
+        >(
+          `SELECT r.token_hash AS "tokenHash",r.token_envelope AS "tokenEnvelope",
+             (SELECT count(*)::int FROM app.outbox_events o
+              WHERE o.tenant_id=r.tenant_id AND o.aggregate_id=r.id
+                AND o.event_type='identity.password_reset.recorded.v1') AS "outboxCount"
+             ,(SELECT count(*)::int FROM app.password_reset_tokens x
+               WHERE x.user_id=r.user_id AND x.request_source='SELF_SERVICE'
+                 AND x.created_at>now()-interval '15 minutes') AS "totalRequests"
+             ,(SELECT count(*)::int FROM app.password_reset_tokens x
+               WHERE x.user_id=r.user_id AND x.used_at IS NULL
+                 AND x.revoked_at IS NULL AND x.expires_at>now()) AS "liveTokens"
+             ,(SELECT state FROM app.outbox_events o
+               WHERE o.aggregate_id=r.id
+                 AND o.event_type='identity.password_reset.recorded.v1') AS "eventState"
+           FROM app.password_reset_tokens r
+           WHERE r.tenant_id=$1::uuid AND r.membership_id=$2::uuid
+             AND r.request_source='SELF_SERVICE' ORDER BY r.created_at DESC LIMIT 1`,
+          tenantA,
+          ownerMembership,
+        ),
+      );
+      expect(evidence[0]?.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(evidence[0]?.tokenEnvelope.split(".")).toHaveLength(3);
+      expect(evidence[0]?.tokenEnvelope).not.toContain(
+        "fnd02-owner-a@test.local",
+      );
+      expect(evidence[0]?.outboxCount).toBe(1);
+      expect(evidence[0]?.totalRequests).toBe(3);
+      expect(evidence[0]?.liveTokens).toBe(3);
+      expect(evidence[0]?.eventState).toBe("RECORDED");
+      const crossTenantTokens = await withTenant(app.db, tenantB, (tx) =>
+        tx.$queryRawUnsafe<Array<{ count: number }>>(
+          `SELECT count(*)::int count FROM app.password_reset_tokens
+           WHERE membership_id=$1::uuid`,
+          ownerMembership,
+        ),
+      );
+      expect(crossTenantTokens[0]?.count).toBe(0);
+      const limiter = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{ bucketKind: string; keyHash: string; attempts: number }>
+        >(
+          `SELECT bucket_kind AS "bucketKind",key_hash AS "keyHash",
+             sum(attempts)::int attempts
+           FROM app.password_reset_request_limits
+           GROUP BY bucket_kind,key_hash ORDER BY attempts DESC`,
+        ),
+      );
+      expect(limiter.some((row) => row.attempts >= 4)).toBe(true);
+      expect(new Set(limiter.map((row) => row.bucketKind))).toEqual(
+        new Set(["GLOBAL", "SOURCE", "IDENTIFIER"]),
+      );
+      expect(limiter.every((row) => /^[a-f0-9]{64}$/.test(row.keyHash))).toBe(
+        true,
+      );
+      expect(JSON.stringify(limiter)).not.toContain("fnd02-owner-a@test.local");
+      const databaseContract = await app.db.$queryRawUnsafe<
+        Array<{
+          name: string;
+          rls: boolean;
+          forced: boolean;
+          policies: number;
+          trigger: boolean;
+          runtimeGrant: boolean;
+        }>
+      >(
+        `SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,
+           (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid=c.oid) AS policies,
+           EXISTS(SELECT 1 FROM pg_trigger g WHERE g.tgrelid=c.oid
+             AND g.tgname='password_reset_membership_validate' AND NOT g.tgisinternal)
+           AND EXISTS(SELECT 1 FROM pg_trigger g
+             JOIN pg_class membership_table ON membership_table.oid=g.tgrelid
+             JOIN pg_namespace membership_schema ON membership_schema.oid=membership_table.relnamespace
+             WHERE membership_schema.nspname='app'
+               AND membership_table.relname='tenant_memberships'
+               AND g.tgname='tenant_membership_identity_version'
+               AND NOT g.tgisinternal) AS trigger,
+           has_table_privilege('logistics_app',format('app.%I',c.relname),'SELECT,INSERT,UPDATE,DELETE') AS "runtimeGrant"
+         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='app' AND c.relname IN ('password_reset_tokens','password_reset_request_limits')
+         ORDER BY c.relname`,
+      );
+      expect(databaseContract).toEqual([
+        {
+          name: "password_reset_request_limits",
+          rls: true,
+          forced: true,
+          policies: 1,
+          trigger: false,
+          runtimeGrant: true,
+        },
+        {
+          name: "password_reset_tokens",
+          rls: true,
+          forced: true,
+          policies: 1,
+          trigger: true,
+          runtimeGrant: true,
+        },
+      ]);
+      const tenantVisibleLimits = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<Array<{ count: number }>>(
+          `SELECT count(*)::int count FROM app.password_reset_request_limits`,
+        ),
+      );
+      expect(tenantVisibleLimits[0]?.count).toBe(0);
+      const membershipBackfill = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<Array<{ count: number }>>(
+          `SELECT count(*)::int count FROM app.users WHERE membership_version<1`,
+        ),
+      );
+      expect(membershipBackfill[0]?.count).toBe(0);
+    });
+
+    it("FND02-AUTH-REC-002: tenant-admin reset is root-authorized, copy-once and denied for a cross-tenant identity", async () => {
+      const ownerBefore = (await access.userDetail(
+        owner,
+        ownerMembership,
+        "fnd02-reset-shared-detail",
+      )) as Record<string, unknown>;
+      const userId = String(
+        (
+          await withPlatform(app.db, (tx) =>
+            tx.$queryRawUnsafe<Array<{ id: string }>>(
+              `SELECT user_id AS id FROM app.tenant_memberships
+               WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+              tenantA,
+              ownerMembership,
+            ),
+          )
+        )[0]!.id,
+      );
+      const sharedMembership = String(
+        (
+          await withPlatform(app.db, (tx) =>
+            tx.$queryRawUnsafe<Array<{ id: string }>>(
+              `INSERT INTO app.tenant_memberships(
+                 tenant_id,user_id,invited_email,invited_name,employee_code,
+                 portal_audience,status
+               ) VALUES($1::uuid,$2::uuid,'fnd02-owner-a@test.local',
+                 'Shared recovery identity','SHARED-RECOVERY','INTERNAL','ACTIVE')
+               RETURNING id`,
+              tenantB,
+              userId,
+            ),
+          )
+        )[0]!.id,
+      );
+      sharedRecoveryMembership = sharedMembership;
+      await expect(
+        access.issuePasswordReset(
+          owner,
+          sharedMembership,
+          {
+            expectedVersion: 1,
+            reason: "Attempted cross-tenant recovery",
+            expiresInHours: 1,
+          },
+          "fnd02-reset-cross-tenant",
+          "fnd02-reset-cross-tenant",
+        ),
+      ).rejects.toMatchObject({ status: 404, code: "RESOURCE_NOT_FOUND" });
+      await expect(
+        access.issuePasswordReset(
+          owner,
+          ownerMembership,
+          {
+            expectedVersion: Number(ownerBefore.version),
+            reason: "User requested recovery assistance",
+            expiresInHours: 1,
+          },
+          "fnd02-reset-shared",
+          "fnd02-reset-shared",
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        code: "SHARED_IDENTITY_SELF_SERVICE_REQUIRED",
+      });
+      await withPlatform(app.db, (tx) =>
+        tx.$executeRawUnsafe(
+          `UPDATE app.tenant_memberships SET status='SUSPENDED',updated_at=now(),version=version+1
+           WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+          tenantB,
+          sharedMembership,
+        ),
+      );
+      const detail = (await access.userDetail(
+        owner,
+        ownerMembership,
+        "fnd02-reset-owner-detail",
+      )) as Record<string, unknown>;
+      const issued = await access.issuePasswordReset(
+        owner,
+        ownerMembership,
+        {
+          expectedVersion: Number(detail.version),
+          reason: "User requested recovery assistance",
+          expiresInHours: 1,
+        },
+        "fnd02-reset-admin-copy",
+        "fnd02-reset-admin-copy",
+      );
+      expect(issued.resetUrl).toMatch(/\/reset-password#token=/);
+      await withPlatform(app.db, (tx) =>
+        tx.$executeRawUnsafe(
+          `UPDATE app.tenant_memberships SET status='ACTIVE',updated_at=now(),version=version+1
+           WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+          tenantB,
+          sharedMembership,
+        ),
+      );
+      await expect(
+        app.passwordResetPreview(String(issued.resetUrl).split("token=")[1]!),
+      ).rejects.toMatchObject({ code: "PASSWORD_RESET_INVALID" });
+      await withPlatform(app.db, (tx) =>
+        tx.$executeRawUnsafe(
+          `UPDATE app.tenant_memberships SET status='SUSPENDED',updated_at=now(),version=version+1
+           WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+          tenantB,
+          sharedMembership,
+        ),
+      );
+      const replay = await access.issuePasswordReset(
+        owner,
+        ownerMembership,
+        {
+          expectedVersion: Number(detail.version),
+          reason: "User requested recovery assistance",
+          expiresInHours: 1,
+        },
+        "fnd02-reset-admin-copy",
+        "fnd02-reset-admin-copy-replay",
+      );
+      expect(replay).toMatchObject({ replayed: true });
+      expect(replay.resetUrl).toBeUndefined();
+    });
+
+    it("FND02-AUTH-REC-003: reset token is single-use, rotates credentials and revokes every session", async () => {
+      const detail = (await access.userDetail(
+        owner,
+        ownerMembership,
+        "fnd02-reset-complete-detail",
+      )) as Record<string, unknown>;
+      const issued = await access.issuePasswordReset(
+        owner,
+        ownerMembership,
+        {
+          expectedVersion: Number(detail.version),
+          reason: "User requested a replacement password",
+          expiresInHours: 1,
+        },
+        "fnd02-reset-complete",
+        "fnd02-reset-complete",
+      );
+      const resetToken = String(issued.resetUrl).split("token=")[1]!;
+      expect(String(issued.resetUrl)).toContain("#token=");
+      const secretStorage = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{ payloads: unknown; audits: unknown; responses: unknown }>
+        >(
+          `SELECT
+             (SELECT jsonb_agg(payload) FROM app.outbox_events
+              WHERE aggregate_type='password_reset') AS payloads,
+             (SELECT jsonb_agg(after_json) FROM audit.audit_events
+              WHERE action LIKE 'auth.password_reset.%'
+                 OR action LIKE 'identity.password_reset.%') AS audits,
+             (SELECT jsonb_agg(response_json) FROM app.idempotency_records
+              WHERE operation LIKE 'access.password-reset:%') AS responses`,
+        ),
+      );
+      expect(JSON.stringify(secretStorage)).not.toContain(resetToken);
+      await request(http.getHttpServer())
+        .post("/api/v1/auth/password-reset/preview")
+        .send({ token: resetToken })
+        .expect("Cache-Control", /no-store/)
+        .expect(200);
+      await expect(app.passwordResetPreview(resetToken)).resolves.toMatchObject(
+        { tenantName: "FND02-A Logistics" },
+      );
+      const preResetLogin = await app.login(
+        "fnd02-owner-a@test.local",
+        "OwnerPassword!234",
+        "FND02-A",
+        "fnd02-pre-reset-login",
+      );
+      if (!("sessionToken" in preResetLogin))
+        throw new Error("Expected pre-reset session");
+      const completedResponse = await request(http.getHttpServer())
+        .post("/api/v1/auth/password-reset/complete")
+        .set("X-Correlation-Id", "fnd02-reset-completed")
+        .send({
+          token: resetToken,
+          password: "ReplacementPassword!234",
+          passwordConfirmation: "ReplacementPassword!234",
+        })
+        .expect("Cache-Control", /no-store/)
+        .expect(200);
+      const completed = completedResponse.body as {
+        revokedSessions: number;
+      };
+      expect(completed.revokedSessions).toBeGreaterThan(0);
+      const clearedEnvelopes = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<Array<{ uncleared: number }>>(
+          `SELECT count(*)::int uncleared FROM app.password_reset_tokens
+           WHERE token_envelope IS NOT NULL AND (used_at IS NOT NULL OR revoked_at IS NOT NULL)`,
+        ),
+      );
+      expect(clearedEnvelopes[0]?.uncleared).toBe(0);
+      await expect(
+        app.session(preResetLogin.sessionToken, true),
+      ).rejects.toMatchObject({ code: "SESSION_STALE" });
+      await expect(app.passwordResetPreview(resetToken)).rejects.toMatchObject({
+        code: "PASSWORD_RESET_INVALID",
+      });
+      await expect(
+        app.login(
+          "fnd02-owner-a@test.local",
+          "OwnerPassword!234",
+          "FND02-A",
+          "fnd02-old-password-login",
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+      await expect(
+        app.login(
+          "fnd02-owner-a@test.local",
+          "ReplacementPassword!234",
+          "FND02-A",
+          "fnd02-new-password-login",
+        ),
+      ).resolves.toHaveProperty("sessionToken");
+
+      await withPlatform(app.db, (tx) =>
+        tx.$executeRawUnsafe(
+          `UPDATE app.tenant_memberships SET status='ACTIVE',updated_at=now(),version=version+1
+           WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+          tenantB,
+          sharedRecoveryMembership,
+        ),
+      );
+      const globalToken = `global-${crypto.randomUUID().replaceAll("-", "")}`;
+      await withPlatform(app.db, async (tx) => {
+        const identity = (
+          await tx.$queryRawUnsafe<
+            Array<{ userId: string; membershipVersion: number }>
+          >(
+            `SELECT u.id AS "userId",u.membership_version AS "membershipVersion"
+             FROM app.users u JOIN app.tenant_memberships m ON m.user_id=u.id
+             WHERE m.tenant_id=$1::uuid AND m.id=$2::uuid`,
+            tenantA,
+            ownerMembership,
+          )
+        )[0]!;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.password_reset_tokens(
+             tenant_id,membership_id,user_id,user_membership_version,request_source,
+             token_hash,token_envelope,expires_at
+           ) VALUES($1::uuid,$2::uuid,$3::uuid,$4,'SELF_SERVICE',$5,'test.envelope.value',now()+interval '1 hour')`,
+          tenantA,
+          ownerMembership,
+          identity.userId,
+          identity.membershipVersion,
+          createHash("sha256").update(globalToken).digest("hex"),
+        );
+      });
+      const globalReset = await app.completePasswordReset(
+        globalToken,
+        "GlobalReplacement!234",
+        "fnd02-global-reset-completed",
+      );
+      expect(globalReset.affectedMemberships).toBe(2);
+      const globalEvidence = await withPlatform(app.db, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{
+            tenantId: string;
+            security: number;
+            audit: number;
+            outbox: number;
+          }>
+        >(
+          `SELECT m.tenant_id AS "tenantId",
+             (SELECT count(*)::int FROM app.security_events s
+              WHERE s.tenant_id=m.tenant_id AND s.correlation_id='fnd02-global-reset-completed'
+                AND s.event_type='PASSWORD_RESET_COMPLETED') AS security,
+             (SELECT count(*)::int FROM audit.audit_events a
+              WHERE a.tenant_id=m.tenant_id AND a.correlation_id='fnd02-global-reset-completed'
+                AND a.action='auth.password_reset.completed') AS audit,
+             (SELECT count(*)::int FROM app.outbox_events o
+              WHERE o.tenant_id=m.tenant_id AND o.event_type='identity.password.changed.v1'
+                AND o.deduplication_key LIKE 'password-reset:%:completed:v1') AS outbox
+           FROM app.tenant_memberships m
+           WHERE m.user_id=(SELECT user_id FROM app.tenant_memberships
+             WHERE tenant_id=$1::uuid AND id=$2::uuid) AND m.status='ACTIVE'
+           ORDER BY m.tenant_id`,
+          tenantA,
+          ownerMembership,
+        ),
+      );
+      expect(globalEvidence).toHaveLength(2);
+      expect(globalEvidence.every((row) => row.security === 1)).toBe(true);
+      expect(globalEvidence.every((row) => row.audit === 1)).toBe(true);
+      expect(globalEvidence.every((row) => row.outbox >= 1)).toBe(true);
     });
   },
 );

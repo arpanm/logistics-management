@@ -104,7 +104,11 @@ function AcceptForm() {
                 }
               />
               {!preview.existingAccount && (
-                <small>At least 12 characters.</small>
+                <small>
+                  At least 12 characters. Create a password you will remember;
+                  the platform does not send or share it and you will need it
+                  after logout.
+                </small>
               )}
             </label>
             {!preview.existingAccount && (
