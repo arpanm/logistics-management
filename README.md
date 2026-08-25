@@ -18,6 +18,35 @@ Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature 
 
 The completed implementation includes normalized canonical stores and workflows for masters, operations, POD, finance, governance, configuration, control-tower, alerts, imports, and integrations. All recorded acceptance and gap defects are resolved; final evidence is recorded in `BUGS.md` and `specs/ALL-FEATURE-GAPS/completion.md`.
 
+## Implemented feature surface
+
+| Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                         |
+| ------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| FND-01  | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | Tenant provisioning/lifecycle, branding, setup, isolation, health, reports, and alerts                                     |
+| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/probes`, `/mfa`                                  | Invitations, MFA, multi-role capabilities, resource scopes, masking, session invalidation, and access evidence             |
+| MST-01  | `/app/masters/locations`, `/app/masters/employees`                                                      | Organization hierarchy, employees, ownership, impact analysis, reassignment, and cycle-safe moves                          |
+| MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Clients, locations, versioned contracts, lanes, SLA rules, and effective rate cards                                        |
+| MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted bank versions, vehicles, drivers, compliance, eligibility, and overrides                                |
+| OPS-01  | `/app/operations/indents`                                                                               | Idempotent indents, commercial/SLA snapshots, partial cancellation, lifecycle, reports, and alerts                         |
+| OPS-02  | `/app/operations/allocations`                                                                           | Split allocation, offer response/expiry, eligibility, vehicle/driver assignment, replacement, and placement                |
+| OPS-03  | `/app/operations/trips`, `/portal/driver`                                                               | Assigned trip execution, immutable milestones, offline/GPS ordering evidence, delivery, and POD handoff                    |
+| DOC-01  | `/app/pod`, governed evidence panels                                                                    | POD tasks, review/submission, secure versioned documents, scoped downloads, ageing, and value-at-risk                      |
+| FIN-01  | `/app/finance/invoices`                                                                                 | Exact minor-unit invoice lines, acknowledgement, notes, posting controls, service links, and reversals                     |
+| FIN-02  | `/app/finance/receipts`                                                                                 | Receipt allocation ledger, reconciliation, reversal, follow-up promises, balances, and collections                         |
+| FIN-03  | `/app/finance/vendor-bills`                                                                             | Vendor-bill validation, maker/checker decisions, verified-bank payment batches, deductions, and reversals                  |
+| CTL-01  | `/app/control`                                                                                          | Canonical placement, POD, collection, trip, and payable KPIs with saved views, drill-down, and freshness                   |
+| ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts |
+| DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation    |
+| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Documents, visibility-aware comments, approval definitions/decisions, immutable audit, and segregation                     |
+| INT-01  | `/app/integrations`                                                                                     | API clients, credential rotation, signed webhooks, mapping versions, delivery attempts, dead letters, and replay           |
+| CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds               |
+
+The detailed fields, calculations, reports, alerts, acceptance criteria, and cross-feature journeys remain in [FEATURES.md](FEATURES.md).
+
+### Pending production-adoption TODOs
+
+No accepted feature implementation or automated test is pending. Production adoption still requires the AWS environment below, DNS/TLS, monitoring/backups/restore drills, secret rotation, and selection of real messaging, malware-scanning, GPS, and accounting providers. Commercial/tax/approval/privacy decisions awaiting product-owner or legal confirmation are listed in [FEATURES.md](FEATURES.md) and tracked in [TODO.md](TODO.md). Local adapters deliberately report unavailable/pending states; they never claim a real external delivery or malware verdict.
+
 ## Engineering baseline
 
 - TypeScript monorepo managed with `pnpm`
@@ -59,6 +88,217 @@ make verify
 ```
 
 See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup and [docs/SDLC.md](docs/SDLC.md) for the feature workflow.
+
+## Local setup and feature testing
+
+### Prerequisites and first start
+
+Install Git, Docker Desktop/Engine, Node.js 22 LTS, pnpm 11, GNU Make, and `screen`. Homebrew's latest Node release may not bundle Corepack, so install pnpm explicitly:
+
+```bash
+brew install node@22 pnpm
+```
+
+Alternatively, with a Node.js distribution that includes Corepack:
+
+```bash
+corepack enable
+corepack prepare pnpm@11.19.0 --activate
+```
+
+Then run:
+
+```bash
+cp .env.example .env
+# Replace AUTH_SECRET, PLATFORM_ADMIN_PASSWORD, and MFA_ENCRYPTION_KEY in .env.
+make bootstrap
+make postgres-up
+make deploy-local
+make health
+```
+
+Open <http://127.0.0.1:3000/login>. Unless overridden in `.env`, the local bootstrap account is `admin@local.test` / `LocalAdmin!234`; never reuse these credentials outside local development.
+
+### Recommended manual flow
+
+1. Sign in as Platform Admin, open `/platform/tenants`, provision a tenant, and use the local invitation link to activate its Tenant Owner.
+2. As Tenant Owner, complete branding at `/app/setup`; create scoped users and roles under `/app/access/users` and `/app/access/roles`.
+3. Build master data in dependency order: organization/employees → client/location/contract/lane/rate → vendor/vehicle/driver/compliance.
+4. Run the operating chain: indent → allocation/offer → vehicle/driver assignment → trip events/delivery → POD review.
+5. Run finance: invoice/acknowledgement → receipt allocation/reversal → vendor bill approval → payment batch.
+6. Reconcile the same records in `/app/control`, `/app/alerts`, `/app/data`, `/app/governance/policies`, and `/app/integrations`.
+7. Invite Vendor, Driver, and Client users and verify their restricted `/portal/vendor`, `/portal/driver`, and `/portal/client` views.
+
+Use unique codes and idempotency keys when repeating mutations. The UI creates these keys automatically; API clients must send `Idempotency-Key` where required.
+
+### Automated real-service flows
+
+```bash
+# Static, migration, unit, integration, authorization, and contract tests
+make check
+
+# All 180 desktop/mobile Playwright executions
+make e2e
+
+# One feature or cross-feature journey
+pnpm exec playwright test tests/e2e/all-feature-gaps.spec.ts \
+  --project=chromium --grep "E2E-GAP-MST02-01"
+
+# Foundation and access journeys
+pnpm exec playwright test tests/e2e/fnd-01-tenant-foundation.spec.ts --project=chromium
+pnpm exec playwright test tests/e2e/fnd-02-identity-access.spec.ts --project=chromium
+```
+
+Playwright uses the deployed frontend/backend and PostgreSQL. It does not mock business APIs or write directly to business tables. Generated reports remain ignored under `playwright-report/` and `test-results/`.
+
+## AWS EC2 + RDS deployment and GitHub CI/CD
+
+This is a low-cost single-instance starting topology: Nginx, Next.js, and NestJS on one EC2 instance; PostgreSQL on private Single-AZ RDS; GitHub Actions deploys through AWS Systems Manager. It intentionally adds no Redis, queue, object-storage, NAT Gateway, load balancer, or separate worker.
+
+### 1. Understand the current Free Tier
+
+AWS accounts created on or after July 15, 2025 use the credit-based Free Tier: new customers receive initial credits, and the Free account plan ends after six months or when credits are exhausted. It is not an unlimited free production environment. Check the live [AWS Free Tier guide](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier.html), [EC2 eligibility](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-free-tier-usage.html), and [RDS eligibility](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) before creating resources.
+
+- Start with one Free-Tier-marked `t3.micro` Ubuntu 24.04 EC2 instance, 20 GiB `gp3`, and a 2 GiB swap file. A `t3.small` is more comfortable for builds but can consume credits faster.
+- Use PostgreSQL on Single-AZ `db.t4g.micro` or `db.t3.micro` with 20 GiB `gp3`, no provisioned IOPS, and storage autoscaling disabled initially.
+- RDS, snapshots beyond the included allowance, DNS registration, data transfer, and public IPv4 can consume credits or incur charges. Create AWS Budgets alerts before deploying.
+
+### 2. Secure the account and budget
+
+1. Enable MFA for the root user, create an administrative IAM identity, and stop using root for daily work.
+2. In Billing → Budgets, create a small monthly cost budget plus actual and forecast email alerts. Also enable Free Tier usage alerts.
+3. Choose one Region close to users and keep EC2, RDS, Systems Manager, and the deployment IAM role there.
+
+### 3. Create networking and security groups
+
+The default VPC is adequate for this first deployment. Create:
+
+- `logistics-ec2-sg`: inbound TCP 80 and 443 from the internet; no inbound 22 is required because administration and deployment use Session Manager.
+- `logistics-rds-sg`: inbound TCP 5432 only from `logistics-ec2-sg`; never from `0.0.0.0/0`.
+- Keep RDS `Public access` set to `No`. EC2 and RDS must be in the same VPC; AWS can configure the EC2-to-RDS security-group relationship from the RDS console.
+
+### 4. Create PostgreSQL RDS
+
+1. RDS → Create database → Standard create → PostgreSQL.
+2. Choose the Free-Tier-marked template/class, Single-AZ, 20 GiB `gp3`, database name `logistics`, and a generated master password.
+3. Place it in the same VPC, attach `logistics-rds-sg`, disable public access, enable deletion protection, automated backups, and encryption at rest.
+4. Record the private RDS endpoint. Application connections use TLS (`sslmode=require`; use `verify-full` with the RDS CA bundle for stricter certificate verification).
+
+After EC2 exists, connect through Session Manager and create the non-master application role:
+
+```sql
+CREATE ROLE logistics_app LOGIN PASSWORD 'GENERATE_A_LONG_UNIQUE_PASSWORD';
+GRANT CONNECT, TEMPORARY, CREATE ON DATABASE logistics TO logistics_app;
+```
+
+### 5. Create and bootstrap EC2
+
+1. In IAM, create an EC2 role with `AmazonSSMManagedInstanceCore`; attach it to the instance.
+2. Launch an Ubuntu Server 24.04 LTS `t3.micro` in the same VPC with `logistics-ec2-sg`, the IAM role, encrypted 20 GiB `gp3`, and tags `Application=logistics-management`, `Environment=production`.
+3. Connect using EC2 → Connect → Session Manager. Ubuntu AWS AMIs normally include SSM Agent; verify it with `systemctl status snap.amazon-ssm-agent.amazon-ssm-agent.service` or `systemctl status amazon-ssm-agent`.
+4. Install the runtime and add swap:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git nginx postgresql-client curl build-essential jq
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo corepack enable
+
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+sudo useradd --system --create-home --shell /bin/bash logistics
+sudo mkdir -p /opt/logistics-management
+sudo chown logistics:logistics /opt/logistics-management
+```
+
+Clone the repository into `/opt/logistics-management`. For a private repository, add a read-only GitHub deploy key to the EC2 `logistics` user; do not place a personal access token in Git configuration.
+
+```bash
+sudo -u logistics git clone git@github.com:GITHUB_OWNER/GITHUB_REPOSITORY.git /opt/logistics-management
+```
+
+### 6. Configure application secrets and services
+
+```bash
+cd /opt/logistics-management
+sudo cp deploy/aws/app.env.example /etc/logistics-management.env
+sudo chown root:logistics /etc/logistics-management.env
+sudo chmod 640 /etc/logistics-management.env
+
+# Generate values before editing the file:
+openssl rand -hex 32
+openssl rand -base64 32
+sudoedit /etc/logistics-management.env
+
+sudo cp deploy/aws/logistics-backend.service /etc/systemd/system/
+sudo cp deploy/aws/logistics-frontend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable logistics-backend.service logistics-frontend.service
+```
+
+Set `FRONTEND_URL` to the final HTTPS origin, keep `BACKEND_URL=http://127.0.0.1:4000`, set `APP_ENV=production`, keep `ENABLE_TEST_HOOKS=false`, URL-encode the database password, and use the private RDS endpoint in `DATABASE_URL`.
+
+Allow only the deployment account to restart these two services:
+
+```bash
+sudo visudo -f /etc/sudoers.d/logistics-deploy
+```
+
+Add this single line:
+
+```text
+logistics ALL=(root) NOPASSWD: /usr/bin/systemctl restart logistics-backend.service logistics-frontend.service, /usr/bin/systemctl is-active --quiet logistics-backend.service, /usr/bin/systemctl is-active --quiet logistics-frontend.service
+```
+
+Run the first migration/build/seed once. Later deployments never reseed the administrator:
+
+```bash
+sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && corepack pnpm install --frozen-lockfile && corepack pnpm run db:migrate && corepack pnpm run build && corepack pnpm run db:seed'
+sudo systemctl start logistics-backend.service logistics-frontend.service
+```
+
+### 7. Configure Nginx, DNS, and TLS
+
+1. Point the desired DNS `A` record at the EC2 public address. A static Elastic IP prevents address changes but may consume credits/incur charges.
+2. Replace `example.com` in `deploy/aws/nginx.conf`, copy it to `/etc/nginx/sites-available/logistics-management`, enable it, test with `nginx -t`, and reload Nginx.
+3. Install Certbot's Nginx integration and issue a certificate for the domain. Keep ports 3000 and 4000 bound to loopback; expose only Nginx 80/443.
+
+```bash
+sudo cp deploy/aws/nginx.conf /etc/nginx/sites-available/logistics-management
+sudo ln -s /etc/nginx/sites-available/logistics-management /etc/nginx/sites-enabled/logistics-management
+sudo nginx -t
+sudo systemctl reload nginx
+
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d logistics.example.com
+```
+
+### 8. Configure GitHub OIDC and deployment permissions
+
+The committed `Quality` workflow runs `make check`. After a successful `main` run, `.github/workflows/deploy-aws.yml` deploys that exact verified commit through SSM. It uses GitHub OIDC, so no long-lived AWS access key is stored in GitHub.
+
+1. IAM → Identity providers → Add provider: OpenID Connect, URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
+2. Replace placeholders in `deploy/aws/github-oidc-trust-policy.json`. Create an IAM role (for example `LogisticsGitHubDeploy`) with that trust policy.
+3. Replace placeholders in `deploy/aws/github-ssm-policy.json` and attach it to the role. It limits deployment to `AWS-RunShellScript` and the one EC2 instance.
+4. GitHub → Settings → Environments → create `production`, allow only `main`, and optionally require approval.
+5. Add these GitHub environment variables (not secrets): `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, and `AWS_EC2_INSTANCE_ID`.
+6. Push to `main`. After `Quality` succeeds, `Deploy AWS` starts automatically for that verified SHA. Inspect its SSM output and then verify `/api/v1/health/ready` and `/login`.
+
+### 9. Production operations checklist
+
+- Keep RDS private, require TLS, rotate the bootstrap admin password, `AUTH_SECRET`, MFA key, database password, API credentials, and GitHub deploy key under an approved rotation procedure.
+- Review automated RDS backups and perform a restore drill. Deletion protection is not a backup.
+- Configure CloudWatch alarms for EC2 CPU/status, RDS CPU/connections/storage, disk usage, service restarts, and application readiness.
+- Patch Ubuntu, Node.js, PostgreSQL minor versions, SSM Agent, and dependencies regularly.
+- For rollback, redeploy a known-good Git SHA only after checking migration compatibility. Forward-only database migrations are not automatically reversed.
+- Before meaningful traffic, move builds off the smallest EC2 size or build an artifact in CI; the swap-backed `t3.micro` path prioritizes cost over deployment speed.
+
+AWS references: [RDS PostgreSQL setup](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html), [EC2/RDS private connectivity](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/ec2-rds-connect.html), [Session Manager](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-with-systems-manager-session-manager.html), [GitHub OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), and [Run Command permissions](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html).
 
 ## Run a feature
 

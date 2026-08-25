@@ -1,0 +1,20 @@
+[Unit]
+Description=Logistics Control Tower frontend
+After=network-online.target logistics-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=logistics
+Group=logistics
+WorkingDirectory=/opt/logistics-management/apps/frontend
+EnvironmentFile=/etc/logistics-management.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

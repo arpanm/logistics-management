@@ -4,6 +4,10 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# shellcheck source=scripts/tooling.sh
+source "$repo_dir/scripts/tooling.sh"
+resolve_pnpm
+
 if [[ -f .env ]]; then
   set -a
   source .env
@@ -24,5 +28,5 @@ fi
 
 for check_name in format:check lint typecheck test; do
   echo "Running workspace check: $check_name"
-  pnpm -r --filter './packages/*' --filter './apps/*' --if-present run "$check_name"
+  run_pnpm -r --filter './packages/*' --filter './apps/*' --if-present run "$check_name"
 done

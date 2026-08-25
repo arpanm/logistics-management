@@ -119,6 +119,45 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 | INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Passing     | FND-01, GOV-01              |
 | CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Passing     | FND-01                      |
 
+### 5.1 Implemented delivery map
+
+All rows below are live, tenant-authorized, PostgreSQL-backed, and covered by the passing acceptance suite.
+
+| Feature    | UI routes                                                                                               | Implemented APIs and persistence                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FND-01** | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | Tenant registry/provision/lifecycle, setup checklist, health, isolation probes, documents, exports, reports, and platform alerts                                        |
+| **FND-02** | `/app/access/users`, `/app/access/roles`, `/app/access/probes`, `/app/access/reports`, `/mfa`           | Invitations, directory/lifecycle, capability roles, same-assignment scope grants, previews, MFA/recovery, session reset, security reports, and alerts                   |
+| **MST-01** | `/app/masters/locations`, `/app/masters/employees`                                                      | Organization closure/hierarchy, employees, ownership, operational assignments, impact, bulk assignment, move, and reassignment/deactivation                             |
+| **MST-02** | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Client/location masters, versioned contracts, lanes, SLA rules, rate lines, duplicate analysis, publish selection, and immutable transaction snapshots                  |
+| **MST-03** | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted/versioned bank accounts, vehicles, drivers, compliance records/decisions, eligibility evaluation, and approved overrides                             |
+| **OPS-01** | `/app/operations/indents`                                                                               | Idempotent indent creation, commercial/SLA snapshots, status transitions, partial cancellation, canonical demand/fill reports, and alerts                               |
+| **OPS-02** | `/app/operations/allocations`                                                                           | Split allocation locking, offer response/expiry, vendor/vehicle/driver eligibility, assignment/replacement history, placement states, and risk reports                  |
+| **OPS-03** | `/app/operations/trips`, `/portal/driver`                                                               | Assigned-trip execution, append-only milestone/GPS events, ordering-conflict evidence, offline retry idempotency, privacy enforcement, delivery, and POD creation       |
+| **DOC-01** | `/app/pod` and record evidence panels                                                                   | POD task/review/submission, document bytes and immutable versions, checksum/signature/size checks, scoped access tokens, ageing, and invoice-value risk                 |
+| **FIN-01** | `/app/finance/invoices`                                                                                 | Exact BigInt minor-unit invoices/lines, billable service links, approval/posting controls, acknowledgement, notes, due dates, and compensating reversals                |
+| **FIN-02** | `/app/finance/receipts`                                                                                 | Receipts, append-only allocation/reversal ledger, exact balances, follow-up promises, reconciliation, collection ageing, and statements                                 |
+| **FIN-03** | `/app/finance/vendor-bills`                                                                             | Vendor bill/line validation, duplicate prevention, maker/checker decisions, verified-bank payment batches/allocations, deductions, reversals, and margin reconciliation |
+| **CTL-01** | `/app/control`                                                                                          | Canonical placement/POD/collection/trip/payable lenses, server filters, saved views, three-level drill, freshness/as-of evidence, and reconciled totals                 |
+| **ALT-01** | `/app/alerts`                                                                                           | Scoped rules, PostgreSQL evaluation/deduplication, linked evidence, queue ownership, acknowledge/assign/snooze/escalate/resolve/reopen, and channel-attempt history     |
+| **DAT-01** | `/app/data`                                                                                             | CSV/XLSX parsing, duplicate/blank/header/row validation, seven canonical adapters, preview/commit/correction, checksum idempotency, scoped errors, and reconciliation   |
+| **GOV-01** | `/app/governance/policies` and record evidence panels                                                   | Governed documents, audience comments/history, approval definitions/instances/decisions, segregation, immutable audit, and reason/correlation evidence                  |
+| **INT-01** | `/app/integrations`                                                                                     | API clients/rotation, HMAC webhooks, mapping versions, endpoint registry, idempotent delivery attempts, retry/dead-letter/replay, and integration health                |
+| **CFG-01** | `/app/configuration/settings`                                                                           | Typed/semantic tenant configuration, versioned draft/publish/rollback, branding/locale/codes/reasons/thresholds, and projection invalidation                            |
+
+### 5.2 Pending production and product-owner TODOs
+
+These items do not reopen the completed PostgreSQL-only feature scope. They are required before or during production adoption:
+
+| Area               | Pending work                                                                                                                                                                 | Status                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| AWS operations     | Provision EC2/RDS, DNS/TLS, OIDC/SSM deployment, budgets, alarms, backups, and restore drills using the README runbook                                                       | Planned                        |
+| Messaging          | Select and connect production email, SMS, and WhatsApp providers; local adapters correctly remain unavailable/failed rather than reporting false delivery                    | Provider decision pending      |
+| Document security  | Select a production malware-scanning provider; benign local uploads remain pending until a real scanner attests them                                                         | Provider decision pending      |
+| GPS/accounting     | Confirm production GPS and accounting vendors, credentials, mappings, retry policy, and reconciliation ownership                                                             | Provider decision pending      |
+| Commercial policy  | Confirm cancellation/fill-rate treatment, placement/POD ageing boundaries, deductions/credit notes, over-receipts, approval thresholds, GST/TDS, and bank-verification rules | Product-owner decision pending |
+| Privacy/compliance | Confirm retention, consent, location-collection, document, audit-export, and data-residency requirements for each operating geography                                        | Legal/product decision pending |
+| Capacity           | Replace the single small EC2 instance with an artifact-based or multi-instance topology when measured load requires it; add infrastructure only through an approved ADR      | Capacity-triggered             |
+
 ## 6. Common Codex build contract
 
 Every feature prompt below includes this contract by reference. Codex must:

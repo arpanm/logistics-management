@@ -26,20 +26,20 @@ for required_file in "${required_files[@]}"; do
   fi
 done
 
-feature_count="$(rg -c '^## (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md)"
-prompt_count="$(rg -c '^### Master prompt for Codex' FEATURES.md)"
+feature_count="$(grep -Ec '^## (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md)"
+prompt_count="$(grep -Ec '^### Master prompt for Codex' FEATURES.md)"
 if [[ "$feature_count" -ne "$prompt_count" ]]; then
   echo "Feature/prompt count mismatch: $feature_count features, $prompt_count prompts." >&2
   exit 1
 fi
 
-test_status_count="$(rg -c '^\*\*Test status:\*\*' FEATURES.md)"
+test_status_count="$(grep -Ec '^\*\*Test status:\*\*' FEATURES.md)"
 if [[ "$test_status_count" -ne "$feature_count" ]]; then
   echo "Feature/test-status count mismatch: $feature_count features, $test_status_count section test statuses." >&2
   exit 1
 fi
 
-register_test_status_count="$(rg '^\| (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md | rg -c '\| (Not started|Planned|Implemented|Failing|Passing|Blocked)[[:space:]]*\|')"
+register_test_status_count="$(grep -E '^\| (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md | grep -Ec '\| (Not started|Planned|Implemented|Failing|Passing|Blocked)[[:space:]]*\|')"
 if [[ "$register_test_status_count" -ne "$feature_count" ]]; then
   echo "Feature register must include a valid test status for all $feature_count features." >&2
   exit 1
