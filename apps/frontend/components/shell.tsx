@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { usePathname, useRouter } from "next/navigation";
+import { MastersNav } from "./masters/masters-nav";
 type Me = {
   user: { email: string; platformAdmin: boolean };
   activeTenantId: string | null;
@@ -117,7 +118,7 @@ export function Shell({
           )}
           {area === "tenant" && effective && (
             <>
-              <Link href="/app/masters/locations">Masters</Link>
+              <Link href="/app/masters">Masters</Link>
               <Link href="/app/operations">Operations</Link>
               <Link href="/app/pod">POD</Link>
               <Link href="/app/finance">Finance</Link>
@@ -137,6 +138,7 @@ export function Shell({
       <p className="sr-only" aria-live="polite">
         {notice}
       </p>
+      {area === "tenant" && path.startsWith("/app/masters") && <MastersNav />}
       <main id="main" className="page" tabIndex={-1}>
         {children}
       </main>

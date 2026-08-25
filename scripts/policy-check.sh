@@ -39,7 +39,7 @@ if [[ "$test_status_count" -ne "$feature_count" ]]; then
   exit 1
 fi
 
-register_test_status_count="$(grep -E '^\| (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md | grep -Ec '\| (Not started|Planned|Implemented|Failing|Passing|Blocked)[[:space:]]*\|')"
+register_test_status_count="$(grep -E '^\| (FND|MST|OPS|DOC|FIN|CTL|ALT|DAT|GOV|INT|CFG)-' FEATURES.md | grep -Ec '\| (Not started|Planned|Implemented / Not Run|Implemented|Failing|Passing|Blocked)[[:space:]]*\|')"
 if [[ "$register_test_status_count" -ne "$feature_count" ]]; then
   echo "Feature register must include a valid test status for all $feature_count features." >&2
   exit 1

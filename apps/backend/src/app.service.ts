@@ -86,6 +86,7 @@ export class AppService implements OnModuleDestroy {
         "202608250014_fnd01_postal_importer_table_privileges",
         "202608250015_fnd01_postal_runtime_lock_privilege",
         "202608250016_fnd01_postal_owner_handoff_contract",
+        "202608250017_mst01_operable_masters",
       ];
       if (
         !required.every((name) =>

@@ -1,106 +1,63 @@
-# Agentic SDLC
+# Rapid Agentic SDLC
 
 ## Goal
 
-Turn each feature in `FEATURES.md` into a reviewed, locally deployed, browser-tested, locally committed vertical slice with durable specification and evidence.
+Finish coherent groups of logistics features quickly while preserving tenant isolation, authorization, financial integrity, migration safety, and honest delivery status. Implementation and test execution are separate phases.
 
-## Orchestration model
-
-The primary Codex agent is accountable for the outcome and starts specialized agents defined in `.codex/agents/`. Agents work in ordered phases:
+## Default flow
 
 ```mermaid
 flowchart LR
-    S["Select dependency-ready feature"] --> P["Spec analyst + test designer"]
-    P --> G["Primary specification gate"]
-    G --> I["Implementation worker"]
-    I --> C["Unit/integration/type/lint gates"]
-    C --> L["Local deploy"]
-    L --> E["E2E tester"]
-    E --> R["Independent reviewer"]
-    R -->|"blocking finding"| I
-    R --> V["Final verification"]
-    V --> S2["Synchronize status, tests, README, TODO, specs, docs"]
-    S2 --> D["Completion evidence + final verification"]
-    D --> M["Focused local Git commit"]
+    B["Select dependency-compatible batch"] --> N["Lightweight acceptance notes"]
+    N --> I["Parallel implementation with non-overlapping ownership"]
+    I --> T["Author/update automated tests: Not Run"]
+    T --> R["One integrated batch review"]
+    R --> S["Synchronize trackers and docs once"]
+    S --> G["One lightweight commit gate"]
+    G --> C["Optional batch commit"]
+    C -. "explicit request only" .-> X["Deploy/test once; record pass/fail"]
 ```
 
-Specification and test design can run in parallel because they own separate files. Production implementation is single-owner. Review may run in parallel with read-only analysis, but final verification waits for all agents.
+The default agents are implementation workers and one batch reviewer. Add a specification analyst, test designer, or E2E tester only for an explicit request or material unresolved risk. Parallel workers must own different modules/files.
 
-## Phase gates
+## Implementation batch
 
-### 1. Intake
+1. Choose the largest coherent batch allowed by dependencies and the user's scope.
+2. Inspect the working tree and list included feature/TODO IDs.
+3. Record compact acceptance notes: outcome, critical rules, dependencies, affected interfaces, and planned automated tests. Reuse existing specs instead of creating ceremony-only documents.
+4. Implement migrations, backend, frontend, authorization, audit, affected reporting/events, documentation, and automated tests together.
+5. Do not run tests, deploy, run Playwright, or invoke `make check`/`make verify` automatically per feature. Mark changed tests `Implemented / Not Run`.
+6. Review the integrated batch once. Resolve clear blocking findings together without automatically testing after each fix.
+7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case lists, and documentation once.
+8. When a commit is requested, run formatting, type checking, and policy/status checks once for the batch; inspect the cached diff and create one related Conventional Commit.
 
-- Select one feature whose dependencies are Complete.
-- Read the feature section, product-wide rules, cross-feature journeys, and relevant supplied data dictionary.
-- Inspect repository state and record pre-existing changes.
-- Create a feature branch when the repository's current workflow uses branches. Do not force branch changes over user work.
+## Test status
 
-### 2. Specification team
+- `Implemented / Not Run` means the production behavior and executable coverage exist, but no current execution result is claimed.
+- `Passing`, `Failing`, and `Blocked` require current command evidence from an explicit test phase.
+- Historical results may remain documented with their date/build, but they do not convert new or changed coverage to Passing.
 
-- `spec_analyst` creates `specs/<ID>/spec.md`.
-- `test_designer` creates `specs/<ID>/test-plan.md`.
-- Both trace to acceptance criteria and identify open decisions.
-- The primary agent reconciles conflicts and marks the spec Approved for implementation.
+## Explicit batch/release test phase
 
-### 3. Development
+Enter this phase only when the user explicitly asks for testing, regression, deployment verification, or release verification.
 
-- `implementation_worker` owns production files and implements a complete vertical slice.
-- Use small checkpoints, but do not create partial commits unless the user requests them.
-- Run focused tests after each material behavior change.
+1. Run either the requested focused suites or the full regression—not both by default.
+2. Deploy once if the selected tests require running services. Use the shared PostgreSQL container and project databases/schemas only.
+3. Run each selected suite once. Do not retry automatically.
+4. Record pass/fail/block status and concise evidence across the affected trackers.
+5. Add failures to `BUGS.md` or `TODO.md` with observed behavior and evidence. Do not auto-fix or rerun unless requested.
 
-### 4. Local deployment
+## Completion states
 
-- Create/start and provision the central shared PostgreSQL container with `make postgres-up`.
-- Apply database migrations and seed deterministic E2E fixtures.
-- Build and start the frontend and backend with `make deploy-local`.
-- Verify project database/schema access, backend readiness, and frontend availability before browser tests.
-- Do not add or start a project-specific database or other infrastructure container.
+- **In progress:** production work is incomplete.
+- **Implemented:** requested production behavior and test coverage are present; tests may be Not Run.
+- **Verified:** the explicitly selected test scope passed for the recorded build.
 
-### 5. End-to-end test
-
-- `e2e_tester` implements Playwright scenarios from the approved test plan.
-- Cover primary success, authorization isolation, validation, and at least one material exception.
-- Prefer role-authenticated API fixtures for setup and UI for behavior under test.
-- Retain trace/screenshot/video for failure diagnosis; generated artifacts remain uncommitted.
-
-### 6. Independent review
-
-- `reviewer` examines the full diff and executed evidence.
-- Findings are ordered by correctness, isolation/security, financial integrity, migrations, idempotency, test gaps, accessibility, maintainability.
-- Implementation worker fixes blocking findings; affected checks repeat.
-
-### 7. Status and documentation synchronization
-
-This is the last functional step after review fixes and before completion/commit:
-
-- Update implementation and test status in both the `FEATURES.md` register and feature section.
-- Update `README.md` current project status and next dependency-ready feature.
-- Update `TODO.md`: remove completed work and record remaining work with feature ID, state, owner/reason, and evidence.
-- Update the feature `spec.md`, `test-plan.md`, and `completion.md`.
-- Give every planned test ID a final state: `Implemented`, `Passing`, `Failing`, `Blocked`, or justified `N/A`.
-- Update executable test files/fixtures and resolve or record all TODO/FIXME, `.skip`, `.only`, quarantine, or stale test-name markers.
-- Update affected architecture, API, data model, deployment, runbook, and package documentation.
-- Search the repository for stale feature/test status and inconsistent checklist entries.
-- Re-run policy and verification after synchronization.
-
-### 8. Completion and commit
-
-- Run `make verify` from the final tree.
-- Create `specs/<ID>/completion.md` with commands and results.
-- Change implementation status to Complete and test status to Passing only if all acceptance criteria and required tests pass locally.
-- Stage only files belonging to the feature.
-- Review `git diff --cached` and secret scan output.
-- Create a local Conventional Commit; do not push.
+A feature can be implementation-complete while tests are Not Run. It must not be labeled Passing or Verified without execution evidence.
 
 ## Failure behavior
 
-- A failed gate stops downstream completion and commit.
-- Record a real external blocker in the feature spec with evidence and an actionable unblock condition.
-- Do not weaken or skip tests to obtain green status.
-- If local deployment is unavailable, the feature remains In progress; unit tests alone are insufficient.
-- If a flaky test appears, diagnose and remove nondeterminism. Retrying without explanation is not acceptance.
-- If synchronization artifacts disagree with code/test evidence, the feature remains In progress and the commit gate is closed.
-
-## Feature selection
-
-Use dependency order from `FEATURES.md`. Within the ready set, prefer foundations that unlock more downstream features. Never mark a dependency Complete solely to start another feature.
+- A code-review blocker prevents implementation completion until resolved.
+- A test failure in an explicit test phase is recorded once and does not trigger an automatic fix/retest loop.
+- Never weaken isolation, authorization, financial rules, migrations, or tests to obtain green status.
+- Never report an unexecuted test, deployment, or regression as successful.

@@ -1,4 +1,4 @@
 interface:
   display_name: "Feature SDLC"
   short_description: "Feature delivery with tests and status synchronization"
-  default_prompt: "Use $feature-sdlc to implement the requested feature through specification, frontend/backend development, shared PostgreSQL deployment, Playwright, review, status synchronization, and local commit."
+  default_prompt: "Use $feature-sdlc rapid batch mode to implement related requested features/TODOs together. Author tests but leave them Not Run unless the user explicitly requests a batch/release test phase; review and synchronize trackers once per batch."

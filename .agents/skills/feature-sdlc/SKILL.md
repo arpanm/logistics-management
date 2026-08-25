@@ -1,52 +1,51 @@
 ---
 name: feature-sdlc
-description: Execute one feature from this logistics repository through a mandatory multi-agent workflow covering specification, test design, implementation, local deployment, Playwright end-to-end testing, independent review, completion evidence, status update, and a focused local Git commit. Use whenever a user asks to build, implement, execute, or complete a feature ID from FEATURES.md. Do not use for read-only questions, feature brainstorming, or documentation-only edits.
+description: Implement related logistics features and TODO fixes in rapid batches with lightweight acceptance notes, production implementation, automated tests authored but not automatically run, one batch review, synchronized trackers, and an optional focused batch commit. Use for feature implementation; run deployment or tests only when explicitly requested as a batch/release phase.
 ---
 
-# Feature SDLC
+# Rapid Feature SDLC
 
-Execute the requested feature completely. Follow `AGENTS.md`; it is the binding repository contract. Read `docs/SDLC.md` and `docs/TESTING.md` before spawning agents.
+Follow `AGENTS.md`, `docs/SDLC.md`, and `docs/TESTING.md`. Optimize for finishing dependency-compatible work in a small number of implementation batches. Never turn each feature into a separate deploy/test/review loop unless the user explicitly requests that process.
 
-## Orchestrate
+## Execute a batch
 
-1. Read the feature in `FEATURES.md`, its dependencies, product-wide rules, cross-feature journeys, and relevant data dictionary.
-2. Inspect Git state. Record the starting commit and dirty paths. Preserve unrelated user changes.
-3. Confirm the feature is dependency-ready. Do not silently substitute another feature.
-4. Create `specs/<FEATURE-ID>/`.
-5. Spawn `spec_analyst` and `test_designer` in parallel with separate ownership of `spec.md` and `test-plan.md`. Wait for both.
-6. Reconcile the artifacts and require complete acceptance-to-test traceability before approving implementation.
-7. Spawn `implementation_worker` with exclusive ownership of production code and non-browser tests. Wait, inspect its diff, and run `make check`. Return exact failures for correction until green.
-8. Run `make deploy-local` and `make health`. Do not begin browser acceptance while unhealthy.
-9. Spawn `e2e_tester` with ownership limited to Playwright tests and E2E fixtures. Require success, validation, unauthorized tenant/role/scope, exception/recovery, and reconciliation journeys. Send production defects to `implementation_worker`.
-10. Spawn `reviewer` for an independent read-only review of the complete diff and evidence. Fix all blocking findings and request a targeted re-review.
-11. Run `make verify`. Inspect the final diff, generated files, and secret/policy checks.
-12. Perform the final synchronization gate: update implementation and test status in the `FEATURES.md` register and feature section; update the `README.md` status summary and `TODO.md`; update `spec.md`, `test-plan.md`, `completion.md`, executable test cases/fixtures, code TODO/FIXME/skip markers, and all affected architecture/API/runbook/package docs. Every test ID must have a final status and evidence.
-13. Search for stale status text, unchecked completion items, unresolved TODO/FIXME markers, and skipped/only tests. Resolve them or record them explicitly with owner/reason. Run policy/verification again.
-14. Mark the feature Complete and tests Passing only when every acceptance criterion and required test passes locally.
-15. Stage only feature files, review the cached diff, and create one local Conventional Commit with the feature ID as scope. Never push, amend, rebase, or tag unless explicitly asked.
-16. Report commit hash, local frontend/backend URLs, test results, synchronized artifacts, major decisions, and non-blocking follow-up. Do not provide schedule estimates.
+1. Read `FEATURES.md` and `TODO.md`; choose the largest coherent dependency-compatible batch that matches the request.
+2. Inspect Git state and preserve unrelated changes. Assign explicit, non-overlapping production ownership when parallel workers are useful.
+3. Capture lightweight acceptance notes in existing specs or a compact batch note. Require full `spec.md` and `test-plan.md` only for material ambiguity/high-risk behavior or an explicit request.
+4. Use one or more `implementation_worker` agents to implement independent areas. Each worker owns production code and related automated tests in its assigned area. Tests are authored or updated but are not automatically run.
+5. Mark unexecuted test cases `Implemented / Not Run`. Never infer Passing from code review, compilation, an old result, or another test.
+6. Use one `reviewer` for the integrated batch. Fix clear blocking findings together. Do not automatically run tests or enter a test/fix/retest loop.
+7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case files, and documentation once for the batch.
+8. If the user asks to commit, run the lightweight batch gate once: formatting, type checking, policy/status synchronization, and cached-diff review. One related batch commit is allowed. Do not push unless explicitly asked.
 
-## Enforce ownership
+## Optional specialist roles
 
-- Run specification and test planning concurrently only because they own separate files.
-- Let only `implementation_worker` edit production files during implementation.
-- Let only `e2e_tester` edit E2E tests/fixtures during browser testing.
-- Keep `reviewer` read-only.
-- Keep final integration, status, staging, and commit with the primary agent.
-- If concurrency is limited, run roles in waves. Never omit a required role.
+Use `spec_analyst`, `test_designer`, or `e2e_tester` only when explicitly requested or when unresolved material risk warrants the extra role. Specialists do not create an automatic requirement to run any test suite.
 
-## Stop before commit
+## Explicit batch/release test phase
 
-Stop before status completion or commit when any required gate fails, local deployment is unhealthy, acceptance coverage is incomplete, review has a blocking finding, or unrelated changes cannot be separated safely. Name the evidence, affected criterion, and exact unblock condition. Never weaken tests, isolation, authorization, or financial rules to obtain a passing result.
+Only enter this phase when the user explicitly requests testing, regression, deployment verification, or release verification:
 
-## Required final evidence
+1. Derive from the request whether the scope is focused tests or full regression.
+2. Deploy locally once when browser/integration testing needs it, using the shared central PostgreSQL container.
+3. Run the selected suites once. Do not automatically retry.
+4. Record exact results as Passing, Failing, or Blocked in the trackers and test-case lists.
+5. For failures, add concise evidence/RCA to the bug or TODO list. Do not fix or rerun unless the user asks.
 
-- Approved `spec.md` and executed `test-plan.md`
-- Passing unit/integration/contract/security/migration checks as applicable
-- Healthy local deployment
-- Passing Playwright acceptance journeys
-- Independent review with no unresolved blocking finding
-- Passing `make verify`
-- Accurate `FEATURES.md` status and `completion.md`
-- Synchronized `README.md`, `TODO.md`, specs, executable test status, and affected documentation
-- One focused local commit and no push
+## Ownership and safety
+
+- Multiple workers may run in parallel only with non-overlapping file/module ownership.
+- Keep financial, authorization, tenant-isolation, idempotency, migration, and secret-handling invariants intact.
+- Use only the shared central PostgreSQL container; add no per-project database or auxiliary infrastructure container.
+- Keep generated reports and bulky artifacts out of Git.
+- Never claim deployment health, test Passing, or regression Passing without current execution evidence.
+
+## Handoff evidence
+
+- Batch IDs and implemented behavior
+- Files/modules owned by each worker
+- Test cases added or changed, normally `Implemented / Not Run`
+- Batch-review findings and disposition
+- Tracker/documentation synchronization
+- Lightweight gate results when a commit was requested
+- Commit hash when committed, plus an explicit statement that tests were not run unless an explicit test phase occurred

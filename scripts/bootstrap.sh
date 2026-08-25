@@ -29,6 +29,8 @@ if (( ${#missing_commands[@]} > 0 )); then
   exit 1
 fi
 
+bash "$repo_dir/scripts/check-node-version.sh"
+
 resolve_pnpm
 echo "Using $(run_pnpm --version | sed 's/^/pnpm /') with $(node --version)."
 

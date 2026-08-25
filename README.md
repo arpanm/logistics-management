@@ -6,46 +6,46 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                              |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                            |
-| Automated feature tests           | Passing — FND-01 postal Playwright 2/2, FND-02 UX Playwright 3/3, and full regression 188/188 locally |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                  |
-| Feature implementation            | Canonical backend baseline complete; product-UX gap remediation is active and tracked in `TODO.md`    |
+| Item                              | Status                                                                                                                                                         |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                                                                       |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                     |
+| Automated feature tests           | Implemented / Not Run for the final MST-01 tree — focused backend/browser evidence exists; repeated full regression was stopped and deferred by user direction |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                           |
+| Feature implementation            | Canonical backend baseline complete; product-UX gap remediation is active and tracked in `TODO.md`                                                             |
 
-Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
+Agents synchronize this summary, `FEATURES.md`, `TODO.md`, affected specs, and executable test-case status once per implementation batch. New or changed tests remain `Implemented / Not Run` until an explicitly requested batch/release test phase executes them.
 
 The implementation includes normalized canonical stores and workflows for masters, operations, POD, finance, governance, configuration, control-tower, alerts, imports, and integrations. A product-UX audit found that several of those backend-complete areas still expose scaffolding or incomplete workbenches; the dependency-ordered remediation queue is recorded in `TODO.md`.
 
 ## Implemented feature surface
 
-| Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                         |
-| ------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| FND-01  | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant provisioning with derived city/state, lifecycle, branding, setup, isolation, health, reports, and alerts  |
-| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured access administration, secure activation links, permission review, Activity & audit, alerts, MFA, and sessions  |
-| MST-01  | `/app/masters/locations`, `/app/masters/employees`                                                      | Organization hierarchy, employees, ownership, impact analysis, reassignment, and cycle-safe moves                          |
-| MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Clients, locations, versioned contracts, lanes, SLA rules, and effective rate cards                                        |
-| MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted bank versions, vehicles, drivers, compliance, eligibility, and overrides                                |
-| OPS-01  | `/app/operations/indents`                                                                               | Idempotent indents, commercial/SLA snapshots, partial cancellation, lifecycle, reports, and alerts                         |
-| OPS-02  | `/app/operations/allocations`                                                                           | Split allocation, offer response/expiry, eligibility, vehicle/driver assignment, replacement, and placement                |
-| OPS-03  | `/app/operations/trips`, `/portal/driver`                                                               | Assigned trip execution, immutable milestones, offline/GPS ordering evidence, delivery, and POD handoff                    |
-| DOC-01  | `/app/pod`, governed evidence panels                                                                    | POD tasks, review/submission, secure versioned documents, scoped downloads, ageing, and value-at-risk                      |
-| FIN-01  | `/app/finance/invoices`                                                                                 | Exact minor-unit invoice lines, acknowledgement, notes, posting controls, service links, and reversals                     |
-| FIN-02  | `/app/finance/receipts`                                                                                 | Receipt allocation ledger, reconciliation, reversal, follow-up promises, balances, and collections                         |
-| FIN-03  | `/app/finance/vendor-bills`                                                                             | Vendor-bill validation, maker/checker decisions, verified-bank payment batches, deductions, and reversals                  |
-| CTL-01  | `/app/control`                                                                                          | Canonical placement, POD, collection, trip, and payable KPIs with saved views, drill-down, and freshness                   |
-| ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts |
-| DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation    |
-| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Documents, visibility-aware comments, approval definitions/decisions, immutable audit, and segregation                     |
-| INT-01  | `/app/integrations`                                                                                     | API clients, credential rotation, signed webhooks, mapping versions, delivery attempts, dead letters, and replay           |
-| CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds               |
+| Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                                                                                  |
+| ------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FND-01  | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant provisioning with derived city/state, lifecycle, branding, setup, isolation, health, reports, and alerts                                                           |
+| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured access administration, secure activation links, permission review, Activity & audit, alerts, MFA, and sessions                                                           |
+| MST-01  | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable Masters hub, PIN-derived organization geography, structured geofences, employees, scoped ownership, impact/reassignment, reports, export, alerts, and cycle-safe moves |
+| MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Clients, locations, versioned contracts, lanes, SLA rules, and effective rate cards                                                                                                 |
+| MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted bank versions, vehicles, drivers, compliance, eligibility, and overrides                                                                                         |
+| OPS-01  | `/app/operations/indents`                                                                               | Idempotent indents, commercial/SLA snapshots, partial cancellation, lifecycle, reports, and alerts                                                                                  |
+| OPS-02  | `/app/operations/allocations`                                                                           | Split allocation, offer response/expiry, eligibility, vehicle/driver assignment, replacement, and placement                                                                         |
+| OPS-03  | `/app/operations/trips`, `/portal/driver`                                                               | Assigned trip execution, immutable milestones, offline/GPS ordering evidence, delivery, and POD handoff                                                                             |
+| DOC-01  | `/app/pod`, governed evidence panels                                                                    | POD tasks, review/submission, secure versioned documents, scoped downloads, ageing, and value-at-risk                                                                               |
+| FIN-01  | `/app/finance/invoices`                                                                                 | Exact minor-unit invoice lines, acknowledgement, notes, posting controls, service links, and reversals                                                                              |
+| FIN-02  | `/app/finance/receipts`                                                                                 | Receipt allocation ledger, reconciliation, reversal, follow-up promises, balances, and collections                                                                                  |
+| FIN-03  | `/app/finance/vendor-bills`                                                                             | Vendor-bill validation, maker/checker decisions, verified-bank payment batches, deductions, and reversals                                                                           |
+| CTL-01  | `/app/control`                                                                                          | Canonical placement, POD, collection, trip, and payable KPIs with saved views, drill-down, and freshness                                                                            |
+| ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts                                                          |
+| DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation                                                             |
+| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Documents, visibility-aware comments, approval definitions/decisions, immutable audit, and segregation                                                                              |
+| INT-01  | `/app/integrations`                                                                                     | API clients, credential rotation, signed webhooks, mapping versions, delivery attempts, dead letters, and replay                                                                    |
+| CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds                                                                        |
 
 The detailed fields, calculations, reports, alerts, acceptance criteria, and cross-feature journeys remain in [FEATURES.md](FEATURES.md).
 
 ### Pending production-adoption TODOs
 
-PIN-first derived addressing is complete for tenant provisioning. Reuse across organization, client-location, vendor, and driver masters remains queued with those master features. Master-data navigation, operations/allocation/trip workbenches, finance queues, and control-tower prototype parity also remain in [TODO.md](TODO.md). Production adoption requires the AWS environment below, a pinned official India postal dataset, DNS/TLS, monitoring/backups/restore drills, secret rotation, and selection of real messaging, malware-scanning, GPS, and accounting providers.
+PIN-first derived addressing is complete for tenant provisioning and organization/geography masters. Client-location, vendor, and driver adoption remains queued with MST-02/MST-03. The Masters hub is live; configured truck/body/cargo catalogs, operations/allocation/trip workbenches, finance queues, and control-tower prototype parity remain in [TODO.md](TODO.md). Production adoption requires the AWS environment below, a pinned official India postal dataset, DNS/TLS, monitoring/backups/restore drills, secret rotation, and selection of real messaging, malware-scanning, GPS, and accounting providers.
 
 ## Engineering baseline
 
@@ -89,6 +89,8 @@ make e2e
 make verify
 ```
 
+The rapid implementation workflow does not invoke these test/deployment commands after every feature. Use `make check`, `make deploy-local`, `make e2e`, and `make verify` only for an explicitly requested batch/release test phase; run the selected scope once and record pass/fail without automatic retry.
+
 See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup and [docs/SDLC.md](docs/SDLC.md) for the feature workflow.
 
 ## Local setup and feature testing
@@ -99,7 +101,11 @@ Install Git, Docker Desktop/Engine, Node.js 22 LTS, pnpm 11, GNU Make, and `scre
 
 ```bash
 brew install node@22 pnpm
+brew unlink node 2>/dev/null || true
+brew link --overwrite node@22
 ```
+
+Node.js 22 is the recommended runtime (Node.js 24 is also accepted). Node.js 25+ is not supported by the current Playwright toolchain and can leave full E2E workers waiting after their tests finish. `make bootstrap` checks the runtime version before installing dependencies.
 
 Alternatively, with a Node.js distribution that includes Corepack:
 
@@ -119,7 +125,7 @@ make deploy-local
 make health
 ```
 
-Do not skip `make bootstrap` with `git commit --no-verify`. The commit hook deliberately runs the repository policy and workspace checks, so a new checkout without `node_modules` will fail even when the `pnpm` executable itself is installed.
+Do not skip `make bootstrap`: it installs locked dependencies and configures the Git hook. The hook runs the lightweight batch gate (policy/status, formatting, lint, and type checking), not database, browser, or full regression tests.
 
 ### Administrator login
 
@@ -158,13 +164,15 @@ Use unique codes and idempotency keys when repeating mutations. The UI creates t
 
 The setup checklist derives completion from live tenant records and links directly to Organization, Users, Branches, Clients, Vendors, Commercial settings, Imports, and Branding. Its isolation-record panel provides both a sample CSV showing the export columns and a current-tenant-only CSV export.
 
-### Automated real-service flows
+### Explicit batch/release test flows
+
+These commands are not automatic per-feature gates. Run the smallest scope explicitly requested, once:
 
 ```bash
-# Static, migration, unit, integration, authorization, and contract tests
+# Non-browser batch test suite
 make check
 
-# All 180 desktop/mobile Playwright executions
+# Full desktop/mobile Playwright regression (release request only)
 make e2e
 
 # One feature or cross-feature journey
@@ -177,6 +185,8 @@ pnpm exec playwright test tests/e2e/fnd-02-identity-access.spec.ts --project=chr
 ```
 
 Playwright uses the deployed frontend/backend and PostgreSQL. It does not mock business APIs or write directly to business tables. Generated reports remain ignored under `playwright-report/` and `test-results/`.
+
+Record failures in `BUGS.md`/`TODO.md`; do not automatically fix, retry, or rerun unless asked.
 
 ## AWS EC2 + RDS deployment and GitHub CI/CD
 
@@ -367,7 +377,7 @@ Open the repository as a trusted Codex project and invoke:
 $feature-sdlc Implement FND-02.
 ```
 
-The skill starts the required multi-agent team, creates the feature specification and test plan, develops the vertical slice, deploys frontend/backend locally against shared PostgreSQL, runs Playwright, performs independent review, synchronizes all status/test/TODO artifacts, and creates a focused local commit only after the gates pass.
+The skill implements dependency-compatible features/TODOs in rapid batches using implementation workers with non-overlapping ownership and one integrated reviewer. It keeps acceptance notes lightweight, authors tests as `Implemented / Not Run`, synchronizes trackers once per batch, and supports one related local commit. Specialist spec/test/E2E agents and deployment/regression execution are used only for material risk or an explicit request.
 
 ## Commands
 
@@ -378,10 +388,11 @@ The skill starts the required multi-agent team, creates the feature specificatio
 | `make postgres-provision` | Add or repair only this project's role, databases, and schemas.                 |
 | `make postgres-status`    | Verify the shared container and project database.                               |
 | `make dev`                | Start frontend and backend in development mode.                                 |
-| `make check`              | Run formatting, linting, type checks, and non-browser tests.                    |
-| `make deploy-local`       | Apply migrations, build, and start frontend/backend locally.                    |
-| `make e2e`                | Run Playwright against the local frontend/backend.                              |
-| `make verify`             | Run final repository and application quality gates.                             |
+| `make check`              | Lightweight batch gate: formatting, linting, and type checks only.              |
+| `make test`               | Explicit test phase: run non-browser test suites.                               |
+| `make deploy-local`       | Explicit deploy/test phase: migrate, build, and start local services.           |
+| `make e2e`                | Explicit test phase: full Playwright regression against local services.         |
+| `make verify`             | Explicit release phase: full repository and application verification.           |
 | `make status`             | Show feature, test, TODO, and Git status.                                       |
 
 ## Documentation map

@@ -12,14 +12,14 @@ FND-01 exposes a versioned JSON API under `/api/v1`. The Next.js frontend uses t
 
 ## Route groups
 
-| Group | Main routes | Access |
-|---|---|---|
-| Health | `GET /health/live`, `GET /health/ready` | Public safe summaries; readiness verifies PostgreSQL and applied Prisma migrations |
-| Authentication | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, invitation preview/acceptance | Public entry points plus authenticated session operations |
-| Tenant session | `POST /session/active-tenant` | Authenticated user with an active membership in the selected tenant |
-| Platform tenancy | tenant list/create/detail, deactivate/reactivate | Platform Admin only |
-| Platform operations | `GET /platform/report`, `GET /platform/alerts` | Platform Admin only; aggregate metadata excludes tenant business payloads |
-| Tenant setup | `GET /tenant/context`, `PATCH /tenant/setup/:key` | Active Tenant Owner context |
-| Isolation probes | probe list/create/detail/update, document, CSV export, report | Active Tenant Owner context; server-derived tenant scope |
+| Group               | Main routes                                                                            | Access                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Health              | `GET /health/live`, `GET /health/ready`                                                | Public safe summaries; readiness verifies PostgreSQL and applied Prisma migrations |
+| Authentication      | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, invitation preview/acceptance | Public entry points plus authenticated session operations                          |
+| Tenant session      | `POST /session/active-tenant`                                                          | Authenticated user with an active membership in the selected tenant                |
+| Platform tenancy    | tenant list/create/detail, deactivate/reactivate                                       | Platform Admin only                                                                |
+| Platform operations | `GET /platform/report`, `GET /platform/alerts`                                         | Platform Admin only; aggregate metadata excludes tenant business payloads          |
+| Tenant setup        | `GET /tenant/context`, `PATCH /tenant/setup/:key`                                      | Active Tenant Owner context                                                        |
+| Isolation probes    | probe list/create/detail/update, document, CSV export, report                          | Active Tenant Owner context; server-derived tenant scope                           |
 
 The complete field, response, idempotency, lifecycle, and failure semantics are defined in `specs/FND-01/spec.md`. Executable contract and isolation evidence is in the backend integration suite and `tests/e2e/fnd-01-tenant-foundation.spec.ts`.

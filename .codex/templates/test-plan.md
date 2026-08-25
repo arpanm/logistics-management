@@ -1,7 +1,7 @@
 # <FEATURE-ID> — Test Plan
 
-**Plan status:** Draft | Approved | Executed
-**Overall test status:** Not started | Planned | Implemented | Passing | Failing | Blocked
+**Plan status:** Lightweight | Detailed | Executed
+**Overall test status:** Planned | Implemented / Not Run | Passing | Failing | Blocked
 **Related spec:** `specs/<FEATURE-ID>/spec.md`
 
 ## Risks
@@ -13,7 +13,7 @@ Define two tenants, scoped roles, deterministic time, currency/timezone, record 
 ## Acceptance-to-test matrix
 
 | Test ID | Acceptance/risk | Layer | Preconditions | Action | Expected result | Status | Evidence |
-|---|---|---|---|---|---|---|---|
+| ------- | --------------- | ----- | ------------- | ------ | --------------- | ------ | -------- |
 
 ## Unit tests
 
@@ -41,7 +41,7 @@ Define two tenants, scoped roles, deterministic time, currency/timezone, record 
 
 ## Failure injection and recovery
 
-## Commands
+## Commands for an explicit batch/release test phase only
 
 ```bash
 make check
@@ -51,14 +51,14 @@ make e2e
 make verify
 ```
 
-## Approval
+## Coverage readiness
 
 - [ ] Every acceptance criterion has at least one test ID
 - [ ] Boundary and negative cases are explicit
 - [ ] Required fixtures are deterministic and tenant-isolated
-- [ ] Primary agent approved
+- [ ] Unexecuted coverage is marked Implemented / Not Run
 
-## Final execution synchronization
+## Execution synchronization (only after an explicit test phase)
 
 - [ ] Every test ID has a final status and evidence
 - [ ] No unexplained skipped/only/quarantined test remains

@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status dev check policy-check deploy-local health e2e verify status
+.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status dev check test policy-check deploy-local health e2e verify status
 
 help:
 	@echo "bootstrap           Validate tools, configure hooks, and install dependencies"
@@ -10,7 +10,8 @@ help:
 	@echo "postgres-provision  Add this project's role, databases, and schemas to shared PostgreSQL"
 	@echo "postgres-status     Verify shared PostgreSQL and the project database"
 	@echo "dev                 Start frontend and backend development processes"
-	@echo "check               Run application static checks and non-browser tests"
+	@echo "check               Run lightweight formatting, linting, and type checks"
+	@echo "test                Run non-browser tests when explicitly requested"
 	@echo "deploy-local        Build and start frontend/backend against shared PostgreSQL"
 	@echo "health              Verify PostgreSQL, backend, and frontend readiness"
 	@echo "e2e                 Run Playwright end-to-end tests"
@@ -37,6 +38,9 @@ dev:
 
 check:
 	@pnpm run check
+
+test:
+	@bash scripts/run-workspace-tests.sh
 
 policy-check:
 	@pnpm run policy:check

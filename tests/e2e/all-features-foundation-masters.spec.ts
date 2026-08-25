@@ -358,7 +358,7 @@ const masters: readonly MasterCase[] = [
     feature: "MST01",
     resource: "organization-nodes",
     route: "/app/masters/locations",
-    createButton: "Create organization node",
+    createButton: "Create node",
     invalidLabel: "Code",
   },
   {
@@ -450,12 +450,29 @@ async function fillCanonicalForm(
   if (entry.feature === "MST01") {
     await page.getByLabel("Code", { exact: true }).fill(String(payload.code));
     await page.getByLabel("Name").fill(String(payload.name));
-    await page.getByLabel("Node type").selectOption(String(payload.nodeType));
+    await page.getByLabel("Node type").selectOption("LEGAL_ENTITY");
     await page.getByLabel("Timezone").selectOption(String(payload.timezone));
-    await page.getByLabel("Postal codes").fill("700001");
-    const geofence = page.getByRole("group", { name: "Geofence method" });
-    await geofence.getByRole("combobox").selectOption("DYNAMIC_RADIUS");
-    await geofence.getByLabel("Radius (km)").fill("5");
+    await page.getByLabel("Address line 1").fill("1 Foundation Masters Road");
+    const postalLookup = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes("/api/v1/domain/masters/postal-localities") &&
+        response.url().includes("postalCode=700001"),
+    );
+    await page.getByLabel("PIN code").fill("700001");
+    expect((await postalLookup).status()).toBe(200);
+    const locality = page.getByLabel("Locality");
+    if (await locality.isVisible()) await locality.selectOption({ index: 1 });
+    await expect(
+      page.locator(".derived-fields span").filter({ hasText: /^CityKolkata$/ }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator(".derived-fields span")
+        .filter({ hasText: /^StateWest Bengal$/ }),
+    ).toBeVisible();
+    await page.getByLabel("Method").selectOption("DYNAMIC_RADIUS");
+    await page.getByLabel("Radius (km)").fill("5");
     await page.getByLabel("Active from").fill(String(payload.activeFrom));
     return;
   }
@@ -507,7 +524,13 @@ for (const entry of masters) {
     const responsePromise = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
-        response.url().endsWith(`/api/v1${endpoint}`),
+        response
+          .url()
+          .endsWith(
+            entry.feature === "MST01"
+              ? "/api/v1/domain/masters/organization"
+              : `/api/v1${endpoint}`,
+          ),
     );
     await page.getByRole("button", { name: entry.createButton }).click();
     expect((await responsePromise).status()).toBe(201);

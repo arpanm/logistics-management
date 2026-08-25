@@ -6,59 +6,43 @@ These instructions apply to the entire repository. More specific `AGENTS.md` fil
 
 Build the reusable logistics platform described in `FEATURES.md` through complete, independently verifiable feature slices. Treat the backup prototypes as requirements evidence, never as production architecture.
 
-## Mandatory multi-agent workflow
+## Rapid batch workflow
 
-For every feature implementation request, the primary agent must use the repo-local `$feature-sdlc` skill and its multi-agent team workflow.
+For implementation requests, use the repo-local `$feature-sdlc` skill in rapid batch mode. The normal unit of delivery is a dependency-compatible batch of related features or TODO fixes, not one agent ceremony and test cycle per feature.
 
-Required roles:
+Default roles:
 
-1. `spec_analyst` — turns the feature into an implementable specification and resolves traceability.
-2. `test_designer` — writes the test plan and acceptance-to-test matrix.
-3. `implementation_worker` — owns production implementation for the feature.
-4. `e2e_tester` — owns Playwright scenarios, local browser verification, and evidence.
-5. `reviewer` — independently checks correctness, security, architecture, migrations, and test gaps.
+1. `implementation_worker` — owns production code and updates automated tests without running the full suites.
+2. `reviewer` — reviews one completed batch for correctness, isolation, security, financial integrity, and obvious gaps.
 
-The primary agent orchestrates, makes final decisions, integrates results, runs final gates, updates status, and commits. If concurrency is limited, run roles in ordered waves. Never omit a role; reuse an idle agent with a follow-up task if needed.
+Use `spec_analyst`, `test_designer`, or `e2e_tester` only when the user explicitly requests them or a batch has material ambiguity or high risk that cannot be handled with lightweight acceptance notes and normal review. Parallelize independent implementation areas with explicit, non-overlapping ownership. Never let agents overwrite or revert another agent's work.
 
-Parallelize read-heavy specification, exploration, and review work. Do not let multiple agents edit overlapping production files concurrently. The implementation worker has exclusive write ownership of production code during implementation. The e2e tester may edit only tests and test fixtures after production implementation is stable.
+## Batch lifecycle
 
-## Feature lifecycle
-
-1. Select exactly one dependency-ready feature from `FEATURES.md`.
-2. Verify Git state. Preserve pre-existing user changes and never include unrelated changes in the feature commit.
-3. Create `specs/<FEATURE-ID>/spec.md` from `.codex/templates/feature-spec.md`.
-4. Create `specs/<FEATURE-ID>/test-plan.md` from `.codex/templates/test-plan.md`.
-5. Record open decisions in the spec. Make safe configurable assumptions; stop only for a genuinely blocking product decision.
-6. Implement a full vertical slice: schema/migration, domain logic, API, authorization, UI, audit/telemetry, reports/alerts/events where applicable, documentation, and tests.
-7. Run unit, integration, contract, security/authorization, and migration checks.
-8. Deploy locally using `make deploy-local` and verify health.
-9. Run Playwright end to end using `make e2e`. Capture traces/screenshots only for failures or required evidence; do not commit bulky generated output.
-10. Run `make verify` and an independent reviewer pass. Fix all blocking findings and repeat affected gates.
-11. Perform the mandatory status/documentation synchronization gate after implementation, deployment, Playwright, and review are final:
-    - Update implementation status and test status in both the `FEATURES.md` register and feature section.
-    - Update `README.md` current status/next feature summary.
-    - Update `TODO.md`: remove completed items and record every remaining item with feature, owner/reason, and state.
-    - Update `specs/<FEATURE-ID>/spec.md`, `test-plan.md`, and `completion.md`; every test ID must show `Planned`, `Implemented`, `Passing`, `Failing`, `Blocked`, or `N/A` with evidence.
-    - Update executable test files, fixture TODOs, code TODOs, API/architecture/runbook documents, and package-level documentation affected by the feature.
-    - Search for stale feature status, unchecked completion items, unresolved TODO/FIXME markers, skipped/only tests, and outdated test names. Resolve them or document them explicitly.
-12. Run synchronization/policy verification again. Only mark implementation Complete and tests Passing when every acceptance criterion and required test is passing locally.
-13. Create one focused local Git commit using the approved convention. Do not push unless the user explicitly asks.
+1. Select the largest sensible dependency-compatible batch from `FEATURES.md` and `TODO.md`; record the included IDs and inspect Git state.
+2. Add or update lightweight acceptance notes in existing feature specs. Create a full spec/test plan only for material ambiguity, high-risk authorization/financial behavior, or an explicit user request.
+3. Implement the batch end to end: migrations, domain logic, API, authorization, UI, audit/telemetry, affected reports/events, documentation, and automated test cases.
+4. Author or update focused unit, integration, contract, security, migration, and Playwright cases as applicable, but mark newly added or changed cases `Implemented / Not Run` until an explicit test phase executes them.
+5. Do not automatically run tests, deploy locally, invoke Playwright, run `make check`, or run `make verify` for each feature. Do not enter fix/retest loops unless the user asks.
+6. Review the combined batch once. Fix clear code-review blockers together without automatically running tests afterward.
+7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case lists, and documentation once for the batch. Implementation and test status must remain distinct.
+8. When the user explicitly requests a batch/release test phase, deploy once if needed, run the selected focused suites or full regression once, and record each result as Passing, Failing, or Blocked. Do not automatically fix or rerun failures; add them to the bug/TODO list with evidence unless asked to fix.
+9. Before a requested batch commit, run only lightweight non-test gates once: formatting, type checking, and policy/status checks. A single focused batch commit covering related IDs is allowed. Do not push unless explicitly asked.
 
 ## Definition of done
 
-A feature is not done because code exists. It is done only when:
+A feature may be implementation-complete before its tests have been executed. Keep those facts explicit:
 
-- Feature spec and test plan are complete and trace every acceptance criterion.
-- Database migrations are forward-safe and verified from a clean database.
-- Server-side tenant isolation and scoped authorization are tested.
+- Acceptance notes identify the intended outcome, dependencies, material rules, and test cases.
+- Database migrations are forward-safe by design; execution evidence is recorded only when run.
+- Server-side tenant isolation and scoped authorization are implemented and have automated coverage authored.
 - UI is accessible, responsive, and handles loading, empty, error, and retry states.
 - Domain calculations have exact boundary tests and use exact decimal/timezone-safe handling.
 - Relevant reports reconcile with transaction detail.
-- Local deployment succeeds from documented commands.
-- Playwright proves the primary happy path, permissions, validation, and a material exception path.
+- Local deployment and Playwright results are not prerequisites for `Implemented`; they are executed only in an explicit batch/release test phase.
 - No secrets, backup source artifacts, generated test output, or unrelated changes enter the commit.
-- `make verify` passes and reviewer has no unresolved blocking finding.
-- Feature/test statuses, README summary, TODO queue, specs, completion evidence, and executable test case status are mutually consistent.
+- A batch review has no unresolved blocking code finding.
+- Feature/test statuses, README summary, TODO queue, specs, and executable test-case status are mutually consistent. `Implemented / Not Run` is valid and must never be reported as Passing.
 
 ## Architecture invariants
 
@@ -80,14 +64,14 @@ A feature is not done because code exists. It is done only when:
 - Prefer small cohesive modules and typed boundaries. Validate all external input.
 - Keep generated clients/artifacts out of manual edits.
 - Use `rg` for search. Use non-destructive Git commands. Never reset or discard user changes.
-- Use Conventional Commits with feature scope: `feat(FND-01): establish tenant foundation`.
-- One feature per commit. Use `fix`, `test`, `docs`, `refactor`, or `chore` only when they accurately describe a standalone non-feature change.
+- Use Conventional Commits with a feature or batch scope, for example `feat(MST): complete master-data workflows`.
+- One related batch per commit is allowed. Use `fix`, `test`, `docs`, `refactor`, or `chore` when they accurately describe the batch.
 - Do not amend, rebase, push, tag, or force-update history unless explicitly requested.
 - Never include schedules or delivery estimates in repository documentation.
 
-## Required verification commands
+## Verification commands
 
-Prefer repository commands over ad hoc equivalents:
+These commands are available, but none is automatically required per feature. Run them only when the user requests testing/verification or at an explicitly selected batch/release test phase:
 
 ```bash
 make policy-check
@@ -98,13 +82,13 @@ make e2e
 make verify
 ```
 
-If a command does not yet apply during bootstrap, implement the missing package/script as part of `FND-01`; do not silently claim the gate passed.
+For a commit-only batch gate, run formatting, type checking, and policy/status checks once. Do not claim an unexecuted test passed.
 
 ## Source hierarchy
 
 1. Current user instruction
 2. This `AGENTS.md`
-3. Approved per-feature spec and decisions
+3. Approved batch acceptance notes/spec decisions
 4. `FEATURES.md`
 5. Architecture/SDLC/testing documentation
 6. Backup prototypes and workbook as historical evidence

@@ -95,11 +95,16 @@ describe.sequential(
         "202608250014_fnd01_postal_importer_table_privileges",
         "202608250015_fnd01_postal_runtime_lock_privilege",
         "202608250016_fnd01_postal_owner_handoff_contract",
+        "202608250017_mst01_operable_masters",
+        "202608250018_mst01_ownership_export",
+        "202608250019_mst01_scope_provenance",
+        "202608250020_mst01_scope_backfill_correction",
+        "202608250021_mst01_exception_scope_reconciliation",
       ]);
       await expect(service.ready()).resolves.toMatchObject({
         status: "ready",
         migration: "ready",
-        migrationCount: 15,
+        migrationCount: 20,
       });
     });
 
@@ -410,6 +415,8 @@ describe.sequential(
         "app.document_scan_results": false,
         "app.drivers": false,
         "app.eligibility_overrides": false,
+        "app.employee_region_coverage": false,
+        "app.employee_scope_grant_links": false,
         "app.employees": false,
         "app.governed_comment_history": false,
         "app.governed_comments": false,
@@ -432,6 +439,7 @@ describe.sequential(
         "app.invoice_notes": false,
         "app.invoice_service_links": false,
         "app.legal_entities": false,
+        "app.master_deactivation_exceptions": false,
         "app.module_comments": false,
         "app.module_documents": false,
         "app.module_record_snapshots": false,
@@ -440,6 +448,7 @@ describe.sequential(
         "app.operational_alert_actions": false,
         "app.operational_alerts": false,
         "app.operational_assignments": false,
+        "app.organization_addresses": false,
         "app.organization_closure": false,
         "app.organization_nodes": false,
         "app.outbox_events": true,

@@ -15,12 +15,15 @@ import {
   OperationalWorkerService,
   AdvancedDomainController,
   AdvancedDomainService,
+  Mst01Controller,
+  Mst01Service,
 } from "./modules/canonical/index.js";
 
 @Module({
   controllers: [
     AccessController,
     ...intelligenceControllers,
+    Mst01Controller,
     AdvancedDomainController,
     CanonicalController,
     KernelController,
@@ -34,6 +37,7 @@ import {
     CanonicalService,
     OperationalWorkerService,
     AdvancedDomainService,
+    Mst01Service,
   ],
 })
 export class AppModule {}

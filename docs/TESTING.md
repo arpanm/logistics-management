@@ -1,72 +1,76 @@
 # Testing Strategy
 
+## Execution policy
+
+Automated tests are designed and maintained with the implementation, but they are not automatically executed for every feature. Newly added or changed coverage remains `Implemented / Not Run` until the user explicitly requests a focused batch test, full regression, deployment verification, or release verification.
+
+When a test phase is requested, run the selected scope once and record the result. Do not automatically retry, fix, or rerun failures.
+
 ## Test layers
 
-| Layer | Purpose | Expected location |
-|---|---|---|
-| Unit | Pure domain calculations, policies, validators, state transitions, boundary rules | Beside source or package test directory |
-| Integration | Database repositories, migrations, transactions, queues, object storage, authorization queries | Package/app integration tests |
-| Contract | API schemas, webhooks, imports/exports, provider adapters | Module contract tests |
-| Component | Accessible UI behavior without full browser journey | UI/app component tests |
-| End to end | Real browser behavior against locally deployed services | `tests/e2e/` |
-| Reconciliation | KPI/ledger/report totals against canonical transactions | Domain/report integration and E2E |
+| Layer          | Purpose                                                                  | Expected location                 |
+| -------------- | ------------------------------------------------------------------------ | --------------------------------- |
+| Unit           | Pure calculations, policies, validators, transitions, boundaries         | Beside source or package tests    |
+| Integration    | PostgreSQL repositories, migrations, transactions, authorization queries | Package/app integration tests     |
+| Contract       | API schemas, webhooks, imports/exports, adapters                         | Module contract tests             |
+| Component      | Accessible UI behavior without a full browser journey                    | UI/app component tests            |
+| End to end     | Real browser behavior against locally deployed services                  | `tests/e2e/`                      |
+| Reconciliation | KPI/ledger/report totals against canonical transactions                  | Domain/report integration and E2E |
 
 ## Test status vocabulary
 
-| Status | Meaning |
-|---|---|
-| Planned | Test ID exists in the approved test plan but executable coverage is incomplete. |
-| Implemented | Executable test exists but the full required local suite is not passing. |
-| Passing | Test passed against the final locally deployed feature/build. |
-| Failing | Test ran and failed; include failure evidence. |
-| Blocked | Test cannot run because of a named blocker and unblock condition. |
-| N/A | Requirement is demonstrably not applicable; include justification and reviewer approval. |
+| Status                | Meaning                                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| Planned               | Coverage is identified but not executable yet.                                                      |
+| Implemented / Not Run | Executable coverage exists or was changed, but has not run in the current batch/release test phase. |
+| Passing               | The test ran and passed against the recorded build/environment.                                     |
+| Failing               | The test ran once and failed; include concise evidence.                                             |
+| Blocked               | The test could not run because of a named blocker and unblock condition.                            |
+| N/A                   | The requirement is demonstrably not applicable; include justification.                              |
 
-Every test ID in `specs/<FEATURE-ID>/test-plan.md` must have a final status and evidence before commit. Test status in `FEATURES.md`, README, TODO, completion evidence, and executable test files must agree.
+Tracker, spec, and executable test-case status must agree. Never use Passing for an unexecuted case.
 
-## Mandatory domain coverage
+## Coverage expectations
 
-- Two-tenant negative-access fixtures for every tenant-owned resource.
-- Scoped-role positive and negative cases.
-- Exact placement, POD, and collection threshold boundaries.
-- Tenant timezone calendar boundaries.
-- Decimal/money rounding and reconciliation.
-- Duplicate/idempotent retry behavior.
-- Concurrent update/version-conflict behavior.
-- State-machine valid and invalid transitions.
-- Import row/column validation and correction history.
-- Ledger posting, partial allocation, full allocation, over-allocation policy, and reversal.
+Author applicable coverage for:
+
+- two-tenant negative access and scoped-role positive/negative behavior;
+- time, timezone, decimal/money, threshold, and state-transition boundaries;
+- duplicate/idempotent requests and concurrent/version conflicts;
+- import validation and correction history;
+- ledger posting, allocation, reconciliation, and compensating reversal;
+- primary UI success, validation/no partial mutation, authorization, material exception/recovery, and downstream reconciliation.
+
+These expectations govern test design; they do not cause automatic execution.
 
 ## Playwright conventions
 
-- Test observable behavior, not implementation details.
-- Prefer semantic locators: role, label, placeholder, visible text, and test IDs only when no stable accessible locator exists.
-- Tests must run independently and in parallel unless explicitly marked serial for a documented shared-resource reason.
-- Use deterministic fixture factories with unique tenant and record keys.
-- Set up data through supported API/test fixtures; execute the behavior under test through the UI.
-- Never use arbitrary sleeps. Wait for UI state, network response, event, or persisted outcome.
-- Assert server-side effects for material operations, not only toast messages.
-- Include accessibility smoke checks for new primary screens when the chosen library is established.
-- Capture trace on first retry and screenshots on failure. Keep generated output out of Git.
+- Test observable behavior using real frontend, backend, and PostgreSQL services; do not mock business APIs.
+- Prefer semantic locators and deterministic tenant-isolated fixtures.
+- Use supported APIs/fixtures for setup and the UI for behavior under test.
+- Never use arbitrary sleeps; wait for observable state or persisted outcomes.
+- Assert server-side effects for material operations.
+- Keep traces, screenshots, videos, and generated reports out of Git.
 
-## Required E2E scenarios per feature
+## Explicit test-phase commands
 
-1. Primary permitted-user success path.
-2. Validation failure with no partial mutation.
-3. Unauthorized role/scope/tenant path.
-4. Material exception or recovery path.
-5. Relevant report/dashboard reconciliation or downstream event.
+Choose the smallest requested scope:
 
-## Local E2E contract
+```bash
+# Focused case or feature
+pnpm exec playwright test tests/e2e/<feature>.spec.ts --project=chromium
 
-- Base URL comes from `E2E_BASE_URL`, default `http://127.0.0.1:3000`.
-- A readiness endpoint must return success before tests begin.
-- Test mode uses dedicated database/schema and object prefix.
-- E2E data must never point to non-local services without explicit authorization.
-- The test runner may reuse an already-running local server; CI can start one through Playwright `webServer` configuration.
+# Non-browser batch tests
+make test
+
+# Full local release regression (only when explicitly requested)
+make deploy-local
+make e2e
+make verify
+```
+
+Use only local services and the project test database. Never point Playwright at production. Run the chosen scope once, record pass/fail, and stop unless the user asks for fixes or another run.
 
 ## Evidence
 
-`completion.md` records commands and concise results. Do not commit videos, traces, screenshots, database dumps, or HTML reports unless a small artifact is expressly required as permanent documentation.
-
-Before completion, search for and resolve or explicitly record `TODO`, `FIXME`, `.skip`, `.only`, quarantine markers, and stale feature/test names in tests and fixtures.
+Record the command, build/commit, environment, counts, and concise failures in the affected tracker/spec or completion note. A test result without current execution evidence remains `Implemented / Not Run`.

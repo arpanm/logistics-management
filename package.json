@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": "22.x || 24.x",
+    "pnpm": ">=11 <12"
+  },
   "description": "Multi-tenant logistics operations control tower",
   "scripts": {
     "policy:check": "bash scripts/policy-check.sh",

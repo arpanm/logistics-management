@@ -28,6 +28,59 @@ export class AdvancedDomainService {
     return toJsonSafe(await withTenant(this.app.db, tenant, execute)) as T;
   }
 
+  private async idempotent<T extends Row>(
+    tx: Tx,
+    actor: SessionActor,
+    operation: string,
+    key: string,
+    input: unknown,
+    execute: () => Promise<T>,
+  ): Promise<T> {
+    if (!key.trim())
+      throw new AppError(
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "Idempotency-Key is required",
+      );
+    const tenant = this.tenant(actor);
+    const keyHash = sha(`${tenant}:${key.trim()}`);
+    const requestHash = sha(JSON.stringify(toJsonSafe(input)));
+    await tx.$executeRawUnsafe(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+      `${tenant}:${operation}:${keyHash}`,
+    );
+    const prior = (
+      await tx.$queryRawUnsafe<Row[]>(
+        `SELECT request_hash,response_json FROM app.idempotency_records WHERE actor_id=$1::uuid AND operation=$2 AND key_hash=$3`,
+        actor.userId,
+        operation,
+        keyHash,
+      )
+    )[0];
+    if (prior) {
+      if (prior.request_hash !== requestHash)
+        throw new AppError(
+          409,
+          "IDEMPOTENCY_CONFLICT",
+          "Idempotency key was used for different input",
+        );
+      return { ...(prior.response_json as T), replayed: true };
+    }
+    const result = await execute();
+    await tx.$executeRawUnsafe(
+      `INSERT INTO app.idempotency_records(scope,tenant_id,actor_id,operation,key_hash,request_hash,resource_id,response_json)
+       VALUES('TENANT',$1::uuid,$2::uuid,$3,$4,$5,$6::uuid,$7::jsonb)`,
+      tenant,
+      actor.userId,
+      operation,
+      keyHash,
+      requestHash,
+      result.id ?? null,
+      JSON.stringify(toJsonSafe(result)),
+    );
+    return result;
+  }
+
   private async access(
     tx: Tx,
     actor: SessionActor,
@@ -178,6 +231,10 @@ export class AdvancedDomainService {
   async organizationImpact(actor: SessionActor, nodeId: string) {
     const tenant = this.tenant(actor);
     return this.safeTenant(tenant, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${tenant}:mst01:organization`,
+      );
       await this.resourceAccess(
         tx,
         actor,
@@ -216,9 +273,14 @@ export class AdvancedDomainService {
     expectedVersion: number,
     reason: string,
     correlationId: string,
+    idempotencyKey: string,
   ) {
     const tenant = this.tenant(actor);
     return this.safeTenant(tenant, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${tenant}:mst01:organization`,
+      );
       await this.resourceAccess(
         tx,
         actor,
@@ -227,91 +289,140 @@ export class AdvancedDomainService {
         "organization-nodes",
         nodeId,
       );
-      const before = (
-        await tx.$queryRawUnsafe<Row[]>(
-          `SELECT * FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
-          tenant,
-          nodeId,
-        )
-      )[0];
-      if (!before)
-        throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
-      if (Number(before.version) !== expectedVersion)
-        throw new AppError(
-          409,
-          "VERSION_CONFLICT",
-          "Hierarchy changed; reload and retry",
-        );
-      if (
-        parentId === nodeId ||
-        (parentId &&
-          bool(
-            (
-              await tx.$queryRawUnsafe<Row[]>(
-                `SELECT EXISTS(SELECT 1 FROM app.organization_closure WHERE tenant_id=$1::uuid AND ancestor_id=$2::uuid AND descendant_id=$3::uuid) cycle`,
-                tenant,
-                nodeId,
-                parentId,
-              )
-            )[0]?.cycle,
-          ))
-      )
-        throw new AppError(
-          409,
-          "HIERARCHY_CYCLE",
-          "A node cannot move beneath its descendant",
-        );
-      if (
-        parentId &&
-        !(
-          await tx.$queryRawUnsafe<Row[]>(
-            `SELECT id FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid AND state='ACTIVE'`,
-            tenant,
-            parentId,
-          )
-        )[0]
-      )
-        throw new AppError(404, "RESOURCE_NOT_FOUND", "Parent not found");
-      if (parentId)
-        await this.resourceAccess(
-          tx,
-          actor,
-          "masters.admin",
-          "UPDATE",
-          "organization-nodes",
-          parentId,
-        );
-      await tx.$executeRawUnsafe(
-        `DELETE FROM app.organization_closure WHERE tenant_id=$1::uuid AND descendant_id IN (SELECT descendant_id FROM app.organization_closure WHERE tenant_id=$1::uuid AND ancestor_id=$2::uuid) AND ancestor_id NOT IN (SELECT descendant_id FROM app.organization_closure WHERE tenant_id=$1::uuid AND ancestor_id=$2::uuid)`,
-        tenant,
-        nodeId,
-      );
-      await tx.$executeRawUnsafe(
-        `INSERT INTO app.organization_closure(tenant_id,ancestor_id,descendant_id,depth) SELECT $1::uuid,p.ancestor_id,c.descendant_id,p.depth+c.depth+1 FROM app.organization_closure p CROSS JOIN app.organization_closure c WHERE p.tenant_id=$1::uuid AND c.tenant_id=$1::uuid AND p.descendant_id=$2::uuid AND c.ancestor_id=$3::uuid ON CONFLICT DO NOTHING`,
-        tenant,
-        parentId,
-        nodeId,
-      );
-      const after = (
-        await tx.$queryRawUnsafe<Row[]>(
-          `UPDATE app.organization_nodes SET parent_id=$1::uuid,version=version+1,updated_at=now() WHERE tenant_id=$2::uuid AND id=$3::uuid RETURNING *`,
-          parentId,
-          tenant,
-          nodeId,
-        )
-      )[0]!;
-      await this.audit(
+      return this.idempotent(
         tx,
         actor,
-        "organization.moved",
-        "organization_node",
-        nodeId,
-        correlationId,
-        before,
-        after,
-        reason,
+        `mst01.organization.move.${nodeId}`,
+        idempotencyKey,
+        { parentId, expectedVersion, reason },
+        async () => {
+          const before = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT * FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+              tenant,
+              nodeId,
+            )
+          )[0];
+          if (!before)
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          if (Number(before.version) !== expectedVersion)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Hierarchy changed; reload and retry",
+            );
+          if (String(before.node_type) === "LEGAL_ENTITY" && parentId)
+            throw new AppError(
+              400,
+              "PARENT_INVALID",
+              "A legal entity must remain a root node",
+            );
+          if (String(before.node_type) !== "LEGAL_ENTITY" && !parentId)
+            throw new AppError(
+              400,
+              "PARENT_INVALID",
+              "Select a valid parent node",
+            );
+          if (
+            parentId === nodeId ||
+            (parentId &&
+              bool(
+                (
+                  await tx.$queryRawUnsafe<Row[]>(
+                    `SELECT EXISTS(SELECT 1 FROM app.organization_closure WHERE tenant_id=$1::uuid AND ancestor_id=$2::uuid AND descendant_id=$3::uuid) cycle`,
+                    tenant,
+                    nodeId,
+                    parentId,
+                  )
+                )[0]?.cycle,
+              ))
+          )
+            throw new AppError(
+              409,
+              "HIERARCHY_CYCLE",
+              "A node cannot move beneath its descendant",
+            );
+          if (
+            parentId &&
+            !(
+              await tx.$queryRawUnsafe<Row[]>(
+                `SELECT id FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid AND state='ACTIVE'`,
+                tenant,
+                parentId,
+              )
+            )[0]
+          )
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Parent not found");
+          if (parentId) {
+            const parentType = String(
+              (
+                await tx.$queryRawUnsafe<Row[]>(
+                  `SELECT node_type FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+                  tenant,
+                  parentId,
+                )
+              )[0]?.node_type ?? "",
+            );
+            const allowed: Record<string, string[]> = {
+              REGION: ["LEGAL_ENTITY"],
+              BRANCH: ["REGION"],
+              TEAM: ["BRANCH", "HUB"],
+              HUB: ["REGION", "BRANCH"],
+            };
+            if (!allowed[String(before.node_type)]?.includes(parentType))
+              throw new AppError(
+                400,
+                "PARENT_TYPE_INVALID",
+                "Selected parent type is not allowed",
+              );
+          }
+          if (parentId)
+            await this.resourceAccess(
+              tx,
+              actor,
+              "masters.admin",
+              "UPDATE",
+              "organization-nodes",
+              parentId,
+            );
+          await tx.$executeRawUnsafe(
+            `DELETE FROM app.organization_closure WHERE tenant_id=$1::uuid AND descendant_id IN (SELECT descendant_id FROM app.organization_closure WHERE tenant_id=$1::uuid AND ancestor_id=$2::uuid) AND ancestor_id NOT IN (SELECT descendant_id FROM app.organization_closure WHERE tenant_id=$1::uuid AND ancestor_id=$2::uuid)`,
+            tenant,
+            nodeId,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.organization_closure(tenant_id,ancestor_id,descendant_id,depth) SELECT $1::uuid,p.ancestor_id,c.descendant_id,p.depth+c.depth+1 FROM app.organization_closure p CROSS JOIN app.organization_closure c WHERE p.tenant_id=$1::uuid AND c.tenant_id=$1::uuid AND p.descendant_id=$2::uuid AND c.ancestor_id=$3::uuid ON CONFLICT DO NOTHING`,
+            tenant,
+            parentId,
+            nodeId,
+          );
+          const after = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `UPDATE app.organization_nodes SET parent_id=$1::uuid,version=version+1,updated_at=now() WHERE tenant_id=$2::uuid AND id=$3::uuid RETURNING *`,
+              parentId,
+              tenant,
+              nodeId,
+            )
+          )[0]!;
+          await tx.$executeRawUnsafe(
+            `SELECT app.reconcile_organization_subtree_scopes($1::uuid,$2::uuid)`,
+            tenant,
+            nodeId,
+          );
+          await this.audit(
+            tx,
+            actor,
+            "organization.moved",
+            "organization_node",
+            nodeId,
+            correlationId,
+            before,
+            after,
+            reason,
+          );
+          return after;
+        },
       );
-      return after;
     });
   }
 
@@ -326,11 +437,50 @@ export class AdvancedDomainService {
       effectiveTo?: string;
       exceptionReason?: string;
     }>,
+    idempotencyKey: string,
     correlationId: string,
   ) {
     const tenant = this.tenant(actor);
     return this.safeTenant(tenant, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${tenant}:mst01:employees`,
+      );
       await this.access(tx, actor, "masters.admin", "UPDATE");
+      if (!idempotencyKey.trim())
+        throw new AppError(
+          400,
+          "IDEMPOTENCY_KEY_REQUIRED",
+          "Idempotency-Key is required",
+        );
+      const keyHash = sha(`${tenant}:${idempotencyKey.trim()}`);
+      const requestHash = sha(JSON.stringify(entries));
+      const claimed = await tx.$queryRawUnsafe<Row[]>(
+        `INSERT INTO app.idempotency_records(scope,tenant_id,actor_id,operation,key_hash,request_hash,response_json,state)
+         VALUES('TENANT',$1::uuid,$2::uuid,'mst01.assignments.bulk',$3,$4,'{}','PENDING')
+         ON CONFLICT(actor_id,operation,key_hash) DO NOTHING RETURNING id`,
+        tenant,
+        actor.userId,
+        keyHash,
+        requestHash,
+      );
+      if (!claimed.length) {
+        const existing = (
+          await tx.$queryRawUnsafe<Row[]>(
+            `SELECT request_hash,response_json,state FROM app.idempotency_records WHERE tenant_id=$1::uuid AND actor_id=$2::uuid AND operation='mst01.assignments.bulk' AND key_hash=$3 FOR UPDATE`,
+            tenant,
+            actor.userId,
+            keyHash,
+          )
+        )[0]!;
+        if (existing.request_hash !== requestHash)
+          throw new AppError(
+            409,
+            "IDEMPOTENCY_CONFLICT",
+            "Idempotency key was already used with different input",
+          );
+        if (existing.state === "COMPLETE") return existing.response_json;
+      }
       const created: Row[] = [];
       for (const entry of entries) {
         if (!entry.organizationNodeId && !entry.clientId)
@@ -347,6 +497,19 @@ export class AdvancedDomainService {
           "employees",
           entry.employeeId,
         );
+        const activeEmployee = (
+          await tx.$queryRawUnsafe<Row[]>(
+            `SELECT id FROM app.employees WHERE tenant_id=$1::uuid AND id=$2::uuid AND state='ACTIVE' AND active_from<=current_date AND (active_to IS NULL OR active_to>=current_date)`,
+            tenant,
+            entry.employeeId,
+          )
+        )[0];
+        if (!activeEmployee)
+          throw new AppError(
+            409,
+            "EMPLOYEE_INACTIVE",
+            "Assignments require an active employee",
+          );
         if (entry.organizationNodeId)
           await this.resourceAccess(
             tx,
@@ -391,8 +554,24 @@ export class AdvancedDomainService {
           row,
           entry.exceptionReason,
         );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key)
+           VALUES($1::uuid,'TENANT','operational_assignment',$2::uuid,'assignment.created.v1',$3::jsonb,$4) ON CONFLICT(deduplication_key) DO NOTHING`,
+          tenant,
+          row.id,
+          JSON.stringify(row),
+          `mst01:assignment:${String(row.id)}:created`,
+        );
       }
-      return { items: created, count: created.length };
+      const response = { items: created, count: created.length };
+      await tx.$executeRawUnsafe(
+        `UPDATE app.idempotency_records SET response_json=$1::jsonb,state='COMPLETE',updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND actor_id=$3::uuid AND operation='mst01.assignments.bulk' AND key_hash=$4`,
+        JSON.stringify(response),
+        tenant,
+        actor.userId,
+        keyHash,
+      );
+      return response;
     });
   }
 
@@ -402,12 +581,18 @@ export class AdvancedDomainService {
     input: {
       replacementEmployeeId: string;
       expectedVersion: number;
+      impactSnapshotId: string;
       reason: string;
     },
     correlationId: string,
+    idempotencyKey: string,
   ) {
     const tenant = this.tenant(actor);
     return this.safeTenant(tenant, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${tenant}:mst01:employees`,
+      );
       await this.resourceAccess(
         tx,
         actor,
@@ -424,73 +609,344 @@ export class AdvancedDomainService {
         "employees",
         input.replacementEmployeeId,
       );
-      const employee = (
-        await tx.$queryRawUnsafe<Row[]>(
-          `SELECT * FROM app.employees WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
-          tenant,
-          employeeId,
-        )
-      )[0];
-      const replacement = (
-        await tx.$queryRawUnsafe<Row[]>(
-          `SELECT id FROM app.employees WHERE tenant_id=$1::uuid AND id=$2::uuid AND state='ACTIVE'`,
-          tenant,
-          input.replacementEmployeeId,
-        )
-      )[0];
-      if (!employee || !replacement)
-        throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
-      if (Number(employee.version) !== input.expectedVersion)
-        throw new AppError(
-          409,
-          "VERSION_CONFLICT",
-          "Employee changed; reload and retry",
-        );
-      if (employeeId === input.replacementEmployeeId)
-        throw new AppError(
-          400,
-          "REPLACEMENT_INVALID",
-          "Replacement must be another employee",
-        );
-      await tx.$executeRawUnsafe(
-        `UPDATE app.employees SET manager_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND manager_id=$3::uuid`,
-        input.replacementEmployeeId,
-        tenant,
-        employeeId,
-      );
-      await tx.$executeRawUnsafe(
-        `UPDATE app.operational_assignments SET effective_to=now(),exception_reason=$1 WHERE tenant_id=$2::uuid AND employee_id=$3::uuid AND (effective_to IS NULL OR effective_to>now())`,
-        input.reason,
-        tenant,
-        employeeId,
-      );
-      await tx.$executeRawUnsafe(
-        `INSERT INTO app.operational_assignments(tenant_id,employee_id,assignment_type,organization_node_id,client_id,effective_from,effective_to,exception_reason,created_by) SELECT tenant_id,$1::uuid,assignment_type,organization_node_id,client_id,now(),null,$2, $3::uuid FROM app.operational_assignments WHERE tenant_id=$4::uuid AND employee_id=$5::uuid AND effective_to=now()`,
-        input.replacementEmployeeId,
-        input.reason,
-        actor.userId,
-        tenant,
-        employeeId,
-      );
-      const after = (
-        await tx.$queryRawUnsafe<Row[]>(
-          `UPDATE app.employees SET state='INACTIVE',active_to=current_date,updated_at=now(),version=version+1 WHERE tenant_id=$1::uuid AND id=$2::uuid RETURNING *`,
-          tenant,
-          employeeId,
-        )
-      )[0]!;
-      await this.audit(
+      return this.idempotent(
         tx,
         actor,
-        "employee.reassigned_and_deactivated",
-        "employee",
-        employeeId,
-        correlationId,
-        employee,
-        after,
-        input.reason,
+        `mst01.employee.reassign.${employeeId}`,
+        idempotencyKey,
+        input,
+        async () => {
+          const employee = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT * FROM app.employees WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+              tenant,
+              employeeId,
+            )
+          )[0];
+          const replacement = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT id,linked_membership_id FROM app.employees WHERE tenant_id=$1::uuid AND id=$2::uuid AND state='ACTIVE'`,
+              tenant,
+              input.replacementEmployeeId,
+            )
+          )[0];
+          if (!employee || !replacement)
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          if (Number(employee.version) !== input.expectedVersion)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Employee changed; reload and retry",
+            );
+          if (employeeId === input.replacementEmployeeId)
+            throw new AppError(
+              400,
+              "REPLACEMENT_INVALID",
+              "Replacement must be another employee",
+            );
+          const replacementInReportSubtree = bool(
+            (
+              await tx.$queryRawUnsafe<Row[]>(
+                `WITH RECURSIVE reports AS (
+               SELECT id FROM app.employees WHERE tenant_id=$1::uuid AND manager_id=$2::uuid AND state='ACTIVE'
+               UNION ALL SELECT e.id FROM app.employees e JOIN reports r ON e.manager_id=r.id WHERE e.tenant_id=$1::uuid AND e.state='ACTIVE'
+             ) SELECT EXISTS(SELECT 1 FROM reports WHERE id=$3::uuid) found`,
+                tenant,
+                employeeId,
+                input.replacementEmployeeId,
+              )
+            )[0]?.found,
+          );
+          if (replacementInReportSubtree)
+            throw new AppError(
+              409,
+              "REPLACEMENT_CYCLE",
+              "Replacement must be outside the employee reporting subtree",
+            );
+          const affected = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT
+            coalesce((SELECT jsonb_agg(e.id ORDER BY e.id) FROM app.employees e WHERE tenant_id=$1::uuid AND manager_id=$2::uuid AND state='ACTIVE'),'[]') reports,
+            coalesce((SELECT jsonb_agg(c.id ORDER BY c.id) FROM app.clients c WHERE tenant_id=$1::uuid AND account_manager_employee_id=$2::uuid AND state='ACTIVE'),'[]') clients,
+            coalesce((SELECT jsonb_agg(l.id ORDER BY l.id) FROM app.client_locations l WHERE tenant_id=$1::uuid AND manager_employee_id=$2::uuid AND state='ACTIVE'),'[]') locations,
+            coalesce((SELECT jsonb_agg(v.id ORDER BY v.id) FROM app.vendors v WHERE tenant_id=$1::uuid AND onboarding_employee_id=$2::uuid AND state<>'INACTIVE'),'[]') vendors,
+            coalesce((SELECT jsonb_agg(a.id ORDER BY a.id) FROM app.operational_assignments a WHERE tenant_id=$1::uuid AND employee_id=$2::uuid AND (effective_to IS NULL OR effective_to>now())),'[]') assignments,
+            coalesce((SELECT jsonb_agg(i.id ORDER BY i.id) FROM app.indents i WHERE tenant_id=$1::uuid AND owner_membership_id=$3::uuid AND state IN ('DRAFT','OPEN','PARTIALLY_ALLOCATED')),'[]') indents,
+            coalesce((SELECT jsonb_agg(a.id ORDER BY a.id) FROM app.allocations a WHERE tenant_id=$1::uuid AND owner_membership_id=$3::uuid AND state NOT IN ('REJECTED','EXPIRED','CANCELLED')),'[]') allocations,
+            coalesce((SELECT jsonb_agg(id ORDER BY id) FROM app.operational_alerts WHERE tenant_id=$1::uuid AND owner_membership_id=$3::uuid AND state<>'RESOLVED'),'[]') alerts,
+            coalesce((SELECT jsonb_agg(r.id ORDER BY r.id) FROM app.alert_rules r WHERE r.tenant_id=$1::uuid AND r.active AND (app.jsonb_replace_string(r.recipient_policy,$3::text,'')<>r.recipient_policy OR app.jsonb_replace_string(r.escalation_levels,$3::text,'')<>r.escalation_levels)),'[]') "alertRules"`,
+              tenant,
+              employeeId,
+              employee.linked_membership_id ?? null,
+            )
+          )[0]!;
+          for (const [resource, ids] of [
+            ["employees", affected.reports],
+            ["clients", affected.clients],
+            ["client-locations", affected.locations],
+            ["vendors", affected.vendors],
+            ["indents", affected.indents],
+            ["allocations", affected.allocations],
+          ] as Array<[string, unknown]>)
+            for (const resourceId of Array.isArray(ids) ? ids : [])
+              await this.resourceAccess(
+                tx,
+                actor,
+                "masters.admin",
+                "UPDATE",
+                resource,
+                String(resourceId),
+              );
+          const assignmentDenied = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT EXISTS(SELECT 1 FROM app.operational_assignments a WHERE a.tenant_id=$1::uuid AND a.id=ANY($4::uuid[]) AND
+                ((a.organization_node_id IS NOT NULL AND NOT app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'masters.admin','UPDATE','organization-nodes',a.organization_node_id)) OR
+                 (a.client_id IS NOT NULL AND NOT app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'masters.admin','UPDATE','clients',a.client_id)))) denied`,
+              tenant,
+              actor.membershipId,
+              actor.userId,
+              affected.assignments,
+            )
+          )[0];
+          if (bool(assignmentDenied?.denied))
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          const alertDenied = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT EXISTS(SELECT 1 FROM app.operational_alerts a WHERE a.tenant_id=$1::uuid AND a.id=ANY($4::uuid[]) AND NOT (
+                 (a.rule_id IS NOT NULL AND EXISTS(SELECT 1 FROM app.alert_rules r WHERE r.tenant_id=a.tenant_id AND r.id=a.rule_id AND app.alert_rule_scope_authorized($1::uuid,$2::uuid,$3::uuid,'masters.admin','UPDATE',r.scope_node_ids)))
+                 OR (a.rule_id IS NULL AND a.source_record_id IS NOT NULL AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'masters.admin','UPDATE',a.source_module,a.source_record_id))
+               )) denied`,
+              tenant,
+              actor.membershipId,
+              actor.userId,
+              affected.alerts,
+            )
+          )[0];
+          if (bool(alertDenied?.denied))
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          const ruleDenied = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `SELECT EXISTS(SELECT 1 FROM app.alert_rules r WHERE r.tenant_id=$1::uuid AND r.id=ANY($4::uuid[]) AND NOT app.alert_rule_scope_authorized($1::uuid,$2::uuid,$3::uuid,'masters.admin','UPDATE',r.scope_node_ids)) denied`,
+              tenant,
+              actor.membershipId,
+              actor.userId,
+              affected.alertRules,
+            )
+          )[0];
+          if (bool(ruleDenied?.denied))
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          const impactCategories = Object.fromEntries(
+            [
+              "reports",
+              "assignments",
+              "clients",
+              "locations",
+              "vendors",
+              "indents",
+              "allocations",
+              "alerts",
+              "alertRules",
+            ].map((name) => [
+              name,
+              {
+                count: Array.isArray(affected[name])
+                  ? affected[name].length
+                  : 0,
+                ids: affected[name] ?? [],
+              },
+            ]),
+          );
+          if (
+            sha(
+              JSON.stringify(
+                toJsonSafe({
+                  version: Number(employee.version),
+                  categories: impactCategories,
+                }),
+              ),
+            ) !== input.impactSnapshotId
+          )
+            throw new AppError(
+              409,
+              "IMPACT_CHANGED",
+              "Impact changed; review the latest preview and retry",
+            );
+          const membershipImpact =
+            JSON.stringify(affected.indents) !== "[]" ||
+            JSON.stringify(affected.allocations) !== "[]" ||
+            JSON.stringify(affected.alerts) !== "[]";
+          const alertRuleImpact = JSON.stringify(affected.alertRules) !== "[]";
+          if (
+            (membershipImpact || alertRuleImpact) &&
+            employee.linked_membership_id &&
+            !replacement.linked_membership_id
+          )
+            throw new AppError(
+              409,
+              "REPLACEMENT_MEMBERSHIP_REQUIRED",
+              "Replacement must have an active linked user for owned open work",
+            );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.employees SET manager_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND manager_id=$3::uuid AND id=ANY($4::uuid[])`,
+            input.replacementEmployeeId,
+            tenant,
+            employeeId,
+            affected.reports,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.clients SET account_manager_employee_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND account_manager_employee_id=$3::uuid AND state='ACTIVE' AND id=ANY($4::uuid[])`,
+            input.replacementEmployeeId,
+            tenant,
+            employeeId,
+            affected.clients,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.client_locations SET manager_employee_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND manager_employee_id=$3::uuid AND state='ACTIVE' AND id=ANY($4::uuid[])`,
+            input.replacementEmployeeId,
+            tenant,
+            employeeId,
+            affected.locations,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.vendors SET onboarding_employee_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND onboarding_employee_id=$3::uuid AND state<>'INACTIVE' AND id=ANY($4::uuid[])`,
+            input.replacementEmployeeId,
+            tenant,
+            employeeId,
+            affected.vendors,
+          );
+          if (
+            employee.linked_membership_id &&
+            replacement.linked_membership_id
+          ) {
+            await tx.$executeRawUnsafe(
+              `UPDATE app.indents SET owner_membership_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND owner_membership_id=$3::uuid AND state IN ('DRAFT','OPEN','PARTIALLY_ALLOCATED') AND id=ANY($4::uuid[])`,
+              replacement.linked_membership_id,
+              tenant,
+              employee.linked_membership_id,
+              affected.indents,
+            );
+            await tx.$executeRawUnsafe(
+              `UPDATE app.allocations SET owner_membership_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND owner_membership_id=$3::uuid AND state NOT IN ('REJECTED','EXPIRED','CANCELLED') AND id=ANY($4::uuid[])`,
+              replacement.linked_membership_id,
+              tenant,
+              employee.linked_membership_id,
+              affected.allocations,
+            );
+            await tx.$executeRawUnsafe(
+              `UPDATE app.operational_alerts SET owner_membership_id=$1::uuid,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND owner_membership_id=$3::uuid AND state<>'RESOLVED' AND id=ANY($4::uuid[])`,
+              replacement.linked_membership_id,
+              tenant,
+              employee.linked_membership_id,
+              affected.alerts,
+            );
+            await tx.$executeRawUnsafe(
+              `UPDATE app.alert_rules SET recipient_policy=app.jsonb_replace_string(recipient_policy,$1,$2),escalation_levels=app.jsonb_replace_string(escalation_levels,$1,$2),updated_at=now(),version=version+1
+               WHERE tenant_id=$3::uuid AND active AND id=ANY($4::uuid[]) AND (app.jsonb_replace_string(recipient_policy,$1,$2)<>recipient_policy OR app.jsonb_replace_string(escalation_levels,$1,$2)<>escalation_levels)`,
+              String(employee.linked_membership_id),
+              String(replacement.linked_membership_id),
+              tenant,
+              affected.alertRules,
+            );
+          }
+          await tx.$executeRawUnsafe(
+            `WITH current_rows AS MATERIALIZED (
+           SELECT id,assignment_type,organization_node_id,client_id,effective_to FROM app.operational_assignments
+           WHERE tenant_id=$2::uuid AND employee_id=$3::uuid AND id=ANY($6::uuid[]) AND effective_from<=now() AND (effective_to IS NULL OR effective_to>now()) FOR UPDATE
+         ), closed AS (
+           UPDATE app.operational_assignments a SET effective_to=now(),exception_reason=$1 FROM current_rows c
+           WHERE a.tenant_id=$2::uuid AND a.id=c.id RETURNING a.id
+         )
+         INSERT INTO app.operational_assignments(tenant_id,employee_id,assignment_type,organization_node_id,client_id,effective_from,effective_to,exception_reason,created_by)
+         SELECT $2::uuid,$4::uuid,c.assignment_type,c.organization_node_id,c.client_id,now(),c.effective_to,$1,$5::uuid FROM current_rows c CROSS JOIN (SELECT count(*) FROM closed) ensure_closed`,
+            input.reason,
+            tenant,
+            employeeId,
+            input.replacementEmployeeId,
+            actor.userId,
+            affected.assignments,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.operational_assignments SET employee_id=$1::uuid,exception_reason=$2
+         WHERE tenant_id=$3::uuid AND employee_id=$4::uuid AND id=ANY($5::uuid[]) AND effective_from>now() AND (effective_to IS NULL OR effective_to>now())`,
+            input.replacementEmployeeId,
+            input.reason,
+            tenant,
+            employeeId,
+            affected.assignments,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.scope_grants g SET status='INACTIVE',effective_to=coalesce(effective_to,now()),updated_at=now(),version=version+1
+         FROM app.employee_scope_grant_links l WHERE l.tenant_id=$1::uuid AND l.employee_id=$2::uuid AND l.state='ACTIVE' AND g.tenant_id=l.tenant_id AND g.id=l.grant_id AND g.status='ACTIVE'`,
+            tenant,
+            employeeId,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.employee_scope_grant_links SET state='INACTIVE',ended_at=now() WHERE tenant_id=$1::uuid AND employee_id=$2::uuid AND state='ACTIVE'`,
+            tenant,
+            employeeId,
+          );
+          if (replacement.linked_membership_id)
+            await tx.$executeRawUnsafe(
+              `WITH desired AS (
+             SELECT DISTINCT ON (n.authorization_scope_node_id) n.id organization_id,n.authorization_scope_node_id scope_id,
+               CASE WHEN n.id=e.home_node_id THEN 'HOME' ELSE 'REGION' END coverage_kind
+             FROM app.employees e JOIN app.organization_nodes n ON n.tenant_id=e.tenant_id AND (n.id=e.home_node_id OR EXISTS(SELECT 1 FROM app.employee_region_coverage c WHERE c.tenant_id=e.tenant_id AND c.employee_id=e.id AND c.organization_node_id=n.id))
+             WHERE e.tenant_id=$1::uuid AND e.id=$2::uuid ORDER BY n.authorization_scope_node_id,(n.id=e.home_node_id) DESC
+           ), source_actions AS (
+             SELECT DISTINCT a.id assignment_id,g.action FROM app.membership_role_assignments a JOIN app.scope_grants g ON g.tenant_id=a.tenant_id AND g.assignment_id=a.id
+             WHERE a.tenant_id=$1::uuid AND a.membership_id=$3::uuid AND a.status='ACTIVE' AND g.status='ACTIVE'
+           ), inserted AS (
+             INSERT INTO app.scope_grants(id,tenant_id,assignment_id,scope_node_id,action,status,effective_from)
+             SELECT gen_random_uuid(),$1::uuid,s.assignment_id,d.scope_id,s.action,'ACTIVE',now() FROM source_actions s CROSS JOIN desired d
+             ON CONFLICT(tenant_id,assignment_id,scope_node_id,action) DO NOTHING RETURNING id,scope_node_id
+           ) INSERT INTO app.employee_scope_grant_links(tenant_id,employee_id,grant_id,coverage_kind,organization_node_id)
+             SELECT $1::uuid,$2::uuid,i.id,d.coverage_kind,d.organization_id FROM inserted i JOIN desired d ON d.scope_id=i.scope_node_id`,
+              tenant,
+              input.replacementEmployeeId,
+              replacement.linked_membership_id,
+            );
+          await tx.$executeRawUnsafe(
+            `UPDATE app.tenant_memberships SET authorization_version=authorization_version+1,updated_at=now()
+             WHERE tenant_id=$1::uuid AND id=ANY($2::uuid[])`,
+            tenant,
+            [
+              employee.linked_membership_id,
+              replacement.linked_membership_id,
+            ].filter(Boolean),
+          );
+          const after = (
+            await tx.$queryRawUnsafe<Row[]>(
+              `UPDATE app.employees SET state='INACTIVE',active_to=current_date,updated_at=now(),version=version+1 WHERE tenant_id=$1::uuid AND id=$2::uuid RETURNING *`,
+              tenant,
+              employeeId,
+            )
+          )[0]!;
+          await this.audit(
+            tx,
+            actor,
+            "employee.reassigned_and_deactivated",
+            "employee",
+            employeeId,
+            correlationId,
+            { employee, affected },
+            {
+              employee: after,
+              replacementEmployeeId: replacement.id,
+              affected,
+            },
+            input.reason,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key)
+         VALUES($1::uuid,'TENANT','employee',$2::uuid,'employee.reassigned_deactivated.v1',$3::jsonb,$4) ON CONFLICT(deduplication_key) DO NOTHING`,
+            tenant,
+            employeeId,
+            JSON.stringify({ replacementEmployeeId: replacement.id, affected }),
+            `mst01:employee:reassign:${employeeId}:${input.expectedVersion}`,
+          );
+          return after;
+        },
       );
-      return after;
     });
   }
 

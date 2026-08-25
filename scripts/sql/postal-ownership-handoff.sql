@@ -30,6 +30,35 @@ ALTER TABLE postal_reference.postal_directory_versions OWNER TO logistics_postal
 ALTER TABLE postal_reference.postal_localities OWNER TO logistics_postal_owner;
 ALTER FUNCTION postal_reference.guard_postal_directory_mutation() OWNER TO logistics_postal_owner;
 
+-- FND-01 databases created before MST-01 already have the postal tables in
+-- postal_reference, while clean databases move them above. Install the MST-01
+-- snapshot foreign keys only after both paths have converged on that schema.
+DO $$
+BEGIN
+  IF to_regclass('app.organization_addresses') IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid='app.organization_addresses'::regclass
+        AND conname='organization_addresses_postal_locality_fk'
+    ) THEN
+      ALTER TABLE app.organization_addresses
+        ADD CONSTRAINT organization_addresses_postal_locality_fk
+        FOREIGN KEY (postal_locality_id)
+        REFERENCES postal_reference.postal_localities(id) ON DELETE RESTRICT;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid='app.organization_addresses'::regclass
+        AND conname='organization_addresses_postal_directory_version_fk'
+    ) THEN
+      ALTER TABLE app.organization_addresses
+        ADD CONSTRAINT organization_addresses_postal_directory_version_fk
+        FOREIGN KEY (postal_directory_version_id)
+        REFERENCES postal_reference.postal_directory_versions(id) ON DELETE RESTRICT;
+    END IF;
+  END IF;
+END $$;
+
 REVOKE ALL ON SCHEMA postal_reference FROM PUBLIC,logistics_app,logistics_postal_importer;
 GRANT USAGE ON SCHEMA postal_reference TO logistics_app,logistics_postal_importer;
 REVOKE ALL ON postal_reference.postal_directory_versions,postal_reference.postal_localities FROM PUBLIC,logistics_app,logistics_postal_importer;

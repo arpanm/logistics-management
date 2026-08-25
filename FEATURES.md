@@ -28,25 +28,26 @@ When sources conflict:
 
 Implementation status:
 
-| Status         | Meaning                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Prototype only | Demonstrated in static/local HTML or sample data, but no production persistence, authorization, API, or automated tests exist. |
-| Specified only | Defined in the workbook or this document, but not demonstrated in the HTML.                                                    |
-| Proposed       | Required for the target operating model or reusable product; business confirmation is still advisable.                         |
-| In progress    | Implementation exists but all acceptance criteria have not passed.                                                             |
-| Complete       | Implemented, authorized, persisted, observable, and all listed end-to-end acceptance tests pass.                               |
-| Blocked        | A named unresolved decision or external dependency prevents completion.                                                        |
+| Status         | Meaning                                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Prototype only | Demonstrated in static/local HTML or sample data, but no production persistence, authorization, API, or automated tests exist.        |
+| Specified only | Defined in the workbook or this document, but not demonstrated in the HTML.                                                           |
+| Proposed       | Required for the target operating model or reusable product; business confirmation is still advisable.                                |
+| In progress    | Production implementation is incomplete.                                                                                              |
+| Complete       | Production behavior, authorization, persistence, observability, and applicable automated tests are implemented; tests may be Not Run. |
+| Verified       | Complete and the explicitly selected batch/release test scope passed for the recorded build.                                          |
+| Blocked        | A named unresolved decision or external dependency prevents completion.                                                               |
 
 Test status:
 
-| Status      | Meaning                                                                                                                          |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Not started | No approved feature test plan or executable feature tests exist.                                                                 |
-| Planned     | Acceptance criteria are mapped to approved test IDs, but executable coverage is incomplete.                                      |
-| Implemented | Required tests exist but the full local acceptance suite is not currently passing.                                               |
-| Failing     | The required suite ran and has one or more named failures.                                                                       |
-| Passing     | Required unit/integration/contract/security/migration and Playwright acceptance tests pass against the locally deployed feature. |
-| Blocked     | A named blocker prevents the required test suite from running or passing.                                                        |
+| Status                | Meaning                                                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| Not started           | No approved feature test plan or executable feature tests exist.                                      |
+| Planned               | Acceptance criteria are mapped to approved test IDs, but executable coverage is incomplete.           |
+| Implemented / Not Run | Required executable tests exist or changed, but no current batch/release execution result is claimed. |
+| Failing               | The required suite ran and has one or more named failures.                                            |
+| Passing               | The explicitly selected required scope ran and passed against the recorded build/environment.         |
+| Blocked               | A named blocker prevents the required test suite from running or passing.                             |
 
 ## 4. Product-wide rules
 
@@ -98,64 +99,64 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 ## 5. Feature register
 
-| ID     | Feature                                                        | Evidence                                       | Implementation status | Test status | Depends on                  |
-| ------ | -------------------------------------------------------------- | ---------------------------------------------- | --------------------- | ----------- | --------------------------- |
-| FND-01 | Multi-tenant product foundation                                | Product objective                              | Complete              | Passing     | —                           |
-| FND-02 | Identity, roles, and scoped access                             | Operating-model roles                          | Complete              | Passing     | FND-01                      |
-| MST-01 | Organization, employee, and geography masters                  | Workbook managers; stated hierarchy            | Complete              | Passing     | FND-01, FND-02              |
-| MST-02 | Client, contract, lane, SLA, and rate-card masters             | Client/location forms; contract business model | Complete              | Passing     | MST-01                      |
-| MST-03 | Vendor, vehicle, driver, and compliance masters                | Vendor form; vendor/driver actors              | Complete              | Passing     | MST-01                      |
-| OPS-01 | Indent capture and lifecycle                                   | Indent form/workbook                           | Complete              | Passing     | MST-02                      |
-| OPS-02 | Vendor allocation and placement                                | Placement form/dashboard                       | Complete              | Passing     | OPS-01, MST-03              |
-| OPS-03 | Trip execution, loading, transit, and unloading                | Stated actors; dashboard mentions GPS          | Complete              | Passing     | OPS-02                      |
-| DOC-01 | POD and delivery-document workflow                             | POD form/dashboard                             | Complete              | Passing     | OPS-03                      |
-| FIN-01 | Client billing and invoice workflow                            | Invoice form/workbook                          | Complete              | Passing     | DOC-01, MST-02              |
-| FIN-02 | Receipts, reconciliation, and collections                      | Receipt/invoice forms/dashboard                | Complete              | Passing     | FIN-01                      |
-| FIN-03 | Vendor bills, deductions, and payments                         | Stated vendor-payment need                     | Complete              | Passing     | OPS-03, MST-03              |
-| CTL-01 | Control tower dashboards and drill-down reports                | Dashboard prototype                            | Complete              | Passing     | Transaction modules         |
-| ALT-01 | Alerts, escalation, and work queues                            | Traffic lights and operating need              | Complete              | Passing     | Transaction modules, FND-02 |
-| DAT-01 | Bulk import, validation, correction, and export                | Workbook/read-me/forms queue                   | Complete              | Passing     | Masters and transactions    |
-| GOV-01 | Documents, comments, audit, and approvals                      | Audit trail notes and regulated data           | Complete              | Passing     | FND-02                      |
-| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Passing     | FND-01, GOV-01              |
-| CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Passing     | FND-01                      |
+| ID     | Feature                                                        | Evidence                                       | Implementation status | Test status           | Depends on                  |
+| ------ | -------------------------------------------------------------- | ---------------------------------------------- | --------------------- | --------------------- | --------------------------- |
+| FND-01 | Multi-tenant product foundation                                | Product objective                              | Complete              | Passing               | —                           |
+| FND-02 | Identity, roles, and scoped access                             | Operating-model roles                          | Complete              | Passing               | FND-01                      |
+| MST-01 | Organization, employee, and geography masters                  | Workbook managers; stated hierarchy            | Complete              | Implemented / Not Run | FND-01, FND-02              |
+| MST-02 | Client, contract, lane, SLA, and rate-card masters             | Client/location forms; contract business model | Complete              | Passing               | MST-01                      |
+| MST-03 | Vendor, vehicle, driver, and compliance masters                | Vendor form; vendor/driver actors              | Complete              | Passing               | MST-01                      |
+| OPS-01 | Indent capture and lifecycle                                   | Indent form/workbook                           | Complete              | Passing               | MST-02                      |
+| OPS-02 | Vendor allocation and placement                                | Placement form/dashboard                       | Complete              | Passing               | OPS-01, MST-03              |
+| OPS-03 | Trip execution, loading, transit, and unloading                | Stated actors; dashboard mentions GPS          | Complete              | Passing               | OPS-02                      |
+| DOC-01 | POD and delivery-document workflow                             | POD form/dashboard                             | Complete              | Passing               | OPS-03                      |
+| FIN-01 | Client billing and invoice workflow                            | Invoice form/workbook                          | Complete              | Passing               | DOC-01, MST-02              |
+| FIN-02 | Receipts, reconciliation, and collections                      | Receipt/invoice forms/dashboard                | Complete              | Passing               | FIN-01                      |
+| FIN-03 | Vendor bills, deductions, and payments                         | Stated vendor-payment need                     | Complete              | Passing               | OPS-03, MST-03              |
+| CTL-01 | Control tower dashboards and drill-down reports                | Dashboard prototype                            | Complete              | Passing               | Transaction modules         |
+| ALT-01 | Alerts, escalation, and work queues                            | Traffic lights and operating need              | Complete              | Passing               | Transaction modules, FND-02 |
+| DAT-01 | Bulk import, validation, correction, and export                | Workbook/read-me/forms queue                   | Complete              | Passing               | Masters and transactions    |
+| GOV-01 | Documents, comments, audit, and approvals                      | Audit trail notes and regulated data           | Complete              | Passing               | FND-02                      |
+| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Passing               | FND-01, GOV-01              |
+| CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Passing               | FND-01                      |
 
 ### 5.0.1 Product UX remediation status
 
-The register above records the canonical backend/contract baseline. A browser-level product audit on 2026-08-25 identified the following user-facing gaps; a feature is not considered product-complete until its remediation row is complete and its focused Playwright evidence passes.
+The register above records the canonical backend/contract baseline. A browser-level product audit on 2026-08-25 identified the following user-facing gaps. Implementation completion and test verification are tracked separately; focused Playwright evidence is required only to label a remediation row verified/passing.
 
-| Feature slice                             | Remediation state   | Test state                   | Remaining product gap                                                                                      |
-| ----------------------------------------- | ------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Access UX (`FND-02`)                      | Implemented locally | Passing — `E2E-FND02-07..09` | Broader directory filtering/profile enrichment remains an explicit follow-up                               |
-| Address UX (`FND-01`, `MST-01/02/03`)      | Tenant flow complete | Passing — `E2E-FND01-PIN-01` | Reuse the PIN-first component in organization, client-location, vendor, and driver master forms            |
-| Masters UX (`MST-01/02/03`, `CFG-01`)     | Pending             | Not run                      | Discoverable Masters hub and configured truck/body/cargo reference masters                                 |
-| Operations UX (`OPS-01/02/03`)            | Pending             | Not run                      | Open-indent dashboard, contextual/manual/automatic allocation, rule setup, allocation/trip queues and CTAs |
-| Finance UX (`FIN-01/02/03`)               | Pending             | Not run                      | Pending/all invoice and collection/payable workbenches with contextual CTAs                                |
-| Control-tower UX (`CTL-01`)               | Pending             | Not run                      | Prototype-parity KPIs, filters, hierarchy drill, tables, export and record actions over canonical data     |
+| Feature slice                         | Remediation state              | Test state                                                                                 | Remaining product gap                                                                                      |
+| ------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Access UX (`FND-02`)                  | Implemented locally            | Passing — `E2E-FND02-07..09`                                                               | Broader directory filtering/profile enrichment remains an explicit follow-up                               |
+| Address UX (`FND-01`, `MST-01/02/03`) | Tenant + organization complete | Implemented / Not Run — current selector maintenance is deferred to an explicit test phase | Reuse PIN-first addressing in client-location, vendor, and driver master forms                             |
+| Masters UX (`MST-01/02/03`, `CFG-01`) | Hub + MST-01 complete          | Implemented / Not Run — current full regression was stopped at user direction              | Add configured truck/body/cargo catalogs and complete MST-02/MST-03 product workflows                      |
+| Operations UX (`OPS-01/02/03`)        | Pending                        | Not run                                                                                    | Open-indent dashboard, contextual/manual/automatic allocation, rule setup, allocation/trip queues and CTAs |
+| Finance UX (`FIN-01/02/03`)           | Pending                        | Not run                                                                                    | Pending/all invoice and collection/payable workbenches with contextual CTAs                                |
+| Control-tower UX (`CTL-01`)           | Pending                        | Not run                                                                                    | Prototype-parity KPIs, filters, hierarchy drill, tables, export and record actions over canonical data     |
 
 ### 5.1 Implemented delivery map
 
 All rows below are live, tenant-authorized, PostgreSQL-backed, and covered by the passing acceptance suite.
 
-| Feature    | UI routes                                                                                               | Implemented APIs and persistence                                                                                                                                                    |
-| ---------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **FND-01** | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant registry/provisioning with PostgreSQL-derived locality/city/state, lifecycle, setup checklist, health, isolation probes, documents, exports, reports, and platform alerts |
-| **FND-02** | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured directory/lifecycle and access editor, secure activation-link rotation/copy, capability roles/scopes, MFA/session reset, permission review, Activity & audit, and alerts |
-| **MST-01** | `/app/masters/locations`, `/app/masters/employees`                                                      | Organization closure/hierarchy, employees, ownership, operational assignments, impact, bulk assignment, move, and reassignment/deactivation                                         |
-| **MST-02** | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Client/location masters, versioned contracts, lanes, SLA rules, rate lines, duplicate analysis, publish selection, and immutable transaction snapshots                              |
-| **MST-03** | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted/versioned bank accounts, vehicles, drivers, compliance records/decisions, eligibility evaluation, and approved overrides                                         |
-| **OPS-01** | `/app/operations/indents`                                                                               | Idempotent indent creation, commercial/SLA snapshots, status transitions, partial cancellation, canonical demand/fill reports, and alerts                                           |
-| **OPS-02** | `/app/operations/allocations`                                                                           | Split allocation locking, offer response/expiry, vendor/vehicle/driver eligibility, assignment/replacement history, placement states, and risk reports                              |
-| **OPS-03** | `/app/operations/trips`, `/portal/driver`                                                               | Assigned-trip execution, append-only milestone/GPS events, ordering-conflict evidence, offline retry idempotency, privacy enforcement, delivery, and POD creation                   |
-| **DOC-01** | `/app/pod` and record evidence panels                                                                   | POD task/review/submission, document bytes and immutable versions, checksum/signature/size checks, scoped access tokens, ageing, and invoice-value risk                             |
-| **FIN-01** | `/app/finance/invoices`                                                                                 | Exact BigInt minor-unit invoices/lines, billable service links, approval/posting controls, acknowledgement, notes, due dates, and compensating reversals                            |
-| **FIN-02** | `/app/finance/receipts`                                                                                 | Receipts, append-only allocation/reversal ledger, exact balances, follow-up promises, reconciliation, collection ageing, and statements                                             |
-| **FIN-03** | `/app/finance/vendor-bills`                                                                             | Vendor bill/line validation, duplicate prevention, maker/checker decisions, verified-bank payment batches/allocations, deductions, reversals, and margin reconciliation             |
-| **CTL-01** | `/app/control`                                                                                          | Canonical placement/POD/collection/trip/payable lenses, server filters, saved views, three-level drill, freshness/as-of evidence, and reconciled totals                             |
-| **ALT-01** | `/app/alerts`                                                                                           | Scoped rules, PostgreSQL evaluation/deduplication, linked evidence, queue ownership, acknowledge/assign/snooze/escalate/resolve/reopen, and channel-attempt history                 |
-| **DAT-01** | `/app/data`                                                                                             | CSV/XLSX parsing, duplicate/blank/header/row validation, seven canonical adapters, preview/commit/correction, checksum idempotency, scoped errors, and reconciliation               |
-| **GOV-01** | `/app/governance/policies` and record evidence panels                                                   | Governed documents, audience comments/history, approval definitions/instances/decisions, segregation, immutable audit, and reason/correlation evidence                              |
-| **INT-01** | `/app/integrations`                                                                                     | API clients/rotation, HMAC webhooks, mapping versions, endpoint registry, idempotent delivery attempts, retry/dead-letter/replay, and integration health                            |
-| **CFG-01** | `/app/configuration/settings`                                                                           | Typed/semantic tenant configuration, versioned draft/publish/rollback, branding/locale/codes/reasons/thresholds, and projection invalidation                                        |
+| Feature    | UI routes                                                                                               | Implemented APIs and persistence                                                                                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FND-01** | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant registry/provisioning with PostgreSQL-derived locality/city/state, lifecycle, setup checklist, health, isolation probes, documents, exports, reports, and platform alerts                                                  |
+| **FND-02** | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured directory/lifecycle and access editor, secure activation-link rotation/copy, capability roles/scopes, MFA/session reset, permission review, Activity & audit, and alerts                                                         |
+| **MST-01** | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable hub/navigation, canonical subtree scopes, PIN-derived address snapshots, structured geofences, employees, assignments, versioned impact, idempotent reassignment/deactivation, ownership reports/CSV/alerts and audit evidence |
+| **MST-02** | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Client/location masters, versioned contracts, lanes, SLA rules, rate lines, duplicate analysis, publish selection, and immutable transaction snapshots                                                                                      |
+| **MST-03** | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted/versioned bank accounts, vehicles, drivers, compliance records/decisions, eligibility evaluation, and approved overrides                                                                                                 |
+| **OPS-01** | `/app/operations/indents`                                                                               | Idempotent indent creation, commercial/SLA snapshots, status transitions, partial cancellation, canonical demand/fill reports, and alerts                                                                                                   |
+| **OPS-02** | `/app/operations/allocations`                                                                           | Split allocation locking, offer response/expiry, vendor/vehicle/driver eligibility, assignment/replacement history, placement states, and risk reports                                                                                      |
+| **OPS-03** | `/app/operations/trips`, `/portal/driver`                                                               | Assigned-trip execution, append-only milestone/GPS events, ordering-conflict evidence, offline retry idempotency, privacy enforcement, delivery, and POD creation                                                                           |
+| **DOC-01** | `/app/pod` and record evidence panels                                                                   | POD task/review/submission, document bytes and immutable versions, checksum/signature/size checks, scoped access tokens, ageing, and invoice-value risk                                                                                     |
+| **FIN-01** | `/app/finance/invoices`                                                                                 | Exact BigInt minor-unit invoices/lines, billable service links, approval/posting controls, acknowledgement, notes, due dates, and compensating reversals                                                                                    |
+| **FIN-02** | `/app/finance/receipts`                                                                                 | Receipts, append-only allocation/reversal ledger, exact balances, follow-up promises, reconciliation, collection ageing, and statements                                                                                                     |
+| **FIN-03** | `/app/finance/vendor-bills`                                                                             | Vendor bill/line validation, duplicate prevention, maker/checker decisions, verified-bank payment batches/allocations, deductions, reversals, and margin reconciliation                                                                     |
+| **CTL-01** | `/app/control`                                                                                          | Canonical placement/POD/collection/trip/payable lenses, server filters, saved views, three-level drill, freshness/as-of evidence, and reconciled totals                                                                                     |
+| **ALT-01** | `/app/alerts`                                                                                           | Scoped rules, PostgreSQL evaluation/deduplication, linked evidence, queue ownership, acknowledge/assign/snooze/escalate/resolve/reopen, and channel-attempt history                                                                         |
+| **DAT-01** | `/app/data`                                                                                             | CSV/XLSX parsing, duplicate/blank/header/row validation, seven canonical adapters, preview/commit/correction, checksum idempotency, scoped errors, and reconciliation                                                                       |
+| **GOV-01** | `/app/governance/policies` and record evidence panels                                                   | Governed documents, audience comments/history, approval definitions/instances/decisions, segregation, immutable audit, and reason/correlation evidence                                                                                      |
+| **INT-01** | `/app/integrations`                                                                                     | API clients/rotation, HMAC webhooks, mapping versions, endpoint registry, idempotent delivery attempts, retry/dead-letter/replay, and integration health                                                                                    |
+| **CFG-01** | `/app/configuration/settings`                                                                           | Typed/semantic tenant configuration, versioned draft/publish/rollback, branding/locale/codes/reasons/thresholds, and projection invalidation                                                                                                |
 
 ### 5.2 Pending production and product-owner TODOs
 
@@ -173,18 +174,20 @@ These items do not reopen the completed PostgreSQL-only feature scope. They are 
 
 ## 6. Common Codex build contract
 
-Every feature prompt below includes this contract by reference. Codex must:
+Every feature prompt below includes this rapid batch contract by reference. Codex must:
 
 1. Inspect the repository, its architecture, existing conventions, and `AGENTS.md` before changing code. Do not invent a second stack.
-2. Restate the feature boundary, dependencies, assumptions, and files likely to change. Ask only about a decision that cannot be safely made or configured.
+2. Group related, dependency-compatible features/TODOs into the largest sensible implementation batch. Capture lightweight acceptance notes and ask only about a decision that cannot be safely made or configured.
 3. Implement the smallest complete vertical slice: migration/schema, domain rules, service/API, authorization, UI, validation, audit/telemetry, seed/fixture updates, and tests.
 4. Enforce tenant scope and permissions on the server. UI hiding is not authorization.
 5. Use accessible responsive UI, keyboard operation, labelled inputs, clear empty/loading/error states, and safe confirmations.
 6. Make calculations deterministic and unit-tested at exact boundaries. Use tenant timezone where calendar boundaries matter.
 7. Add idempotency for retried writes, imports, webhooks, financial posting, and notifications where applicable.
 8. Preserve unrelated user changes. Avoid destructive migration behavior. Include rollback-safe migrations.
-9. Run focused tests plus the relevant full suite, typecheck, lint, and production build. Fix failures caused by the change.
-10. As the final pre-commit gate, synchronize implementation status and test status in the feature register and feature section, `README.md`, `TODO.md`, `specs/<FEATURE-ID>/spec.md`, `test-plan.md`, `completion.md`, executable test/TODO files, and any affected documentation. Remove completed TODOs, record remaining TODOs with owners/reasons, and ensure every test ID has its final status/evidence. Only then report changed files, commands, test results, decisions, and remaining risks. Do not provide schedule estimates.
+9. Author/update automated tests but do not automatically run tests, deploy, invoke Playwright, or enter fix/retest loops per feature. Use `Implemented / Not Run` until the user explicitly requests a batch/release test phase.
+10. Review and synchronize the integrated batch once. Before a requested commit, run formatting, type checking, and policy/status checks once; one related batch commit is allowed.
+11. When testing is explicitly requested, run the selected focused suite or full regression once, record Passing/Failing/Blocked, and do not automatically fix or rerun failures unless asked.
+12. Synchronize implementation and test status in the feature register/section, `README.md`, `TODO.md`, affected specs/test-case files, and documentation. Do not provide schedule estimates or claim unexecuted tests passed.
 
 ---
 
@@ -219,7 +222,7 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ### Master prompt for Codex
 
-> Implement **FND-01 Multi-tenant product foundation** from `FEATURES.md`, following the Common Codex build contract. Bootstrap the Next.js frontend and NestJS backend against the central shared PostgreSQL container; build tenant schema/request context, secure provisioning, owner invitation, tenant switcher, tenant-scoped PostgreSQL persistence/documents/events/reporting, setup checklist, platform health view, and automated cross-tenant isolation tests. Do not add Redis, object storage, a message broker, Mailpit, or a separate worker. Seed configurable defaults rather than Juri Gari constants. Do not implement business transaction modules except the minimum tenant-owned example needed to prove isolation. Complete the final cross-file implementation/test status synchronization only when all listed end-to-end tests pass.
+> Implement **FND-01 Multi-tenant product foundation** from `FEATURES.md`, following the Common Codex build contract. Bootstrap the Next.js frontend and NestJS backend against the central shared PostgreSQL container; build tenant schema/request context, secure provisioning, owner invitation, tenant switcher, tenant-scoped PostgreSQL persistence/documents/events/reporting, setup checklist, platform health view, and automated cross-tenant isolation tests. Do not add Redis, object storage, a message broker, Mailpit, or a separate worker. Seed configurable defaults rather than Juri Gari constants. Do not implement business transaction modules except the minimum tenant-owned example needed to prove isolation. Synchronize implementation and test status independently; leave new/changed end-to-end tests `Implemented / Not Run` until an explicit batch/release test phase.
 
 ---
 
@@ -262,7 +265,7 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Configurable organization structure drives ownership, routing, permissions, filters, and escalations.
 

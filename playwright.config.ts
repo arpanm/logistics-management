@@ -9,6 +9,7 @@ export default defineConfig({
   testMatch: [
     "fnd-01-tenant-foundation.spec.ts",
     "fnd-02-identity-access.spec.ts",
+    "mst-01-operable-masters.spec.ts",
     "all-features-foundation-masters.spec.ts",
     "all-feature-gaps.spec.ts",
   ],

@@ -14,13 +14,13 @@ No other local infrastructure containers are required.
 
 Project defaults:
 
-| Resource                | Value                                                 |
-| ----------------------- | ----------------------------------------------------- |
-| Application database    | `logistics`                                           |
-| Test database           | `logistics_test`                                      |
-| Application role        | `logistics_app`                                       |
-| Postal owner/importer   | `logistics_postal_owner` / `logistics_postal_importer` |
-| Schemas                 | `app`, `audit`, `reporting`, `postal_reference`       |
+| Resource              | Value                                                  |
+| --------------------- | ------------------------------------------------------ |
+| Application database  | `logistics`                                            |
+| Test database         | `logistics_test`                                       |
+| Application role      | `logistics_app`                                        |
+| Postal owner/importer | `logistics_postal_owner` / `logistics_postal_importer` |
+| Schemas               | `app`, `audit`, `reporting`, `postal_reference`        |
 
 Configure different names in `.env` if they conflict with an existing project. Use lowercase PostgreSQL-safe identifiers.
 
@@ -41,7 +41,7 @@ make postgres-up
 make postgres-status
 ```
 
-Run `make bootstrap` immediately after cloning and again after changes to `package.json` or `pnpm-lock.yaml`. Do not bypass the hook with `--no-verify`; it intentionally runs repository policy, formatting, lint, type checking, and non-browser tests. If a database test reports that `app.users` disappeared, ensure no other commit/test process is resetting `logistics_test`, then rerun once.
+Run `make bootstrap` immediately after cloning and again after changes to `package.json` or `pnpm-lock.yaml`. The commit hook performs the lightweight batch gate (policy/status, formatting, lint, and type checking); it does not run database, browser, or full regression tests automatically.
 
 `postgres-up` behaves safely:
 
@@ -57,10 +57,11 @@ Run `make bootstrap` immediately after cloning and again after changes to `packa
 make dev
 ```
 
-In another terminal:
+Run checks only when explicitly starting a batch/release test phase:
 
 ```bash
 make check
+make test
 make e2e
 ```
 
@@ -81,12 +82,12 @@ The local adapter does not deliver real email. A missed or expired first-owner l
 
 Local/test origin validation accepts both `http://127.0.0.1:3000` and `http://localhost:3000` when port 3000 is configured. It still rejects other hosts, schemes, and ports. Production accepts only the exact `FRONTEND_URL` origin.
 
-## Targeted feature tests
+## Explicit batch/release test phase
 
-The active Playwright matrix runs real frontend/backend/PostgreSQL behavior in Chromium and mobile Chromium:
+Do not run these commands automatically after each feature or fix. When testing is explicitly requested, select the smallest requested scope and run it once:
 
 ```bash
-# Complete matrix
+# Full matrix (release/full-regression request only)
 make e2e
 
 # One canonical feature gap
@@ -99,6 +100,8 @@ pnpm exec playwright test tests/e2e/fnd-02-identity-access.spec.ts --project=chr
 ```
 
 Do not point Playwright at production. `ENABLE_TEST_HOOKS` must remain `false` for every non-local environment, and production startup rejects an enabled value.
+
+Record each result as Passing, Failing, or Blocked. Do not automatically fix, retry, or rerun failures.
 
 ## Local production-style deployment
 

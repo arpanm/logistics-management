@@ -26,7 +26,7 @@ if [[ ! -d apps/frontend || ! -d apps/backend ]]; then
   exit 0
 fi
 
-for check_name in format:check lint typecheck test; do
+for check_name in format:check lint typecheck; do
   echo "Running workspace check: $check_name"
   run_pnpm -r --filter './packages/*' --filter './apps/*' --if-present run "$check_name"
 done

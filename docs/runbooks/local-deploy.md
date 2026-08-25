@@ -14,16 +14,20 @@
 make deploy-local
 ```
 
-## Verify
+## Verify when explicitly requested
+
+Deployment and tests are batch/release actions, not automatic per-feature gates. For a requested release verification, run the selected scope once:
 
 ```bash
 make postgres-status
 make health
-make e2e
-make verify
+make e2e      # full browser regression only when requested
+make verify   # full repository verification only when requested
 ```
 
 Confirm project database/schema access, backend readiness, frontend availability, and local-only Playwright endpoints.
+
+Record failures without automatically retrying or fixing them unless the user asks.
 
 ## Failure triage
 

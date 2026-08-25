@@ -152,8 +152,8 @@ describe.sequential(
 
     it("FND02-M-001: clean migration and runtime provisioning create deterministic owner authorization", async () => {
       await expect(app.ready()).resolves.toMatchObject({
-        latestMigration: "202608250016_fnd01_postal_owner_handoff_contract",
-        migrationCount: 15,
+        latestMigration: "202608250021_mst01_exception_scope_reconciliation",
+        migrationCount: 20,
       });
       const facts = await withTenant(app.db, tenantA, (tx) =>
         tx.$queryRawUnsafe<

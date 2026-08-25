@@ -50,10 +50,15 @@ function ReferenceField({
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLoading(true);
+      const encoded = encodeURIComponent(search);
       const path =
         field.referenceResource === "access-users"
-          ? `/tenant/access/users?search=${encodeURIComponent(search)}`
-          : `/domain/${field.referenceResource}?search=${encodeURIComponent(search)}`;
+          ? `/tenant/access/users?search=${encoded}`
+          : field.referenceResource === "employees"
+            ? `/domain/masters/employees?query=${encoded}&state=ACTIVE&limit=50&offset=0`
+            : field.referenceResource === "organization-nodes"
+              ? `/domain/masters/organization?query=${encoded}&state=ACTIVE&limit=50&offset=0`
+              : `/domain/${field.referenceResource}?search=${encoded}`;
       void api<{ items: LookupRow[] }>(path, { signal: controller.signal })
         .then((result) => setItems(result.items ?? []))
         .catch(() => setItems([]))

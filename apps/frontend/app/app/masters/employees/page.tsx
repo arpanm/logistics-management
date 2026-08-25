@@ -1,7 +1,4 @@
-import {
-  CanonicalWorkspace,
-  canonicalManifests,
-} from "../../../../components/canonical";
+import { EmployeeWorkspace } from "../../../../components/masters";
 export default function Page() {
-  return <CanonicalWorkspace manifest={canonicalManifests.employees} />;
+  return <EmployeeWorkspace />;
 }

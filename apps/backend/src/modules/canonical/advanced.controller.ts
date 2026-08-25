@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Inject,
   Param,
   Post,
@@ -92,6 +93,7 @@ export class AdvancedDomainController {
   @Post("organization/:id/move") move(
     @Param("id") id: string,
     @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -111,11 +113,13 @@ export class AdvancedDomainController {
         input.expectedVersion,
         input.reason,
         this.correlation(req),
+        idempotencyKey ?? "",
       );
     });
   }
   @Post("assignments/bulk") bulk(
     @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -154,6 +158,7 @@ export class AdvancedDomainController {
         return this.service.bulkAssignments(
           await this.mutation(req),
           input.items,
+          idempotencyKey ?? "",
           this.correlation(req),
         );
       },
@@ -163,6 +168,7 @@ export class AdvancedDomainController {
   @Post("employees/:id/reassign-deactivate") reassignEmployee(
     @Param("id") id: string,
     @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
@@ -171,6 +177,7 @@ export class AdvancedDomainController {
         .object({
           replacementEmployeeId: uuid,
           expectedVersion: z.number().int().positive(),
+          impactSnapshotId: z.string().min(16),
           reason,
         })
         .strict()
@@ -180,6 +187,7 @@ export class AdvancedDomainController {
         uuid.parse(id),
         input,
         this.correlation(req),
+        idempotencyKey ?? "",
       );
     });
   }

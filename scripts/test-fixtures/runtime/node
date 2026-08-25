@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+major="${MST_TEST_NODE_MAJOR:?MST_TEST_NODE_MAJOR is required}"
+case "${1:-}" in
+  -p)
+    printf '%s\n' "$major"
+    ;;
+  --version)
+    printf 'v%s.0.0\n' "$major"
+    ;;
+  *)
+    # Bootstrap's policy check invokes a repository JavaScript status check.
+    # Runtime-policy tests only exercise the shell version gate, so the fake
+    # runtime deliberately performs no application JavaScript work.
+    ;;
+esac

@@ -10,6 +10,10 @@ const code = z
 const text = (max = 500) => z.string().trim().min(1).max(max);
 const isoDate = z.string().date();
 const instant = z.string().datetime({ offset: true });
+const optionalText = (max = 500) => z.string().trim().max(max).nullish();
+const pin = z
+  .string()
+  .regex(/^[1-9][0-9]{5}$/, "Enter a valid 6-digit PIN code");
 const exactInteger = z
   .union([
     z.number().int().safe().transform(String),
@@ -60,6 +64,235 @@ export const employeeCommandSchema = z
     linkedMembershipId: uuid.nullish(),
     activeFrom: isoDate,
     activeTo: isoDate.nullish(),
+  })
+  .strict();
+
+const geofenceBaseSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("POLYGON"),
+      points: z
+        .array(
+          z
+            .object({
+              lat: z.number().min(-90).max(90),
+              lng: z.number().min(-180).max(180),
+            })
+            .strict(),
+        )
+        .min(3)
+        .max(100),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("POINT_RADIUS"),
+      point: z
+        .object({
+          lat: z.number().min(-90).max(90),
+          lng: z.number().min(-180).max(180),
+        })
+        .strict(),
+      radiusKm: z.number().positive().max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("DYNAMIC_RADIUS"),
+      radiusKm: z.number().positive().max(1000),
+      contextualAnchor: z.literal("ORGANIZATION_ADDRESS"),
+    })
+    .strict(),
+]);
+type Point = { lat: number; lng: number };
+const cross = (a: Point, b: Point, c: Point) =>
+  (b.lng - a.lng) * (c.lat - a.lat) - (b.lat - a.lat) * (c.lng - a.lng);
+const orientation = (a: Point, b: Point, c: Point) => Math.sign(cross(a, b, c));
+const onSegment = (a: Point, b: Point, point: Point) =>
+  Math.abs(cross(a, b, point)) < 1e-12 &&
+  point.lat >= Math.min(a.lat, b.lat) &&
+  point.lat <= Math.max(a.lat, b.lat) &&
+  point.lng >= Math.min(a.lng, b.lng) &&
+  point.lng <= Math.max(a.lng, b.lng);
+const intersects = (a: Point, b: Point, c: Point, d: Point) => {
+  const abC = orientation(a, b, c),
+    abD = orientation(a, b, d),
+    cdA = orientation(c, d, a),
+    cdB = orientation(c, d, b);
+  return (
+    (abC !== abD && cdA !== cdB) ||
+    (abC === 0 && onSegment(a, b, c)) ||
+    (abD === 0 && onSegment(a, b, d)) ||
+    (cdA === 0 && onSegment(c, d, a)) ||
+    (cdB === 0 && onSegment(c, d, b))
+  );
+};
+export const geofenceSchema = geofenceBaseSchema.superRefine(
+  (value, context) => {
+    if (value.mode !== "POLYGON") return;
+    const keys = value.points.map((point) => `${point.lat}:${point.lng}`);
+    if (new Set(keys).size !== keys.length)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points"],
+        message:
+          "Polygon vertices must be distinct and must not repeat the closing vertex",
+      });
+    const twiceArea = value.points.reduce((area, point, index) => {
+      const next = value.points[(index + 1) % value.points.length]!;
+      return area + point.lng * next.lat - next.lng * point.lat;
+    }, 0);
+    if (Math.abs(twiceArea) < 1e-12)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points"],
+        message: "Polygon must enclose a non-zero area",
+      });
+    for (let i = 0; i < value.points.length; i++) {
+      const previous =
+          value.points[(i + value.points.length - 1) % value.points.length]!,
+        current = value.points[i]!,
+        next = value.points[(i + 1) % value.points.length]!;
+      if (
+        orientation(previous, current, next) === 0 &&
+        onSegment(previous, current, next)
+      )
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["points", i],
+          message: "Adjacent polygon edges must not overlap",
+        });
+    }
+    for (let i = 0; i < value.points.length; i++)
+      for (let j = i + 1; j < value.points.length; j++) {
+        const adjacent =
+          j === i + 1 || (i === 0 && j === value.points.length - 1);
+        if (
+          !adjacent &&
+          intersects(
+            value.points[i]!,
+            value.points[(i + 1) % value.points.length]!,
+            value.points[j]!,
+            value.points[(j + 1) % value.points.length]!,
+          )
+        )
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["points"],
+            message: "Polygon edges must not intersect",
+          });
+      }
+  },
+);
+
+export const organizationAddressSchema = z
+  .object({
+    line1: text(160),
+    line2: optionalText(160),
+    country: z.literal("IN").default("IN"),
+    postalCode: pin,
+    postalLocalityId: uuid,
+  })
+  .strict();
+
+const hierarchy: Record<string, readonly string[]> = {
+  LEGAL_ENTITY: [],
+  REGION: ["LEGAL_ENTITY"],
+  BRANCH: ["REGION"],
+  TEAM: ["BRANCH", "HUB"],
+  HUB: ["REGION", "BRANCH"],
+};
+export function organizationParentAllowed(
+  nodeType: string,
+  parentType: string | null,
+) {
+  return hierarchy[nodeType]?.includes(parentType ?? "") ?? false;
+}
+
+const organizationMasterBaseSchema = z
+  .object({
+    code,
+    name: text(160),
+    nodeType: z.enum(["LEGAL_ENTITY", "REGION", "BRANCH", "TEAM", "HUB"]),
+    parentId: uuid.nullish(),
+    authorizationScopeNodeId: uuid.nullish(),
+    timezone: text(80).default("Asia/Kolkata"),
+    activeFrom: isoDate,
+    activeTo: isoDate.nullish(),
+    address: organizationAddressSchema.nullish(),
+    geofence: geofenceSchema.nullish(),
+  })
+  .strict();
+export const organizationMasterCreateSchema =
+  organizationMasterBaseSchema.superRefine((value, context) => {
+    if (value.nodeType === "LEGAL_ENTITY" && value.parentId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["parentId"],
+        message: "A legal entity must be a root node",
+      });
+    if (value.nodeType !== "LEGAL_ENTITY" && !value.parentId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["parentId"],
+        message: "Select a valid parent node",
+      });
+    if (["BRANCH", "HUB"].includes(value.nodeType) && !value.address)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["address"],
+        message: "A PIN-derived physical address is required",
+      });
+    if (value.geofence?.mode === "DYNAMIC_RADIUS" && !value.address)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["geofence"],
+        message: "Dynamic radius requires a PIN-derived organization address",
+      });
+    if (value.activeTo && value.activeTo < value.activeFrom)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["activeTo"],
+        message: "Active end must not precede start",
+      });
+  });
+
+export const organizationMasterPatchSchema = organizationMasterBaseSchema
+  .partial()
+  .extend({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().trim().min(5).max(1000),
+  })
+  .strict();
+
+const employeeMasterBaseSchema = z
+  .object({
+    employeeCode: code,
+    displayName: text(160),
+    designation: text(120),
+    email: z.string().trim().toLowerCase().email().max(254).nullish(),
+    mobile: e164MobileSchema.nullish(),
+    managerId: uuid.nullish(),
+    homeNodeId: uuid,
+    regionIds: z.array(uuid).max(100).default([]),
+    linkedMembershipId: uuid.nullish(),
+    activeFrom: isoDate,
+    activeTo: isoDate.nullish(),
+  })
+  .strict();
+export const employeeMasterCreateSchema = employeeMasterBaseSchema.refine(
+  (value) => !value.activeTo || value.activeTo >= value.activeFrom,
+  {
+    path: ["activeTo"],
+    message: "Active end must not precede start",
+  },
+);
+
+export const employeeMasterPatchSchema = employeeMasterBaseSchema
+  .partial()
+  .extend({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().trim().min(5).max(1000),
   })
   .strict();
 
