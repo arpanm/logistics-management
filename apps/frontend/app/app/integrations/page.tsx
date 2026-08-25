@@ -32,22 +32,35 @@ type Dead = {
   deliveryVersion: number;
   resolvedAt?: string;
 };
+type Accounting = {
+  id: string;
+  documentType: string;
+  state: string;
+  amountMinor: number;
+  externalReference?: string;
+  safeErrorCode?: string;
+  version: number;
+};
 export default function IntegrationsPage() {
   const [tab, setTab] = useState("health"),
     [endpoints, setEndpoints] = useState<Endpoint[]>([]),
     [deliveries, setDeliveries] = useState<Delivery[]>([]),
     [dead, setDead] = useState<Dead[]>([]),
-    [error, setError] = useState<ApiError | null>(null);
+    [accounting, setAccounting] = useState<Accounting[]>([]),
+    [error, setError] = useState<ApiError | null>(null),
+    [secret, setSecret] = useState("");
   const load = () =>
     Promise.all([
       api<Endpoint[]>("/tenant/integrations"),
       api<Delivery[]>("/tenant/integrations/deliveries"),
       api<Dead[]>("/tenant/integrations/dead-letters"),
+      api<Accounting[]>("/domain/commands/accounting/reconciliation"),
     ])
-      .then(([e, d, l]) => {
+      .then(([e, d, l, a]) => {
         setEndpoints(e);
         setDeliveries(d);
         setDead(l);
+        setAccounting(a);
         setError(null);
       })
       .catch(setError);
@@ -95,6 +108,47 @@ export default function IntegrationsPage() {
       setError(value as ApiError);
     }
   }
+  async function addMapping(endpoint: Endpoint) {
+    const raw = window.prompt("Mapping JSON", '{"fields":{}}');
+    if (!raw) return;
+    try {
+      await api(`/tenant/integrations/${endpoint.id}/mappings`, {
+        method: "POST",
+        body: JSON.stringify({
+          schema: { type: "object" },
+          mapping: JSON.parse(raw),
+        }),
+      });
+      await load();
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
+  async function createCredential(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget,
+      fields = new FormData(form);
+    try {
+      const created = await api<{ secret: string }>(
+        "/tenant/integrations/api-clients",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            code: fields.get("code"),
+            name: fields.get("name"),
+            scopes: String(fields.get("scopes"))
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+          }),
+        },
+      );
+      setSecret(created.secret);
+      form.reset();
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
   return (
     <Shell>
       <div className="heading">
@@ -115,7 +169,14 @@ export default function IntegrationsPage() {
       )}
       <section className="panel">
         <div role="tablist" aria-label="Integration views">
-          {["health", "deliveries", "dead-letters", "new"].map((value) => (
+          {[
+            "health",
+            "deliveries",
+            "dead-letters",
+            "accounting",
+            "credentials",
+            "new",
+          ].map((value) => (
             <button
               role="tab"
               aria-selected={tab === value}
@@ -151,6 +212,9 @@ export default function IntegrationsPage() {
                       ? new Date(item.lastFailureAt).toLocaleString()
                       : "—"}
                   </small>
+                  <button type="button" onClick={() => void addMapping(item)}>
+                    Create mapping version
+                  </button>
                 </article>
               ))}
             </div>
@@ -219,7 +283,10 @@ export default function IntegrationsPage() {
             </label>
             <label>
               Endpoint
-              <input name="endpoint" type="url" />
+              <input
+                name="endpoint"
+                placeholder="https://… or local://capture"
+              />
             </label>
             <label>
               Credential reference
@@ -230,6 +297,64 @@ export default function IntegrationsPage() {
             </label>
             <button className="primary">Create integration</button>
           </form>
+        </section>
+      )}
+      {tab === "credentials" && (
+        <section className="panel">
+          <h2>Machine credentials</h2>
+          {secret && (
+            <div className="success" role="status">
+              <strong>Copy this secret now</strong>
+              <code>{secret}</code>
+              <p>It is not shown again.</p>
+            </div>
+          )}
+          <form
+            className="access-form"
+            onSubmit={(event) => void createCredential(event)}
+          >
+            <label>
+              Client code
+              <input name="code" required />
+            </label>
+            <label>
+              Name
+              <input name="name" required />
+            </label>
+            <label>
+              Allowed event scopes
+              <input
+                name="scopes"
+                required
+                placeholder="indent.created.v1, trip.event.v1"
+              />
+            </label>
+            <button className="primary">Create credential</button>
+          </form>
+        </section>
+      )}
+      {tab === "accounting" && (
+        <section className="panel">
+          <h2>Accounting reconciliation</h2>
+          {accounting.length ? (
+            accounting.map((item) => (
+              <article className="access-card" key={item.id}>
+                <h3>{item.documentType}</h3>
+                <p>
+                  {item.state} · {item.amountMinor} minor units
+                </p>
+                <small>
+                  {item.externalReference ??
+                    item.safeErrorCode ??
+                    "Awaiting adapter"}
+                </small>
+              </article>
+            ))
+          ) : (
+            <p className="empty">
+              No posted documents await accounting exchange.
+            </p>
+          )}
         </section>
       )}
     </Shell>

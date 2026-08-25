@@ -4,10 +4,18 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // These are the active canonical acceptance suites. Earlier rapid generic-
+  // kernel suites were superseded when the domain modules became canonical.
+  testMatch: [
+    "fnd-01-tenant-foundation.spec.ts",
+    "fnd-02-identity-access.spec.ts",
+    "all-features-foundation-masters.spec.ts",
+    "all-feature-gaps.spec.ts",
+  ],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  workers: 2,
   reporter: [["line"], ["html", { open: "never" }]],
   use: {
     baseURL,

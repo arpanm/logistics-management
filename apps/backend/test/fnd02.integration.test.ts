@@ -153,8 +153,8 @@ describe.sequential(
 
     it("FND02-M-001: clean migration and runtime provisioning create deterministic owner authorization", async () => {
       await expect(app.ready()).resolves.toMatchObject({
-        latestMigration: "202608250006_intelligence_modules",
-        migrationCount: 5,
+        latestMigration: "202608250009_alert_tenant_root_fallback",
+        migrationCount: 8,
       });
       const facts = await withTenant(app.db, tenantA, (tx) =>
         tx.$queryRawUnsafe<
@@ -1367,6 +1367,7 @@ describe.sequential(
             },
           ],
           expiresInHours: 72,
+          reason: "Approved client portal MFA access",
         },
         "fnd02-mfa-invite",
         "fnd02-mfa-invite",

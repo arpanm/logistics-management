@@ -98,26 +98,26 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 ## 5. Feature register
 
-| ID | Feature | Evidence | Implementation status | Test status | Depends on |
-|---|---|---|---|---|---|
-| FND-01 | Multi-tenant product foundation | Product objective | Complete | Passing | — |
-| FND-02 | Identity, roles, and scoped access | Operating-model roles | In progress | Implemented | FND-01 |
-| MST-01 | Organization, employee, and geography masters | Workbook managers; stated hierarchy | In progress | Implemented | FND-01, FND-02 |
-| MST-02 | Client, contract, lane, SLA, and rate-card masters | Client/location forms; contract business model | In progress | Implemented | MST-01 |
-| MST-03 | Vendor, vehicle, driver, and compliance masters | Vendor form; vendor/driver actors | In progress | Implemented | MST-01 |
-| OPS-01 | Indent capture and lifecycle | Indent form/workbook | In progress | Implemented | MST-02 |
-| OPS-02 | Vendor allocation and placement | Placement form/dashboard | In progress | Implemented | OPS-01, MST-03 |
-| OPS-03 | Trip execution, loading, transit, and unloading | Stated actors; dashboard mentions GPS | In progress | Implemented | OPS-02 |
-| DOC-01 | POD and delivery-document workflow | POD form/dashboard | In progress | Implemented | OPS-03 |
-| FIN-01 | Client billing and invoice workflow | Invoice form/workbook | In progress | Implemented | DOC-01, MST-02 |
-| FIN-02 | Receipts, reconciliation, and collections | Receipt/invoice forms/dashboard | In progress | Implemented | FIN-01 |
-| FIN-03 | Vendor bills, deductions, and payments | Stated vendor-payment need | In progress | Implemented | OPS-03, MST-03 |
-| CTL-01 | Control tower dashboards and drill-down reports | Dashboard prototype | In progress | Implemented | Transaction modules |
-| ALT-01 | Alerts, escalation, and work queues | Traffic lights and operating need | In progress | Implemented | Transaction modules, FND-02 |
-| DAT-01 | Bulk import, validation, correction, and export | Workbook/read-me/forms queue | In progress | Implemented | Masters and transactions |
-| GOV-01 | Documents, comments, audit, and approvals | Audit trail notes and regulated data | In progress | Implemented | FND-02 |
-| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note | In progress | Implemented | FND-01, GOV-01 |
-| CFG-01 | No-code tenant configuration and white-labeling | Resale objective | In progress | Implemented | FND-01 |
+| ID     | Feature                                                        | Evidence                                       | Implementation status | Test status | Depends on                  |
+| ------ | -------------------------------------------------------------- | ---------------------------------------------- | --------------------- | ----------- | --------------------------- |
+| FND-01 | Multi-tenant product foundation                                | Product objective                              | Complete              | Passing     | —                           |
+| FND-02 | Identity, roles, and scoped access                             | Operating-model roles                          | Complete              | Passing     | FND-01                      |
+| MST-01 | Organization, employee, and geography masters                  | Workbook managers; stated hierarchy            | Complete              | Passing     | FND-01, FND-02              |
+| MST-02 | Client, contract, lane, SLA, and rate-card masters             | Client/location forms; contract business model | Complete              | Passing     | MST-01                      |
+| MST-03 | Vendor, vehicle, driver, and compliance masters                | Vendor form; vendor/driver actors              | Complete              | Passing     | MST-01                      |
+| OPS-01 | Indent capture and lifecycle                                   | Indent form/workbook                           | Complete              | Passing     | MST-02                      |
+| OPS-02 | Vendor allocation and placement                                | Placement form/dashboard                       | Complete              | Passing     | OPS-01, MST-03              |
+| OPS-03 | Trip execution, loading, transit, and unloading                | Stated actors; dashboard mentions GPS          | Complete              | Passing     | OPS-02                      |
+| DOC-01 | POD and delivery-document workflow                             | POD form/dashboard                             | Complete              | Passing     | OPS-03                      |
+| FIN-01 | Client billing and invoice workflow                            | Invoice form/workbook                          | Complete              | Passing     | DOC-01, MST-02              |
+| FIN-02 | Receipts, reconciliation, and collections                      | Receipt/invoice forms/dashboard                | Complete              | Passing     | FIN-01                      |
+| FIN-03 | Vendor bills, deductions, and payments                         | Stated vendor-payment need                     | Complete              | Passing     | OPS-03, MST-03              |
+| CTL-01 | Control tower dashboards and drill-down reports                | Dashboard prototype                            | Complete              | Passing     | Transaction modules         |
+| ALT-01 | Alerts, escalation, and work queues                            | Traffic lights and operating need              | Complete              | Passing     | Transaction modules, FND-02 |
+| DAT-01 | Bulk import, validation, correction, and export                | Workbook/read-me/forms queue                   | Complete              | Passing     | Masters and transactions    |
+| GOV-01 | Documents, comments, audit, and approvals                      | Audit trail notes and regulated data           | Complete              | Passing     | FND-02                      |
+| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Passing     | FND-01, GOV-01              |
+| CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Passing     | FND-01                      |
 
 ## 6. Common Codex build contract
 
@@ -173,9 +173,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## FND-02 — Identity, roles, and scoped access
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Every person sees and changes only the data and actions required for their role and operational scope.
 
@@ -208,9 +208,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## MST-01 — Organization, employee, and geography masters
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Configurable organization structure drives ownership, routing, permissions, filters, and escalations.
 
@@ -242,9 +242,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## MST-02 — Client, contract, lane, SLA, and rate-card masters
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Commercial and service commitments are versioned once and applied consistently to indents, billing, reporting, and alerts.
 
@@ -285,9 +285,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## MST-03 — Vendor, vehicle, driver, and compliance masters
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Operations can allocate only eligible supply, while finance can settle verified vendors securely.
 
@@ -320,9 +320,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## OPS-01 — Indent capture and lifecycle
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Every customer truck requirement becomes a traceable, assigned, SLA-bound indent rather than a WhatsApp message.
 
@@ -356,9 +356,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## OPS-02 — Vendor allocation and placement
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Placement teams allocate demand to eligible vendors, capture vehicle/driver reporting, measure fill and delay, and escalate NTP consistently.
 
@@ -393,9 +393,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## OPS-03 — Trip execution, loading, transit, and unloading
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Field events replace WhatsApp updates and create an auditable trip record from gate-in through delivery.
 
@@ -429,9 +429,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## DOC-01 — POD and delivery-document workflow
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Each LR has traceable delivery proof, discrepancy evidence, submission acknowledgement, and POD ageing.
 
@@ -465,9 +465,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## FIN-01 — Client billing and invoice workflow
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Completed eligible services become accurate, approved, submitted client invoices with traceable commercial calculations.
 
@@ -501,9 +501,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## FIN-02 — Receipts, reconciliation, and collections
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Each bank credit is allocated transparently, invoice balances are derived, deductions remain visible, and collection owners work prioritized queues.
 
@@ -538,9 +538,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## FIN-03 — Vendor bills, deductions, and payments
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Vendor obligations are calculated from performed services, approved against evidence, and paid with full reconciliation and margin visibility.
 
@@ -575,9 +575,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## CTL-01 — Control tower dashboards and drill-down reports
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Owners and managers move from portfolio risk to the exact actionable record without separate Excel preparation.
 
@@ -614,9 +614,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## ALT-01 — Alerts, escalation, and work queues
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Computed risk becomes assigned, deduplicated action with escalation rather than passive dashboard colour.
 
@@ -656,9 +656,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## DAT-01 — Bulk import, validation, correction, and export
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Existing Excel-based operations migrate safely while users receive row-level feedback and retained history.
 
@@ -702,9 +702,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## GOV-01 — Documents, comments, audit, and approvals
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** Operational and financial decisions have secure evidence, discussion, authorization, and an immutable history.
 
@@ -737,9 +737,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## INT-01 — APIs, notifications, GPS, accounting, and migration connectors
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** The platform integrates with existing systems and communication habits without making WhatsApp or spreadsheets the system of record.
 
@@ -774,9 +774,9 @@ Every feature prompt below includes this contract by reference. Codex must:
 
 ## CFG-01 — No-code tenant configuration and white-labeling
 
-**Status:** In progress
+**Status:** Complete
 
-**Test status:** Implemented
+**Test status:** Passing
 
 **Outcome:** The same product supports different logistics operators without forks or customer-specific constants.
 

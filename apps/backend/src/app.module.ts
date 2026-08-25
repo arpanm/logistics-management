@@ -9,11 +9,20 @@ import {
   intelligenceControllers,
   intelligenceProviders,
 } from "./modules/control/index.js";
+import {
+  CanonicalController,
+  CanonicalService,
+  OperationalWorkerService,
+  AdvancedDomainController,
+  AdvancedDomainService,
+} from "./modules/canonical/index.js";
 
 @Module({
   controllers: [
     AccessController,
     ...intelligenceControllers,
+    AdvancedDomainController,
+    CanonicalController,
     KernelController,
     ApiController,
   ],
@@ -22,6 +31,9 @@ import {
     AccessService,
     KernelService,
     ...intelligenceProviders,
+    CanonicalService,
+    OperationalWorkerService,
+    AdvancedDomainService,
   ],
 })
 export class AppModule {}

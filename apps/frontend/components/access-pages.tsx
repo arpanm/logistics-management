@@ -97,6 +97,9 @@ export function UsersPage() {
     void load(controller.signal);
     return () => controller.abort();
   }, []);
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -141,7 +144,6 @@ export function UsersPage() {
       await load();
     } catch (value) {
       setError(value as ApiError);
-      requestAnimationFrame(() => errorRef.current?.focus());
     }
   }
   async function openUser(user: User) {

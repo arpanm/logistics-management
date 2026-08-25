@@ -7,7 +7,9 @@ type Report = {
   totals: { total: number; active: number; inactive: number };
   projectDatabaseBytes: string;
   storageLabel: string;
-  integrationHealth: string;
+  integrationHealth:
+    | string
+    | { endpoints: number; active: number; failures: number };
   tenants: Array<Record<string, string | number | null>>;
 };
 type PlatformAlert = {
@@ -129,8 +131,11 @@ export default function Report() {
               </table>
             </div>
             <p className="muted">
-              Integration health: {data.integrationHealth}. Generated{" "}
-              {new Date(data.generatedAt).toLocaleString()}.
+              Integration health:{" "}
+              {typeof data.integrationHealth === "string"
+                ? data.integrationHealth
+                : `${data.integrationHealth.active}/${data.integrationHealth.endpoints} active, ${data.integrationHealth.failures} failures`}
+              . Generated {new Date(data.generatedAt).toLocaleString()}.
             </p>
           </section>
           <section className="panel" aria-labelledby="alerts-title">

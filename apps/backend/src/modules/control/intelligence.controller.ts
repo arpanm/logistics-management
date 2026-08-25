@@ -118,6 +118,43 @@ export class IntelligenceController {
       ),
     );
   }
+  @Get("control/:lens/views") savedViews(
+    @Param("lens") value: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () =>
+      this.control.savedViews(
+        await this.authorized(req, "control.dashboard.read"),
+        lens.parse(value),
+      ),
+    );
+  }
+  @Post("control/:lens/views") saveView(
+    @Param("lens") value: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const actor = await this.authorized(req, "control.dashboard.read");
+        this.csrf(req, actor);
+        const input = z
+          .object({
+            name: z.string().trim().min(2).max(100),
+            filters: z.record(z.unknown()).default({}),
+            isDefault: z.boolean().default(false),
+            expectedVersion: z.number().int().positive().optional(),
+          })
+          .strict()
+          .parse(body);
+        return this.control.saveView(actor, lens.parse(value), input);
+      },
+      201,
+    );
+  }
   @Get("alerts") alertQueue(
     @Query("state") state: string | undefined,
     @Query("severity") severity: string | undefined,
@@ -130,6 +167,64 @@ export class IntelligenceController {
         state ?? "",
         severity ?? "",
       ),
+    );
+  }
+  @Get("alert-rules") alertRules(@Req() req: Request, @Res() res: Response) {
+    return this.run(res, async () =>
+      this.alerts.rules(await this.authorized(req, "alerts.read")),
+    );
+  }
+  @Post("alert-rules") saveAlertRule(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const actor = await this.authorized(req, "alerts.admin");
+        this.csrf(req, actor);
+        const input = z
+          .object({
+            id: uuid.optional(),
+            code: z.string().regex(/^[A-Z0-9_.-]{2,80}$/),
+            name: z.string().trim().min(2).max(120),
+            sourceModule: z.string().trim().min(2).max(40),
+            eventType: z.string().trim().min(2).max(120).optional(),
+            metricCode: z.enum([
+              "PLACEMENT_OVERDUE_MINUTES",
+              "POD_AGE_DAYS",
+              "INVOICE_OVERDUE_DAYS",
+              "COMPLIANCE_EXPIRY_DAYS",
+            ]),
+            scopeNodeIds: z.array(uuid).max(100).default([]),
+            threshold: z
+              .object({ value: z.number().nonnegative() })
+              .passthrough(),
+            severity: z.enum(["INFO", "WARNING", "HIGH", "CRITICAL"]),
+            recipientPolicy: z.record(z.unknown()).default({}),
+            channels: z
+              .array(z.enum(["IN_APP", "EMAIL", "SMS", "WHATSAPP"]))
+              .min(1)
+              .max(4),
+            quietHours: z.record(z.unknown()).default({}),
+            repeatPolicy: z.record(z.unknown()).default({}),
+            escalationLevels: z.array(z.unknown()).max(20).default([]),
+            acknowledgementRequired: z.boolean().default(true),
+            resolutionCondition: z.record(z.unknown()).default({}),
+            active: z.boolean().default(true),
+            expectedVersion: z.number().int().positive().optional(),
+          })
+          .strict()
+          .parse(body);
+        return this.alerts.saveRule(
+          actor,
+          input,
+          (req as Request & { correlationId?: string }).correlationId ??
+            crypto.randomUUID(),
+        );
+      },
+      201,
     );
   }
   @Post("alerts/:id/actions") alertAction(
@@ -236,6 +331,29 @@ export class IntelligenceController {
       201,
     );
   }
+  @Post("imports/parse") importParse(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () => {
+      const actor = await this.authorized(req, "data.import.admin");
+      this.csrf(req, actor);
+      const input = z
+        .object({
+          filename: z.string().min(1).max(240),
+          mediaType: z.string().min(1).max(120),
+          contentBase64: z.string().min(1).max(34_000_000),
+        })
+        .strict()
+        .parse(body);
+      return this.data.parseFile(
+        input.filename,
+        input.mediaType,
+        input.contentBase64,
+      );
+    });
+  }
   @Post("imports/:id/commit") importCommit(
     @Param("id") id: string,
     @Body() body: unknown,
@@ -262,6 +380,142 @@ export class IntelligenceController {
       ),
     );
   }
+  @Get("integrations/:id/mappings") integrationMappings(
+    @Param("id") id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () =>
+      this.integrations.mappings(
+        await this.authorized(req, "integrations.read"),
+        uuid.parse(id),
+      ),
+    );
+  }
+  @Post("integrations/:id/mappings") integrationMappingCreate(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const actor = await this.authorized(req, "integrations.admin");
+        this.csrf(req, actor);
+        const input = z
+          .object({
+            schema: z.record(z.unknown()),
+            mapping: z.record(z.unknown()),
+          })
+          .strict()
+          .parse(body);
+        return this.integrations.createMapping(
+          actor,
+          uuid.parse(id),
+          input,
+          (req as Request & { correlationId?: string }).correlationId ??
+            crypto.randomUUID(),
+        );
+      },
+      201,
+    );
+  }
+  @Post("integrations/api-clients") apiClientCreate(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const actor = await this.authorized(req, "integrations.admin");
+        this.csrf(req, actor);
+        const input = z
+          .object({
+            code: z.string().regex(/^[A-Z0-9_-]{2,40}$/),
+            name: z.string().trim().min(2).max(120),
+            scopes: z.array(z.string().trim().min(2).max(120)).min(1).max(100),
+            expiresAt: z.string().datetime({ offset: true }).optional(),
+          })
+          .strict()
+          .parse(body);
+        return this.integrations.createApiClient(
+          actor,
+          input,
+          (req as Request & { correlationId?: string }).correlationId ??
+            crypto.randomUUID(),
+        );
+      },
+      201,
+    );
+  }
+  @Post("integrations/api-clients/:id/rotate") apiClientRotate(
+    @Param("id") id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () => {
+      const actor = await this.authorized(req, "integrations.admin");
+      this.csrf(req, actor);
+      return this.integrations.rotateApiClient(
+        actor,
+        uuid.parse(id),
+        (req as Request & { correlationId?: string }).correlationId ??
+          crypto.randomUUID(),
+      );
+    });
+  }
+  @Post("webhooks/:tenantCode/:clientCode") webhook(
+    @Param("tenantCode") tenantCode: string,
+    @Param("clientCode") clientCode: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const input = z
+          .object({
+            eventKey: z.string().trim().min(2).max(120),
+            eventType: z.string().trim().min(2).max(120),
+            payload: z.unknown(),
+          })
+          .strict()
+          .parse(body);
+        const auth = String(req.headers.authorization ?? "");
+        if (!auth.startsWith("Bearer "))
+          throw new AppError(
+            401,
+            "MACHINE_AUTH_FAILED",
+            "Machine authentication failed",
+          );
+        return this.integrations.ingestWebhook({
+          tenantCode: z
+            .string()
+            .regex(/^[A-Z0-9_-]{2,40}$/)
+            .parse(tenantCode),
+          clientCode: z
+            .string()
+            .regex(/^[A-Z0-9_-]{2,40}$/)
+            .parse(clientCode),
+          token: auth.slice(7),
+          signature: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/i)
+            .parse(req.headers["x-webhook-signature"]),
+          eventKey: input.eventKey,
+          eventType: input.eventType,
+          payload: input.payload,
+          correlationId:
+            (req as Request & { correlationId?: string }).correlationId ??
+            crypto.randomUUID(),
+        });
+      },
+      202,
+    );
+  }
   @Post("integrations") integrationCreate(
     @Body() body: unknown,
     @Req() req: Request,
@@ -285,7 +539,12 @@ export class IntelligenceController {
             ]),
             name: z.string().min(2).max(120),
             environment: z.string().min(2).max(40),
-            endpoint: z.string().url().optional(),
+            endpoint: z
+              .union([
+                z.string().url(),
+                z.string().regex(/^local:\/\/[a-z0-9/_-]+$/i),
+              ])
+              .optional(),
             credentialReference: z.string().min(3).max(240).optional(),
             scopes: z
               .array(z.string().trim().min(1).max(100))

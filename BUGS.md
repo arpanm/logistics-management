@@ -4,20 +4,37 @@ This register tracks the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`. RC
 
 ## Summary
 
-| Bug         | Failed test        | Feature | Classification      | Severity    | Root cause                                                                            | Status   |
-| ----------- | ------------------ | ------- | ------------------- | ----------- | ------------------------------------------------------------------------------------- | -------- |
-| BUG-E2E-001 | E2E-FOUND-FND01-05 | FND-01  | Product correctness | P1 / Medium | Platform report reads totals and rows from different PostgreSQL snapshots             | Resolved |
-| BUG-E2E-002 | OPS02-UI-001       | OPS-02  | Test automation     | P2 / Medium | Brittle exact label locator cannot resolve a visible wrapped select                   | Resolved |
-| BUG-E2E-003 | OPS03-UI-001       | OPS-03  | Test automation     | P2 / Medium | Brittle exact label locator cannot resolve a visible wrapped select                   | Resolved |
-| BUG-E2E-004 | DOC01-UI-001       | DOC-01  | Test automation     | P2 / Medium | Brittle exact label locator cannot resolve a visible wrapped select                   | Resolved |
-| BUG-E2E-005 | FIN02-UI-001       | FIN-02  | Test automation     | P2 / Medium | Brittle exact label locator cannot resolve a visible wrapped select                   | Resolved |
-| BUG-E2E-006 | FIN01-UI-001       | FIN-01  | Test automation     | P2 / Low    | Success assertion ambiguously matches two live status regions                         | Resolved |
-| BUG-E2E-007 | FIN03-UI-001       | FIN-03  | Test automation     | P2 / Low    | Success assertion ambiguously matches two live status regions                         | Resolved |
-| BUG-E2E-008 | E2E-ALT01-01       | ALT-01  | Product integration | P1 / High   | Generic alert records and operational alert queues use disconnected stores            | Resolved |
-| BUG-E2E-009 | E2E-ALT01-04       | ALT-01  | Product integration | P1 / High   | Alert action API cannot find records created through the advertised generic API       | Resolved |
-| BUG-E2E-010 | E2E-ALT01-05       | ALT-01  | Product integration | P1 / High   | Alert reconciliation reads a store that never received the created alert              | Resolved |
-| BUG-E2E-011 | E2E-INT01-01       | INT-01  | Product UI          | P1 / High   | Async form handler loses its form reference and skips state refresh                   | Resolved |
-| BUG-E2E-012 | E2E-INT01-04       | INT-01  | Product integration | P1 / High   | Generic delivery records and operational delivery/dead-letter stores are disconnected | Resolved |
+| Bug         | Failed test         | Feature      | Classification      | Severity      | Root cause                                                                              | Status   |
+| ----------- | ------------------- | ------------ | ------------------- | ------------- | --------------------------------------------------------------------------------------- | -------- |
+| BUG-E2E-001 | E2E-FOUND-FND01-05  | FND-01       | Product correctness | P1 / Medium   | Platform report reads totals and rows from different PostgreSQL snapshots               | Resolved |
+| BUG-E2E-002 | OPS02-UI-001        | OPS-02       | Test automation     | P2 / Medium   | Brittle exact label locator cannot resolve a visible wrapped select                     | Resolved |
+| BUG-E2E-003 | OPS03-UI-001        | OPS-03       | Test automation     | P2 / Medium   | Brittle exact label locator cannot resolve a visible wrapped select                     | Resolved |
+| BUG-E2E-004 | DOC01-UI-001        | DOC-01       | Test automation     | P2 / Medium   | Brittle exact label locator cannot resolve a visible wrapped select                     | Resolved |
+| BUG-E2E-005 | FIN02-UI-001        | FIN-02       | Test automation     | P2 / Medium   | Brittle exact label locator cannot resolve a visible wrapped select                     | Resolved |
+| BUG-E2E-006 | FIN01-UI-001        | FIN-01       | Test automation     | P2 / Low      | Success assertion ambiguously matches two live status regions                           | Resolved |
+| BUG-E2E-007 | FIN03-UI-001        | FIN-03       | Test automation     | P2 / Low      | Success assertion ambiguously matches two live status regions                           | Resolved |
+| BUG-E2E-008 | E2E-ALT01-01        | ALT-01       | Product integration | P1 / High     | Generic alert records and operational alert queues use disconnected stores              | Resolved |
+| BUG-E2E-009 | E2E-ALT01-04        | ALT-01       | Product integration | P1 / High     | Alert action API cannot find records created through the advertised generic API         | Resolved |
+| BUG-E2E-010 | E2E-ALT01-05        | ALT-01       | Product integration | P1 / High     | Alert reconciliation reads a store that never received the created alert                | Resolved |
+| BUG-E2E-011 | E2E-INT01-01        | INT-01       | Product UI          | P1 / High     | Async form handler loses its form reference and skips state refresh                     | Resolved |
+| BUG-E2E-012 | E2E-INT01-04        | INT-01       | Product integration | P1 / High     | Generic delivery records and operational delivery/dead-letter stores are disconnected   | Resolved |
+| BUG-GAP-001 | FND01-M-001         | FND-01       | Test maintenance    | P2 / Low      | Exact migration inventory omitted the new canonical all-feature migration               | Resolved |
+| BUG-GAP-002 | FND01-A-006         | FND-01       | Test maintenance    | P2 / Low      | Exact tenant-table RLS inventory omitted the new canonical tenant relations             | Resolved |
+| BUG-GAP-003 | FND02-I/C/A suite   | FND-02       | Product regression  | P1 / High     | Tenant Owner can no longer delegate baseline scoped roles after migration 007           | Resolved |
+| BUG-GAP-004 | FND02-C-005/R-004   | FND-02       | Product regression  | P1 / High     | Repeated-login security alerts are not created/reported after canonical alert changes   | Resolved |
+| BUG-GAP-005 | E2E-GAP-XF-01..07   | ALL          | Test infrastructure | P1 / High     | Consolidated Playwright fixtures stall at Platform registry and reporter loses step IDs | Resolved |
+| BUG-GAP-006 | Canonical commands  | ALL          | Security            | P0 / Critical | Same-tenant IDs bypass assignment/resource scope checks in commands and governance      | Resolved |
+| BUG-GAP-007 | Create/import paths | DAT/Masters  | Security            | P0 / Critical | Create/import validates capability but not supplied parent/resource scope               | Resolved |
+| BUG-GAP-008 | Sensitive fields    | FND-02       | Security            | P1 / High     | Generic ADMIN action reveals data without explicit sensitive-read capabilities          | Resolved |
+| BUG-GAP-009 | Finance ledgers     | FIN-01/02/03 | Correctness         | P1 / High     | Bigint money crosses unsafe JavaScript Number conversions                               | Resolved |
+| BUG-GAP-010 | Local workers       | GOV/INT      | Product correctness | P1 / High     | Local adapters falsely mark unscanned files and unsent messages successful              | Resolved |
+| BUG-GAP-011 | Migration 007       | FND-02       | Upgrade regression  | P1 / High     | Existing baseline roles are not backfilled with new domain capabilities                 | Resolved |
+| BUG-GAP-012 | Alert queue/actions | ALT-01       | Security            | P1 / High     | Rule-less alerts are readable/actionable tenant-wide without resource scope             | Resolved |
+| BUG-GAP-013 | E2E-GAP-OPS02-01    | OPS-02       | Test fixture        | P2 / Low      | Eligibility scenario reused an already eligible vendor                                  | Resolved |
+| BUG-GAP-014 | E2E-GAP-OPS03-03    | OPS-03       | Test assertion      | P2 / Low      | Regression expected an obsolete report response shape                                   | Resolved |
+| BUG-GAP-015 | E2E-GAP-OPS03-02    | OPS-03       | Test fixture        | P2 / Low      | Offline ordering scenario reused an immutable event key                                 | Resolved |
+| BUG-GAP-016 | FND01-04/05         | FND-01       | Test navigation     | P2 / Low      | Lifecycle and tenant-selection checks assumed an obsolete landing route                 | Resolved |
+| BUG-GAP-017 | E2E-FOUND-FND01-05  | FND-01       | Product UI          | P1 / Medium   | Platform report rendered the integration-health object directly as a React child        | Resolved |
 
 ## Detailed RCA
 
@@ -195,6 +212,44 @@ The 12 failed cases represent six underlying causes:
 5. Integration frontend refresh defect: BUG-E2E-011.
 6. Integration delivery persistence-boundary defect: BUG-E2E-012.
 
+## Consolidated all-feature gap run — 2026-08-25
+
+### BUG-GAP-003 — FND-02 delegation regression blocks eight integration cases
+
+- **Observed:** `make check` completed formatting, lint, typecheck, unit tests, clean migration 007, and FND-01 tests, then the FND-02 suite finished with 4 passed and 10 failed. The first failure was `DELEGATION_DENIED` while the Tenant Owner invited the baseline Regional Manager. KAM and external-portal invitation paths failed identically.
+- **Cascaded evidence:** Later scope, denial, access-edit, concurrency, and portal cases used actors/membership IDs that the failed invitation was meant to create. Those failures surfaced as undefined actors or PostgreSQL `22P02` UUID casts and are classified as blocked cascades, not eight independent product defects.
+- **Expected:** A provisioned Tenant Owner must retain delegability for every baseline role/capability/scope combination allowed before migration 007.
+- **Likely boundary:** Migration 007 adds domain capabilities and role grants, changing the capability/delegation catalogue used by `AccessService.validateDelegation` without updating the FND-02 baseline delegation model consistently.
+- **Affected named tests:** FND02-I-001/I-002/C-001/C-002; A-001/A-002/A-006/C-003/C-004; A-007/A-008/A-009; I-003/I-006/I-007/A-010; A-002/A-006; A-003/A-004/A-005/I-005.
+- **Status:** Resolved. Tenant Owner delegation now proves the requested capability and TENANT-root ADMIN grant within one active assignment; FND-02 passes 14/14.
+
+### BUG-GAP-004 — Repeated-login alert reconciliation regressed
+
+- **Observed:** After the fifth invalid login, `app.security_alerts` contained zero `REPEATED_LOGIN_FAILURES` rows. The report/alert reconciliation case consequently could not find that alert.
+- **Expected:** Below-threshold attempts create no alert; the threshold attempt creates one deduplicated alert with occurrence count one; alert/report totals reconcile.
+- **Likely boundary:** The canonical alert integration added for the all-feature batch does not preserve the existing FND-02 security-alert creation/reporting path.
+- **Affected named tests:** FND02-I-004/C-005/C-006 and FND02-R-001..R-005.
+- **Status:** Resolved. Post-upsert rolling counts drive the threshold and the canonical security alert reconciles in the passing FND-02 suite.
+
+### BUG-GAP-005 — Consolidated browser matrix cannot complete reliably
+
+- **Observed:** The real-service Playwright file discovered 16 desktop/mobile journey executions and started five Chromium workers. The initial XF-01..XF-05 journeys remained at the Platform Tenant registry, emitted repeated `Internal error: step id not found: fixture@...`, generated failure screenshots, and did not finish after exceeding the configured 240-second test timeout. The run was terminated after more than five minutes with no trustworthy per-ID final ledger.
+- **Expected:** All eight journeys finish in both projects and attach one machine-readable result for each of the 50 stable gap IDs.
+- **Impact:** The original run could not classify feature behavior.
+- **Status:** Resolved. Playwright workers are bounded, fixtures are deterministic, and all 50 IDs pass in desktop and mobile Chromium.
+
+### BUG-GAP-006 through BUG-GAP-012 — Independent review blockers
+
+- **BUG-GAP-006:** Advanced organization, commercial, operations, finance, document, comment, approval, and report paths commonly check only that the actor has a capability on some grant, then accept arbitrary same-tenant target IDs. Region/client/vendor-scoped actors can access or mutate resources outside their grants.
+- **BUG-GAP-007:** Generic create and import paths do not prove that supplied parents, scope nodes, clients, or vendors fall inside the actor's grant. Imports can also create null-scope records, preventing consistent downstream authorization.
+- **BUG-GAP-008:** Canonical serializers use a generic `ADMIN` action to reveal PAN, GSTIN, mobile, bank, rate, payment, and margin values instead of requiring the corresponding `sensitive.*.read` capability.
+- **BUG-GAP-009:** Financial commands accept ordinary integer numbers and convert PostgreSQL bigint values through JavaScript `Number`; values above `Number.MAX_SAFE_INTEGER` can be rounded in append-only ledger operations.
+- **BUG-GAP-010:** PostgreSQL-only workers mark email/SMS/notification attempts `DELIVERED` without a provider and mark every non-EICAR upload `CLEAN/VERIFIED` without a malware scanner. Local adapters must stay pending/simulated and must not confer real security or delivery state.
+- **BUG-GAP-011:** Migration 007 grants new domain capabilities only to Tenant Owner. Existing upgraded Regional, Traffic, Finance, Driver, Vendor, Client, and Auditor roles are not backfilled to match newly provisioned tenants.
+- **BUG-GAP-012:** Rule-less alerts are exposed to any internal actor with `alerts.read`, and action lookups use tenant plus alert UUID without resource-scope evaluation.
+- **Evidence:** Independent read-only review of the final production diff after the consolidated test run.
+- **Status:** Resolved. Target-resource authorization, scoped imports, explicit sensitive capabilities, BigInt-only finance, truthful local-adapter states, role backfills, and alert-source authorization have focused regression coverage and pass the consolidated suite.
+
 ## Resolution evidence
 
 - **BUG-E2E-001:** Platform totals and tenant rows now come from one materialized PostgreSQL snapshot. The concurrent reconciliation case passes in desktop and mobile Chromium.
@@ -205,3 +260,21 @@ The 12 failed cases represent six underlying causes:
 - **BUG-E2E-012:** Delivery creation, dead-lettering, replay, detail, and reporting use the canonical integration tables. The regression proves two fail/replay cycles on one delivery, ending at version 5 with replay count 2, in desktop and mobile Chromium.
 
 The backend regression suite also covers required idempotency keys, reordered-body replay, changed-body conflicts, tenant namespacing, stale versions, immutable delivery fields, concurrent failure/replay lock behavior, CSRF, low-capability and cross-tenant denials, payload secrecy, and exact-once audit records.
+
+## Consolidated gap-batch failures
+
+### BUG-GAP-001 — Migration inventory was stale after canonical migration
+
+- **Failed test:** `FND01-M-001`
+- **Observed:** The clean migration run applied `202608250007_all_feature_canonical`, but the legacy exact-list assertion expected only the preceding five migrations.
+- **RCA:** A forward migration was correctly introduced, while the catalog meta-test remained hard-coded to the old inventory.
+- **Impact:** False-negative test result; migration application itself succeeded and the second deploy reported no pending migrations.
+- **Status:** Resolved. The exact eight-migration inventory passes on clean and upgraded databases.
+
+### BUG-GAP-002 — RLS catalog inventory was stale after canonical tables
+
+- **Failed test:** `FND01-A-006`
+- **Observed:** PostgreSQL returned the new canonical tenant relations in addition to the legacy expected set.
+- **RCA:** The security meta-test intentionally requires an exact table inventory, but the expected map was not extended with the new FORCE-RLS relations.
+- **Impact:** False-negative test result; this failure does not itself prove an RLS-policy defect, so the updated exact test must verify every new relation rather than weakening the assertion.
+- **Status:** Resolved. The exact canonical tenant-table RLS/index/policy inventory passes.

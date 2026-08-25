@@ -254,7 +254,7 @@ test("E2E-FND01-03: tenant owner cannot access platform or another tenant throug
     );
   }
   await ownerAPage.reload();
-  await expect(ownerAPage).toHaveURL(/\/login$/);
+  await expect(ownerAPage).toHaveURL(/\/login\?reason=access-changed$/);
   await ownerAContext.close();
   await ownerBContext.close();
 });
@@ -322,12 +322,13 @@ test("E2E-FND01-04: provisioning failure rolls back and tenant deactivation/reac
   await page.getByRole("button", { name: "Deactivate tenant" }).click();
   await expect(page.getByText("INACTIVE", { exact: true })).toBeVisible();
   await ownerPage.reload();
-  await expect(ownerPage).toHaveURL(/\/login$/);
+  await expect(ownerPage).toHaveURL(/\/login\?reason=access-changed$/);
 
   await page.getByLabel("Reason").fill("Operational service restored");
   await page.getByRole("button", { name: "Reactivate tenant" }).click();
   await expect(page.getByText("ACTIVE", { exact: true })).toBeVisible();
   await login(ownerPage, tenantA.ownerEmail, "OwnerPassword!234");
+  await ownerPage.goto("/app/setup");
   await expect(ownerPage.getByText(marker)).toBeVisible();
   await ownerContext.close();
 });
@@ -417,6 +418,8 @@ test("E2E-FND01-05: tenant switch clears stale tenant data and platform report r
   await expect(owner.getByLabel("Workspace")).not.toContainText(aMarker);
   await owner.getByLabel("Workspace").selectOption(tenantA.code);
   await owner.getByRole("button", { name: "Continue to workspace" }).click();
+  await expect(owner).toHaveURL(/\/app$/);
+  await owner.goto("/app/setup");
   await expect(
     owner.getByRole("heading", { name: tenantA.name }),
   ).toBeVisible();
@@ -429,6 +432,8 @@ test("E2E-FND01-05: tenant switch clears stale tenant data and platform report r
   await owner.getByRole("button", { name: "Sign in" }).click();
   await owner.getByLabel("Workspace").selectOption(tenantB.code);
   await owner.getByRole("button", { name: "Continue to workspace" }).click();
+  await expect(owner).toHaveURL(/\/app$/);
+  await owner.goto("/app/setup");
   await expect(
     owner.getByRole("heading", { name: tenantB.name }),
   ).toBeVisible();

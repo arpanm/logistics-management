@@ -6,17 +6,17 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                                                   |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                                                                 |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                               |
-| Automated feature tests           | 74 non-browser checks pass; all 90 real cross-feature Playwright cases pass; the 12 remediated cases pass on desktop and mobile Chromium |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                     |
-| Feature implementation            | All 18 feature areas have locally deployed implementation surfaces; all 90 named cross-feature acceptance cases pass                     |
+| Item                              | Status                                                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                   |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                 |
+| Automated feature tests           | Passing — all non-browser gates and 180/180 desktop/mobile Playwright executions pass                      |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                       |
+| Feature implementation            | Complete — all 18 feature areas use the canonical authorized PostgreSQL implementation and pass acceptance |
 
 Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
 
-The rapid implementation pass uses a shared tenant-scoped record/workflow kernel for masters, operations, POD, finance, governance, and configuration, with PostgreSQL-backed control-tower, alert, import, and integration modules. The cross-feature ledger records all 90 real-browser acceptance cases as Passed; the 12 previously failing cases are resolved in `BUGS.md`.
+The completed implementation includes normalized canonical stores and workflows for masters, operations, POD, finance, governance, configuration, control-tower, alerts, imports, and integrations. All recorded acceptance and gap defects are resolved; final evidence is recorded in `BUGS.md` and `specs/ALL-FEATURE-GAPS/completion.md`.
 
 ## Engineering baseline
 

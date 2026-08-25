@@ -76,6 +76,9 @@ export class AppService implements OnModuleDestroy {
         "202608240003_fnd02_identity_access",
         "202608250004_module_kernel",
         "202608250006_intelligence_modules",
+        "202608250007_all_feature_canonical",
+        "202608250008_all_feature_gap_repairs",
+        "202608250009_alert_tenant_root_fallback",
       ];
       if (
         !required.every((name) =>
@@ -312,6 +315,14 @@ export class AppService implements OnModuleDestroy {
           `INSERT INTO app.login_attempts(identity_hash,window_start) VALUES($1,date_trunc('minute',now())) ON CONFLICT(identity_hash,window_start) DO UPDATE SET attempts=app.login_attempts.attempts+1,updated_at=now() RETURNING attempts,window_start AS "windowStart"`,
           identityHash,
         );
+        const updatedAttempts = Number(
+          (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT COALESCE(sum(attempts),0)::int count FROM app.login_attempts WHERE identity_hash=$1 AND window_start>now()-interval '15 minutes'`,
+              identityHash,
+            )
+          )[0]?.count ?? 0,
+        );
         if (user) {
           const memberships = await tx.$queryRawUnsafe<Array<Row>>(
             `SELECT tenant_id AS "tenantId",id FROM app.tenant_memberships WHERE user_id=$1::uuid AND status='ACTIVE'`,
@@ -326,11 +337,11 @@ export class AppService implements OnModuleDestroy {
               membership.id,
               identityHash.slice(0, 24),
               JSON.stringify({
-                attempt: Number(attempts[0]?.count ?? 0) + 1,
+                attempt: updatedAttempts,
               }),
               correlationId,
             );
-            if (Number(attempts[0]?.count ?? 0) + 1 >= 5)
+            if (updatedAttempts >= 5)
               await tx.$executeRawUnsafe(
                 `INSERT INTO app.security_alerts(tenant_id,alert_type,severity,deduplication_key,user_id,membership_id)
                  VALUES($1::uuid,'REPEATED_LOGIN_FAILURES','HIGH',$2,$3::uuid,$4::uuid)
@@ -596,7 +607,7 @@ export class AppService implements OnModuleDestroy {
             keys[i]![0],
             keys[i]![1],
             i + 1,
-            keys[i]![0] === "branding" ? "COMPLETE" : "NOT_AVAILABLE",
+            keys[i]![0] === "branding" ? "COMPLETE" : "NOT_STARTED",
           );
         const membershipRows = await tx.$queryRawUnsafe<Array<Row>>(
           `INSERT INTO app.tenant_memberships(tenant_id,invited_email,invited_name,employee_code,role,status) VALUES($1::uuid,$2,$3,$4,'TENANT_OWNER','INVITED') RETURNING id`,
@@ -660,12 +671,14 @@ export class AppService implements OnModuleDestroy {
            SELECT r.tenant_id,r.id,c.code FROM app.roles r CROSS JOIN app.capability_catalog c
            WHERE r.tenant_id=$1::uuid AND r.code<>'TENANT_OWNER' AND (
              (r.code IN ('MIS_EXECUTIVE','AUDITOR') AND c.code IN ('identity.user.read','identity.role.read','identity.report.read','identity.audit.read','probe.read','probe.export'))
-             OR (r.code IN ('REGIONAL_MANAGER','KEY_ACCOUNT_MANAGER','TRAFFIC_PLACEMENT_EXECUTIVE') AND c.code IN ('probe.read','probe.create','probe.update','probe.export'))
-             OR (r.code IN ('FINANCE_EXECUTIVE','COLLECTION_EXECUTIVE') AND c.code IN ('probe.read','probe.approve','probe.export','sensitive.payment.read','sensitive.bank_detail.read'))
-             OR (r.code IN ('LOADING_EXECUTIVE','UNLOADING_EXECUTIVE') AND c.code IN ('probe.read','probe.update'))
-             OR (r.code='VENDOR_OWNER' AND c.code IN ('probe.read','probe.update','sensitive.payment.read'))
-             OR (r.code='DRIVER' AND c.code IN ('probe.read','probe.update'))
-             OR (r.code='CLIENT_VIEWER' AND c.code='probe.read'))`,
+             OR (r.code IN ('REGIONAL_MANAGER','KEY_ACCOUNT_MANAGER','TRAFFIC_PLACEMENT_EXECUTIVE') AND c.code IN ('probe.read','probe.create','probe.update','probe.export','masters.read','operations.read','operations.admin','pod.read'))
+             OR (r.code IN ('FINANCE_EXECUTIVE','COLLECTION_EXECUTIVE') AND c.code IN ('probe.read','probe.approve','probe.export','sensitive.payment.read','sensitive.bank_detail.read','finance.read','finance.admin','pod.read','governance.read'))
+             OR (r.code IN ('LOADING_EXECUTIVE','UNLOADING_EXECUTIVE') AND c.code IN ('probe.read','probe.update','operations.read','operations.admin','pod.read','pod.admin'))
+             OR (r.code='VENDOR_OWNER' AND c.code IN ('probe.read','probe.update','sensitive.payment.read','masters.read','operations.read','finance.read','governance.read'))
+             OR (r.code='DRIVER' AND c.code IN ('probe.read','probe.update','operations.read','operations.admin','governance.read'))
+             OR (r.code='CLIENT_VIEWER' AND c.code IN ('probe.read','operations.read','pod.read','finance.read','governance.read'))
+             OR (r.code IN ('MIS_EXECUTIVE','AUDITOR') AND c.code IN ('masters.read','operations.read','pod.read','finance.read','governance.read','configuration.read')))
+           ON CONFLICT DO NOTHING`,
           tenantId,
         );
         const inviteToken = token(),
@@ -679,13 +692,13 @@ export class AppService implements OnModuleDestroy {
           input.owner.email,
           hash(inviteToken),
           expiresAt,
-          input.active ? "DELIVERED" : "PENDING_DELIVERY",
+          "PENDING_DELIVERY",
         );
         if (injectFailure && this.config.ENABLE_TEST_HOOKS === "true")
           throw new Error("Injected provisioning failure");
         const inviteId = String(inviteRows[0]!.id);
         await tx.$executeRawUnsafe(
-          `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key,state,processed_at) VALUES($1::uuid,'TENANT','owner_invitation',$2::uuid,'owner_invitation.requested.v1',$3::jsonb,$4,$5,$6)`,
+          `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key,state,processed_at) VALUES($1::uuid,'TENANT','owner_invitation',$2::uuid,'owner_invitation.requested.v1',$3::jsonb,$4,'PENDING',null)`,
           tenantId,
           inviteId,
           JSON.stringify({
@@ -696,8 +709,12 @@ export class AppService implements OnModuleDestroy {
             ),
           }),
           `owner-invitation:${inviteId}:v1`,
-          input.active ? "PROCESSED" : "PENDING",
-          input.active ? new Date() : null,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.invitation_delivery_attempts(tenant_id,invitation_id,channel,destination_hash) VALUES($1::uuid,$2::uuid,'EMAIL',$3)`,
+          tenantId,
+          inviteId,
+          hash(input.owner.email.toLowerCase()),
         );
         await tx.$executeRawUnsafe(
           `INSERT INTO reporting.tenant_activity_projection(tenant_id,config_count,last_activity_at) VALUES($1::uuid,5,now())`,
@@ -723,9 +740,12 @@ export class AppService implements OnModuleDestroy {
             id: inviteId,
             email: input.owner.email,
             expiresAt: expiresAt.toISOString(),
-            state: input.active ? "DELIVERED" : "PENDING_DELIVERY",
+            state: "PENDING_DELIVERY",
           },
-          invitationUrl: `${this.config.FRONTEND_URL}/accept-invitation?token=${inviteToken}`,
+          invitationUrl:
+            this.config.ENABLE_TEST_HOOKS === "true"
+              ? `${this.config.FRONTEND_URL}/accept-invitation?token=${inviteToken}`
+              : undefined,
         };
         await tx.$executeRawUnsafe(
           `INSERT INTO app.idempotency_records(scope,actor_id,operation,key_hash,request_hash,resource_id,response_json) VALUES('PLATFORM',$1::uuid,'tenant.provision',$2,$3,$4::uuid,$5::jsonb)`,
@@ -1047,16 +1067,32 @@ export class AppService implements OnModuleDestroy {
       );
       const tenant = one(tenants);
       const checklist = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT key,label,state,version FROM app.setup_checklist_items ORDER BY display_order`,
+        `SELECT key,label,CASE key
+           WHEN 'organization' THEN CASE WHEN EXISTS(SELECT 1 FROM app.organization_nodes WHERE tenant_id=$1::uuid AND node_type='LEGAL_ENTITY' AND state='ACTIVE') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           WHEN 'users' THEN CASE WHEN EXISTS(SELECT 1 FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND status='ACTIVE') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           WHEN 'branches' THEN CASE WHEN EXISTS(SELECT 1 FROM app.organization_nodes WHERE tenant_id=$1::uuid AND node_type='BRANCH' AND state='ACTIVE') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           WHEN 'clients' THEN CASE WHEN EXISTS(SELECT 1 FROM app.clients WHERE tenant_id=$1::uuid AND state='ACTIVE') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           WHEN 'vendors' THEN CASE WHEN EXISTS(SELECT 1 FROM app.vendors WHERE tenant_id=$1::uuid AND state='ACTIVE') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           WHEN 'commercial' THEN CASE WHEN EXISTS(SELECT 1 FROM app.contracts WHERE tenant_id=$1::uuid AND state='PUBLISHED') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           WHEN 'imports' THEN CASE WHEN EXISTS(SELECT 1 FROM app.import_jobs WHERE tenant_id=$1::uuid AND state='COMMITTED') THEN 'COMPLETE' ELSE 'NOT_STARTED' END
+           ELSE state END AS state,version FROM app.setup_checklist_items WHERE tenant_id=$1::uuid ORDER BY display_order`,
+        tenantId,
       );
       const configs = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT namespace,schema_version AS "schemaVersion",value,version FROM app.tenant_configuration ORDER BY namespace`,
+      );
+      const integrations = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT count(*)::int endpoints,count(*) FILTER(WHERE state='ACTIVE')::int active,
+          (SELECT count(*)::int FROM app.integration_deliveries WHERE tenant_id=$1::uuid AND state IN ('FAILED','DEAD_LETTER')) failures
+         FROM app.integration_endpoints WHERE tenant_id=$1::uuid`,
+        tenantId,
       );
       return {
         tenant,
         checklist,
         configurations: configs,
         contextVersion: actor.contextVersion,
+        integrationHealth: integrations[0],
       };
     });
   }
@@ -1313,6 +1349,11 @@ export class AppService implements OnModuleDestroy {
       const size = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT pg_database_size(current_database())::text AS bytes`,
       );
+      const integrations = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT count(*)::int endpoints,count(*) FILTER(WHERE state='ACTIVE')::int active,
+          (SELECT count(*)::int FROM app.integration_deliveries WHERE state IN ('FAILED','DEAD_LETTER')) failures
+         FROM app.integration_endpoints`,
+      );
       return {
         generatedAt: new Date().toISOString(),
         totals: {
@@ -1322,7 +1363,11 @@ export class AppService implements OnModuleDestroy {
         },
         projectDatabaseBytes: size[0]?.bytes,
         storageLabel: "Shared-container project database usage",
-        integrationHealth: "Not configured",
+        integrationHealth: integrations[0] ?? {
+          endpoints: 0,
+          active: 0,
+          failures: 0,
+        },
         tenants: snapshot.tenants ?? [],
       };
     });

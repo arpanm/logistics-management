@@ -1,4 +1,7 @@
-import { ModulePage, uiManifests } from "../../../../components/module-kit";
+import {
+  CanonicalWorkspace,
+  canonicalManifests,
+} from "../../../../components/canonical";
 export default function Page() {
-  return <ModulePage manifest={uiManifests.settings} />;
+  return <CanonicalWorkspace manifest={canonicalManifests.configuration} />;
 }

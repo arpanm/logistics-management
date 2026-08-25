@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./canonical.js";
 
 const trimmed = (min: number, max: number) =>
   z.string().trim().min(min).max(max);

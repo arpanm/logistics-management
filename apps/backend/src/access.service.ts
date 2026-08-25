@@ -1083,8 +1083,9 @@ export class AccessService {
       const rows = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT i.masked_destination AS "maskedDestination",i.expires_at AS "expiresAt",i.authentication_method AS "authenticationMethod",
           t.name AS "tenantName",t.short_name AS "shortName",t.timezone,
-          EXISTS(SELECT 1 FROM app.users u JOIN app.tenant_memberships m ON m.user_id=u.id
-            WHERE m.id=i.membership_id AND (u.email=m.invited_email OR u.mobile_e164=m.invited_mobile)) AS "existingIdentity",
+          EXISTS(SELECT 1 FROM app.users u
+            WHERE (m.invited_email IS NOT NULL AND u.email=m.invited_email)
+               OR (m.invited_mobile IS NOT NULL AND u.mobile_e164=m.invited_mobile)) AS "existingIdentity",
           m.portal_audience AS "portalAudience"
          FROM app.access_invitations i JOIN app.tenants t ON t.id=i.tenant_id
          JOIN app.tenant_memberships m ON m.tenant_id=i.tenant_id AND m.id=i.membership_id
@@ -1515,6 +1516,43 @@ export class AccessService {
             "A protected capability cannot be delegated",
           );
         for (const grant of proposed.grants) {
+          if (actorOwner) {
+            const ownerDelegation = Boolean(
+              (
+                await tx.$queryRawUnsafe<Array<Row>>(
+                  `SELECT EXISTS(
+                     SELECT 1
+                     FROM app.membership_role_assignments a
+                     JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id AND r.code='TENANT_OWNER' AND r.status='ACTIVE'
+                     JOIN app.role_capabilities c ON c.tenant_id=a.tenant_id AND c.role_id=a.role_id AND c.capability_code=$3
+                     JOIN app.scope_grants g ON g.tenant_id=a.tenant_id AND g.assignment_id=a.id AND g.status='ACTIVE'
+                       AND g.action='ADMIN' AND g.effective_from<=now() AND (g.effective_to IS NULL OR g.effective_to>now())
+                     WHERE a.tenant_id=$1::uuid AND a.membership_id=$2::uuid AND a.status='ACTIVE'
+                       AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now())
+                       AND EXISTS(
+                         WITH RECURSIVE ancestors AS (
+                           SELECT id,parent_id FROM app.authorization_scope_nodes WHERE tenant_id=$1::uuid AND id=$4::uuid AND status='ACTIVE'
+                           UNION ALL
+                           SELECT n.id,n.parent_id FROM app.authorization_scope_nodes n JOIN ancestors x ON x.parent_id=n.id
+                           WHERE n.tenant_id=$1::uuid AND n.status='ACTIVE'
+                         ) SELECT 1 FROM ancestors WHERE id=g.scope_node_id
+                       )
+                   ) allowed`,
+                  tenantId,
+                  actor.membershipId,
+                  String(row.code),
+                  grant.scopeNodeId,
+                )
+              )[0]?.allowed,
+            );
+            if (!ownerDelegation)
+              throw new AppError(
+                403,
+                "DELEGATION_DENIED",
+                "Delegation requires Tenant Owner ADMIN on the assigned scope",
+              );
+            continue;
+          }
           const { decision } = await this.decide(
             tx,
             actor,
@@ -2721,6 +2759,20 @@ export class AccessService {
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.assertCurrent(tx, actor);
+      const assignments = await this.policyData(tx, actor);
+      if (
+        !assignments.some((assignment) =>
+          assignment.capabilities.includes("probe.export"),
+        )
+      )
+        return this.denial(
+          tx,
+          actor,
+          "probe.export",
+          "EXPORT",
+          "authorization-probe-export",
+          correlationId,
+        );
       const rows = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT p.id,p.label,p.status,p.resource_type AS "resourceType" FROM app.authorization_probe_records p
          WHERE p.tenant_id=$1::uuid AND ${this.scopePredicate("$7")} AND ($5='' OR p.label ILIKE $6)

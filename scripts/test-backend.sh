@@ -25,3 +25,4 @@ pnpm --filter @logistics/backend exec vitest run test/fnd02.integration.test.ts 
 pnpm --filter @logistics/db run db:reset:test
 pnpm --filter @logistics/db run db:seed
 pnpm --filter @logistics/backend exec vitest run test/bug-e2e-canonical.integration.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/backend exec vitest run test/all-feature-gaps.contract.test.ts --maxWorkers=1 --no-file-parallelism

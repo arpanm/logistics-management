@@ -1,4 +1,4 @@
-import { ModulePage, uiManifests } from "../../../../components/module-kit";
+import { GovernanceWorkspace } from "../../../../components/canonical";
 export default function Page() {
-  return <ModulePage manifest={uiManifests.policies} />;
+  return <GovernanceWorkspace />;
 }

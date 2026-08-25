@@ -89,7 +89,6 @@ test("E2E-FND02-01: invitation validation, identity verification, MFA, and role 
     displayName: `Regional ${suffix}`,
     employeeCode: `RM-${suffix}`.toUpperCase(),
     email: `regional-${suffix}@test.local`,
-    mobile: "+919876543210",
     portalAudience: "INTERNAL",
     roleName: "Regional Manager",
     scopePath: "North",
@@ -299,7 +298,7 @@ test("E2E-FND02-02: access lifecycle invalidates two sessions and restores narro
   );
   expect(changes.status(), await changes.text()).toBe(200);
   expect(await changes.text()).toMatch(
-    /identity\.user\.(update|suspend|reactivate)|identity\.session\.reset/,
+    /identity\.access\.changed|identity\.membership\.(suspended|active)|identity\.sessions\.reset/,
   );
 
   await ownerSession.context.close();
@@ -585,7 +584,9 @@ test("E2E-FND02-05: Vendor, Driver, and Client portals enforce scope, reassignme
     }),
   ).toHaveCount(0);
 
-  const sensitive = rawSensitiveValues(fixture);
+  // Internal margin 5000 is a substring of the explicitly permitted vendor
+  // payment 125000, so assert that field structurally instead of by substring.
+  const sensitive = rawSensitiveValues(fixture).filter((raw) => raw !== "5000");
   for (const session of [vendor, driverA, client]) {
     const html = await session.page.locator("body").innerText();
     const json = await (await accessApi(session.page, "/probes")).text();
@@ -593,6 +594,7 @@ test("E2E-FND02-05: Vendor, Driver, and Client portals enforce scope, reassignme
       expect(html).not.toContain(raw);
       expect(json).not.toContain(raw);
     }
+    expect(json).not.toContain('"internalMargin":{"value":5000');
   }
   expect(await (await accessApi(vendor.page, "/probes")).text()).toContain(
     '"payment":{"value":125000,"masked":false}',
@@ -747,7 +749,8 @@ test("FND02-X-002: access UI handles loading, empty, forbidden, error, retry, an
   const fixture = await seedFnd02(page, testInfo, "SCOPES_ONLY");
   const owner = await actorPage(browser, fixture.actors.owner);
   let failOnce = true;
-  await owner.page.route("**/api/v1/tenant/access/probes", async (route) => {
+  const probesRoute = "**/api/v1/tenant/access/probes";
+  await owner.page.route(probesRoute, async (route) => {
     if (failOnce && route.request().method() === "GET") {
       failOnce = false;
       await route.fulfill({
@@ -766,8 +769,12 @@ test("FND02-X-002: access UI handles loading, empty, forbidden, error, retry, an
   );
   await owner.page.getByRole("button", { name: "Retry" }).click();
   await expect(
-    owner.page.getByText(/no work items|current scope/i),
+    owner.page.getByRole("heading", {
+      name: requiredResource(fixture, "north").label,
+    }),
   ).toBeVisible();
+  await expect(owner.page.getByText("Loading work queue…")).toHaveCount(0);
   await expectAccessibleResponsive(owner.page, "access work queue recovery");
+  await owner.page.unroute(probesRoute);
   await owner.context.close();
 });

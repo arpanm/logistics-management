@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Shell } from "../../../components/shell";
 import { api, type ApiError } from "../../../components/api";
 type Alert = {
@@ -17,7 +17,8 @@ export default function AlertsPage() {
   const [items, setItems] = useState<Alert[]>([]),
     [state, setState] = useState(""),
     [error, setError] = useState<ApiError | null>(null),
-    [busy, setBusy] = useState("");
+    [busy, setBusy] = useState(""),
+    [rules, setRules] = useState<Array<Record<string, unknown>>>([]);
   const load = () =>
     api<{ items: Alert[] }>(`/tenant/alerts?state=${encodeURIComponent(state)}`)
       .then((v) => {
@@ -27,7 +28,41 @@ export default function AlertsPage() {
       .catch(setError);
   useEffect(() => {
     void load();
+    void api<Array<Record<string, unknown>>>("/tenant/alert-rules")
+      .then(setRules)
+      .catch(setError);
   }, [state]);
+  async function createRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget,
+      f = new FormData(form);
+    try {
+      await api("/tenant/alert-rules", {
+        method: "POST",
+        body: JSON.stringify({
+          code: f.get("code"),
+          name: f.get("name"),
+          sourceModule: "canonical",
+          metricCode: f.get("metricCode"),
+          threshold: { value: Number(f.get("threshold")) },
+          severity: f.get("severity"),
+          scopeNodeIds: [],
+          recipientPolicy: { owners: true },
+          channels: ["IN_APP"],
+          quietHours: {},
+          repeatPolicy: { deduplicate: true },
+          escalationLevels: [],
+          acknowledgementRequired: true,
+          resolutionCondition: { automatic: true },
+          active: true,
+        }),
+      });
+      form.reset();
+      setRules(await api("/tenant/alert-rules"));
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
   async function act(alert: Alert, action: "ACKNOWLEDGE" | "RESOLVE") {
     const reason =
       action === "RESOLVE" ? (window.prompt("Resolution outcome") ?? "") : "";
@@ -122,6 +157,48 @@ export default function AlertsPage() {
         ) : (
           <p className="empty">No alerts match this queue.</p>
         )}
+      </section>
+      <section className="panel">
+        <div className="panel-title">
+          <h2>Alert rules</h2>
+          <span className="count">{rules.length}</span>
+        </div>
+        <form
+          className="access-form"
+          onSubmit={(event) => void createRule(event)}
+        >
+          <label>
+            Rule code
+            <input required name="code" />
+          </label>
+          <label>
+            Name
+            <input required name="name" />
+          </label>
+          <label>
+            Metric
+            <select name="metricCode">
+              <option>PLACEMENT_OVERDUE_MINUTES</option>
+              <option>POD_AGE_DAYS</option>
+              <option>INVOICE_OVERDUE_DAYS</option>
+              <option>COMPLIANCE_EXPIRY_DAYS</option>
+            </select>
+          </label>
+          <label>
+            Threshold
+            <input name="threshold" required type="number" min="0" />
+          </label>
+          <label>
+            Severity
+            <select name="severity">
+              <option>WARNING</option>
+              <option>HIGH</option>
+              <option>CRITICAL</option>
+              <option>INFO</option>
+            </select>
+          </label>
+          <button className="primary">Create rule</button>
+        </form>
       </section>
     </Shell>
   );

@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { withTenant } from "@logistics/db";
 import type { Prisma } from "@logistics/db";
 import { AppError, AppService } from "../../app.service.js";
@@ -199,6 +200,238 @@ export class IntegrationsProvider {
           return row;
         },
       );
+    });
+  }
+
+  async mappings(actor: TenantActor, endpointId: string) {
+    const id = tenantId(actor);
+    return withTenant(this.app.db, id, (tx) =>
+      tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT id,endpoint_id AS "endpointId",version,schema,mapping,mapping_hash AS "mappingHash",created_at AS "createdAt" FROM app.integration_mapping_versions WHERE tenant_id=$1::uuid AND endpoint_id=$2::uuid ORDER BY version DESC`,
+        id,
+        endpointId,
+      ),
+    );
+  }
+
+  async createMapping(
+    actor: TenantActor,
+    endpointId: string,
+    input: {
+      schema: Record<string, unknown>;
+      mapping: Record<string, unknown>;
+    },
+    correlationId: string,
+  ) {
+    const id = tenantId(actor);
+    return withTenant(this.app.db, id, async (tx) => {
+      await this.assertInternal(tx, actor, id);
+      const endpoint = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id FROM app.integration_endpoints WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+          id,
+          endpointId,
+        )
+      )[0];
+      if (!endpoint)
+        throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+      const version = Number(
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT coalesce(max(version),0)+1 next FROM app.integration_mapping_versions WHERE tenant_id=$1::uuid AND endpoint_id=$2::uuid`,
+            id,
+            endpointId,
+          )
+        )[0]?.next ?? 1,
+      );
+      const mappingHash = sha256(
+        canonicalJson({ schema: input.schema, mapping: input.mapping }),
+      );
+      const row = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.integration_mapping_versions(tenant_id,endpoint_id,version,schema,mapping,mapping_hash,created_by) VALUES($1::uuid,$2::uuid,$3,$4::jsonb,$5::jsonb,$6,$7::uuid) RETURNING id,endpoint_id AS "endpointId",version,mapping_hash AS "mappingHash",created_at AS "createdAt"`,
+          id,
+          endpointId,
+          version,
+          JSON.stringify(input.schema),
+          JSON.stringify(input.mapping),
+          mappingHash,
+          actor.userId,
+        )
+      )[0]!;
+      await tx.$executeRawUnsafe(
+        `UPDATE app.integration_endpoints SET mapping_version=$1,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND id=$3::uuid`,
+        version,
+        id,
+        endpointId,
+      );
+      await this.audit(
+        tx,
+        actor,
+        "integration.mapping_created",
+        "integration_endpoint",
+        endpointId,
+        correlationId,
+      );
+      return row;
+    });
+  }
+
+  async createApiClient(
+    actor: TenantActor,
+    input: { code: string; name: string; scopes: string[]; expiresAt?: string },
+    correlationId: string,
+  ) {
+    const id = tenantId(actor),
+      secret = `lg_${randomBytes(32).toString("base64url")}`;
+    return withTenant(this.app.db, id, async (tx) => {
+      await this.assertInternal(tx, actor, id);
+      const row = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.api_clients(tenant_id,code,name,credential_hash,scopes,expires_at) VALUES($1::uuid,$2,$3,$4,$5::text[],$6::timestamptz) RETURNING id,code,name,scopes,state,expires_at AS "expiresAt"`,
+          id,
+          input.code,
+          input.name,
+          sha256(secret),
+          input.scopes,
+          input.expiresAt ?? null,
+        )
+      )[0]!;
+      await this.audit(
+        tx,
+        actor,
+        "integration.credential_created",
+        "integration_endpoint",
+        String(row.id),
+        correlationId,
+      );
+      return { ...row, secret };
+    });
+  }
+
+  async rotateApiClient(
+    actor: TenantActor,
+    clientId: string,
+    correlationId: string,
+  ) {
+    const id = tenantId(actor),
+      secret = `lg_${randomBytes(32).toString("base64url")}`;
+    return withTenant(this.app.db, id, async (tx) => {
+      await this.assertInternal(tx, actor, id);
+      const old = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT * FROM app.api_clients WHERE tenant_id=$1::uuid AND id=$2::uuid AND state<>'REVOKED' FOR UPDATE`,
+          id,
+          clientId,
+        )
+      )[0];
+      if (!old)
+        throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+      const code =
+        `${String(old.code).slice(0, 31)}-R${Date.now().toString(36).toUpperCase()}`.slice(
+          0,
+          40,
+        );
+      const row = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.api_clients(tenant_id,code,name,credential_hash,scopes,rotated_from,expires_at) VALUES($1::uuid,$2,$3,$4,$5::text[],$6::uuid,$7::timestamptz) RETURNING id,code,name,scopes,state,expires_at AS "expiresAt"`,
+          id,
+          code,
+          old.name,
+          sha256(secret),
+          old.scopes,
+          clientId,
+          old.expires_at ?? null,
+        )
+      )[0]!;
+      await tx.$executeRawUnsafe(
+        `UPDATE app.api_clients SET state='ROTATING',expires_at=least(coalesce(expires_at,now()+interval '24 hours'),now()+interval '24 hours') WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+        id,
+        clientId,
+      );
+      await this.audit(
+        tx,
+        actor,
+        "integration.credential_rotated",
+        "integration_endpoint",
+        clientId,
+        correlationId,
+      );
+      return { ...row, secret };
+    });
+  }
+
+  async ingestWebhook(input: {
+    tenantCode: string;
+    clientCode: string;
+    token: string;
+    signature: string;
+    eventKey: string;
+    eventType: string;
+    payload: unknown;
+    correlationId: string;
+  }) {
+    const tenant = (
+      await this.app.db.$queryRawUnsafe<Array<Row>>(
+        `SELECT id FROM app.tenants WHERE code=$1 AND status='ACTIVE'`,
+        input.tenantCode,
+      )
+    )[0];
+    if (!tenant)
+      throw new AppError(
+        401,
+        "MACHINE_AUTH_FAILED",
+        "Machine authentication failed",
+      );
+    return withTenant(this.app.db, String(tenant.id), async (tx) => {
+      const client = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id,credential_hash,scopes,state,expires_at FROM app.api_clients WHERE tenant_id=$1::uuid AND code=$2`,
+          tenant.id,
+          input.clientCode,
+        )
+      )[0];
+      if (
+        !client ||
+        client.state === "REVOKED" ||
+        (client.expires_at &&
+          new Date(String(client.expires_at)) <= new Date()) ||
+        sha256(input.token) !== client.credential_hash
+      )
+        throw new AppError(
+          401,
+          "MACHINE_AUTH_FAILED",
+          "Machine authentication failed",
+        );
+      if (
+        !(client.scopes as string[]).includes(input.eventType) &&
+        !(client.scopes as string[]).includes("*")
+      )
+        throw new AppError(403, "EVENT_NOT_ALLOWED", "Event is not allowed");
+      const expected = createHmac("sha256", input.token)
+        .update(canonicalJson(input.payload))
+        .digest("hex");
+      const a = Buffer.from(expected),
+        b = Buffer.from(input.signature.toLowerCase());
+      if (a.length !== b.length || !timingSafeEqual(a, b))
+        throw new AppError(
+          401,
+          "SIGNATURE_INVALID",
+          "Webhook signature is invalid",
+        );
+      const payloadHash = sha256(canonicalJson(input.payload));
+      const row = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.webhook_events(tenant_id,api_client_id,event_key,event_type,payload_hash,signature_version,correlation_id,state,processed_at) VALUES($1::uuid,$2::uuid,$3,$4,$5,1,$6,'PROCESSED',now()) ON CONFLICT(tenant_id,api_client_id,event_key) DO UPDATE SET event_key=excluded.event_key RETURNING id,event_key AS "eventKey",event_type AS "eventType",payload_hash AS "payloadHash",state,received_at AS "receivedAt"`,
+          tenant.id,
+          client.id,
+          input.eventKey,
+          input.eventType,
+          payloadHash,
+          input.correlationId,
+        )
+      )[0]!;
+      return row;
     });
   }
 

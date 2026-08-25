@@ -22,11 +22,40 @@ export default function ControlTowerPage() {
   const [lens, setLens] = useState<(typeof lenses)[number]>("placement");
   const [data, setData] = useState<Dashboard | null>(null),
     [error, setError] = useState<ApiError | null>(null),
-    [paused, setPaused] = useState(false);
+    [paused, setPaused] = useState(false),
+    [views, setViews] = useState<Array<Record<string, unknown>>>([]),
+    [drill, setDrill] = useState<Array<Record<string, unknown>>>([]);
   const load = () => {
     setError(null);
     api<Dashboard>(`/tenant/control/${lens}`).then(setData).catch(setError);
+    api<Array<Record<string, unknown>>>(`/tenant/control/${lens}/views`)
+      .then(setViews)
+      .catch(setError);
   };
+  async function saveView() {
+    const name = window.prompt("Saved view name");
+    if (!name) return;
+    try {
+      await api(`/tenant/control/${lens}/views`, {
+        method: "POST",
+        body: JSON.stringify({ name, filters: {}, isDefault: false }),
+      });
+      load();
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
+  async function openDrill(status: string) {
+    try {
+      setDrill(
+        await api(
+          `/tenant/control/${lens}/drill?status=${encodeURIComponent(status)}`,
+        ),
+      );
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
   useEffect(() => {
     setData(null);
     load();
@@ -47,6 +76,7 @@ export default function ControlTowerPage() {
         <button onClick={() => setPaused((v) => !v)}>
           {paused ? "Resume live refresh" : "Pause refresh"}
         </button>
+        <button onClick={() => void saveView()}>Save current view</button>
       </div>
       <section className="panel">
         <label>
@@ -95,9 +125,15 @@ export default function ControlTowerPage() {
               {data.status.length ? (
                 <div className="responsive-list">
                   {data.status.map((row, index) => (
-                    <pre className="safe-json" key={index}>
-                      {JSON.stringify(row, null, 2)}
-                    </pre>
+                    <button
+                      type="button"
+                      className="access-card"
+                      key={index}
+                      onClick={() => void openDrill(String(row.status))}
+                    >
+                      <strong>{String(row.status)}</strong>
+                      <span>{String(row.count)} records</span>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -106,6 +142,29 @@ export default function ControlTowerPage() {
                 </p>
               )}
             </section>
+            {views.length > 0 && (
+              <section className="panel">
+                <h2>Saved views</h2>
+                <div className="responsive-list">
+                  {views.map((view) => (
+                    <article className="access-card" key={String(view.id)}>
+                      <h3>{String(view.name)}</h3>
+                      <small>{String(view.lens)}</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+            {drill.length > 0 && (
+              <section className="panel">
+                <h2>Scoped drill-down</h2>
+                {drill.map((row) => (
+                  <pre className="safe-json" key={String(row.id)}>
+                    {JSON.stringify(row, null, 2)}
+                  </pre>
+                ))}
+              </section>
+            )}
           </>
         )
       )}

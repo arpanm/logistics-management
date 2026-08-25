@@ -24,6 +24,23 @@ type Context = {
   contextVersion: number;
 };
 type Probe = { id: string; label: string; note: string; version: number };
+
+function contrastInk(background: string) {
+  const hex = background.trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return "#000000";
+  const channel = (offset: number) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045
+      ? value / 12.92
+      : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  const luminance =
+    0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  const blackContrast = (luminance + 0.05) / 0.05;
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  return blackContrast >= whiteContrast ? "#000000" : "#ffffff";
+}
+
 export default function Setup() {
   const [ctx, setCtx] = useState<Context | null>(null);
   const [probes, setProbes] = useState<Probe[]>([]);
@@ -110,6 +127,7 @@ export default function Setup() {
               {
                 "--tenant": ctx.tenant.primaryColor,
                 "--accent": ctx.tenant.accentColor,
+                "--accent-ink": contrastInk(ctx.tenant.accentColor),
               } as React.CSSProperties
             }
           >

@@ -39,29 +39,25 @@ export default function DataImportsPage() {
     try {
       if (!file?.size)
         throw { message: "Choose a CSV file", code: "FILE_REQUIRED" };
-      const content = await file.text();
-      const lines = content
-          .replace(/^\uFEFF/, "")
-          .split(/\r?\n/)
-          .filter(Boolean),
-        headers = (lines.shift() ?? "").split(",").map((v) => v.trim());
-      const rows = lines.map((line) =>
-        Object.fromEntries(
-          line
-            .split(",")
-            .map((value, index) => [
-              headers[index] ?? `column_${index + 1}`,
-              value.trim(),
-            ]),
-        ),
-      );
-      const digest = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(content),
-      );
-      const checksum = Array.from(new Uint8Array(digest), (v) =>
-        v.toString(16).padStart(2, "0"),
-      ).join("");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 32768)
+        binary += String.fromCharCode(
+          ...bytes.subarray(offset, offset + 32768),
+        );
+      const parsed = await api<{
+        headers: string[];
+        rows: Array<Record<string, unknown>>;
+        byteSize: number;
+        checksum: string;
+      }>("/tenant/imports/parse", {
+        method: "POST",
+        body: JSON.stringify({
+          filename: file.name,
+          mediaType: file.type || "text/csv",
+          contentBase64: btoa(binary),
+        }),
+      });
       const result = await api<Job>("/tenant/imports/preview", {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
@@ -69,12 +65,12 @@ export default function DataImportsPage() {
           dataset: form.get("dataset"),
           filename: file.name,
           mediaType: file.type || "text/csv",
-          byteSize: file.size,
-          checksum,
+          byteSize: parsed.byteSize,
+          checksum: parsed.checksum,
           sourceTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           importMode: form.get("mode"),
-          headers,
-          rows,
+          headers: parsed.headers,
+          rows: parsed.rows,
         }),
       });
       setPreview(result);
@@ -139,8 +135,13 @@ export default function DataImportsPage() {
             </select>
           </label>
           <label>
-            CSV file
-            <input name="file" type="file" accept=".csv,text/csv" required />
+            CSV or XLSX file
+            <input
+              name="file"
+              type="file"
+              accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              required
+            />
           </label>
           <button className="primary" disabled={busy}>
             {busy ? "Validating…" : "Validate complete file"}
