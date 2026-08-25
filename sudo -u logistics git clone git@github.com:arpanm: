@@ -1,1 +1,0 @@
-sudo -u logistics git clone git@github.com:arpanm/logistics-management.git /opt/logistics-management
