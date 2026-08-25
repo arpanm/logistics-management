@@ -1,0 +1,127 @@
+.page {
+  display: grid;
+  gap: 1rem;
+}
+.head,
+.toolbar,
+.actions,
+.crumbs {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.head {
+  justify-content: space-between;
+  align-items: start;
+}
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+  overflow: auto;
+}
+.tabs button[aria-selected="true"] {
+  background: var(--primary);
+  color: white;
+}
+.panel,
+.metric,
+.client,
+.vendor {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  padding: 1rem;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.7rem;
+}
+.metric strong {
+  display: block;
+  font-size: 1.65rem;
+  margin-top: 0.3rem;
+}
+.toolbar label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 10rem;
+  flex: 1;
+}
+.status {
+  display: inline-flex;
+  border-radius: 1rem;
+  padding: 0.2rem 0.55rem;
+  font-weight: 750;
+  font-size: 0.8rem;
+}
+.GREEN {
+  background: #d1fadf;
+  color: #05603a;
+}
+.YELLOW {
+  background: #fef0c7;
+  color: #93370d;
+}
+.RED {
+  background: #fee4e2;
+  color: #b42318;
+}
+.clients {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.7rem;
+}
+.client {
+  text-align: left;
+}
+.strip {
+  height: 0.45rem;
+  border-radius: 1rem;
+  background: linear-gradient(
+    90deg,
+    #12b76a var(--green),
+    #fdb022 var(--green),
+    #fdb022 calc(var(--green) + var(--yellow)),
+    #f04438 0
+  );
+}
+.tableWrap {
+  overflow: auto;
+}
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 58rem;
+}
+.table th,
+.table td {
+  padding: 0.65rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.table th {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.vendors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.6rem;
+}
+.money {
+  font-variant-numeric: tabular-nums;
+}
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem;
+}
+@media (max-width: 640px) {
+  .actions button,
+  .actions a {
+    width: 100%;
+  }
+}

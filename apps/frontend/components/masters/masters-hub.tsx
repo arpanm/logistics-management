@@ -29,6 +29,7 @@ const groups = [
     links: [
       ["Vendors", "/app/masters/vendors"],
       ["Fleet", "/app/masters/fleet"],
+      ["Truck/body/cargo catalogs", "/app/masters/catalogs"],
       ["Drivers", "/app/masters/drivers"],
     ],
   },

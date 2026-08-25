@@ -21,3 +21,5 @@ export const governanceNavigation: readonly KernelNavDescriptor[] = [
     href: "/app/governance/policies",
   },
 ];
+export { GovernanceWorkbenchController } from "./workbench.controller.js";
+export { GovernanceWorkbenchService } from "./workbench.service.js";

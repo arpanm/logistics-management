@@ -52,6 +52,45 @@ type UserDetail = {
   mobile?: string | null;
   assignments: AccessAssignment[];
 };
+type UserDossier = {
+  profile: {
+    id: string;
+    displayName: string;
+    employeeCode: string;
+    status: string;
+    portalAudience: string;
+    email?: string | null;
+    mobile?: string | null;
+    version: number;
+  };
+  invitation: null | {
+    destination: string;
+    expiresAt: string;
+    deliveryState: string;
+    usedAt?: string | null;
+    revokedAt?: string | null;
+  };
+  sessions: Array<{
+    id: string;
+    createdAt: string;
+    expiresAt: string;
+    assuranceLevel: string;
+    revokedAt?: string | null;
+    revokedReason?: string | null;
+  }>;
+  mfa: Array<{
+    factorType: string;
+    createdAt: string;
+    verifiedAt?: string | null;
+    disabledAt?: string | null;
+  }>;
+  history: Array<{
+    action: string;
+    occurredAt: string;
+    reason?: string | null;
+    correlationId: string;
+  }>;
+};
 type AccessPreview = {
   fingerprint: string;
   authorizationVersion: number;
@@ -99,6 +138,24 @@ export function UsersPage() {
       canResetMfa: false,
     }),
     [supportNotice, setSupportNotice] = useState("");
+  const [filters, setFilters] = useState({
+      search: "",
+      status: "",
+      audience: "",
+      roleId: "",
+      sessionState: "",
+    }),
+    [page, setPage] = useState(1),
+    [total, setTotal] = useState(0),
+    [dossier, setDossier] = useState<UserDossier | null>(null),
+    [profile, setProfile] = useState({
+      displayName: "",
+      employeeCode: "",
+      email: "",
+      mobile: "",
+      portalAudience: "INTERNAL",
+      reason: "Profile corrected after administrator review",
+    });
   const [loading, setLoading] = useState(true),
     [error, setError] = useState<ApiError | null>(null),
     [success, setSuccess] = useState(""),
@@ -141,13 +198,21 @@ export function UsersPage() {
     setCopyStatus("");
     setPreview(null);
     setDetail(null);
+    setDossier(null);
   }
   async function load(signal?: AbortSignal) {
     setLoading(true);
     setError(null);
     try {
+      const query = new URLSearchParams({ page: String(page), pageSize: "25" });
+      Object.entries(filters).forEach(([name, value]) => {
+        if (value) query.set(name, value);
+      });
       const [directory, effective] = await Promise.all([
-        api<{ items: User[] }>("/tenant/access/users", { signal }),
+        api<{ items: User[]; total: number }>(
+          `/tenant/access/remediation/users?${query.toString()}`,
+          { signal },
+        ),
         api<{
           capabilities: string[];
           actions: typeof availableActions;
@@ -170,6 +235,7 @@ export function UsersPage() {
       const scopeData =
         scopeResult.status === "fulfilled" ? scopeResult.value : [];
       setUsers(directory.items);
+      setTotal(directory.total);
       setRoles(roleData);
       setScopes(scopeData);
       setAvailableActions(effective.actions);
@@ -198,7 +264,7 @@ export function UsersPage() {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [filters, page]);
   useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
@@ -254,10 +320,45 @@ export function UsersPage() {
   }
   async function openUser(user: User) {
     try {
-      setDetail(await api<UserDetail>(`/tenant/access/users/${user.id}`));
+      const [nextDetail, nextDossier] = await Promise.all([
+        api<UserDetail>(`/tenant/access/users/${user.id}`),
+        api<UserDossier>(`/tenant/access/remediation/users/${user.id}`),
+      ]);
+      setDetail(nextDetail);
+      setDossier(nextDossier);
+      setProfile({
+        displayName: nextDossier.profile.displayName,
+        employeeCode: nextDossier.profile.employeeCode,
+        email: "",
+        mobile: "",
+        portalAudience: nextDossier.profile.portalAudience,
+        reason: "Profile corrected after administrator review",
+      });
       setPreview(null);
       setActivationLink("");
       setCopyStatus("");
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault();
+    if (!detail || !dossier) return;
+    try {
+      await api(`/tenant/access/remediation/users/${detail.id}/profile`, {
+        method: "PATCH",
+        headers: { "Idempotency-Key": newKey() },
+        body: JSON.stringify({
+          ...profile,
+          email: profile.email || undefined,
+          mobile: profile.mobile || undefined,
+          expectedVersion: dossier.profile.version,
+        }),
+      });
+      setSuccess("User profile updated and recorded in activity history.");
+      const current = users.find((user) => user.id === detail.id);
+      if (current) await openUser(current);
+      await load();
     } catch (value) {
       setError(value as ApiError);
     }
@@ -529,8 +630,87 @@ export function UsersPage() {
       <section className="panel" aria-busy={loading}>
         <div className="panel-title">
           <h2>Users</h2>
-          <span className="count">{users.length}</span>
+          <span className="count">{total}</span>
         </div>
+        <form
+          className="access-form"
+          aria-label="User directory filters"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <label>
+            Search users
+            <input
+              type="search"
+              value={filters.search}
+              onChange={(event) => {
+                setPage(1);
+                setFilters({ ...filters, search: event.target.value });
+              }}
+            />
+          </label>
+          <label>
+            Status
+            <select
+              value={filters.status}
+              onChange={(event) => {
+                setPage(1);
+                setFilters({ ...filters, status: event.target.value });
+              }}
+            >
+              <option value="">All statuses</option>
+              <option value="INVITED">Invited</option>
+              <option value="ACTIVE">Active</option>
+              <option value="SUSPENDED">Suspended</option>
+            </select>
+          </label>
+          <label>
+            Portal audience
+            <select
+              value={filters.audience}
+              onChange={(event) => {
+                setPage(1);
+                setFilters({ ...filters, audience: event.target.value });
+              }}
+            >
+              <option value="">All audiences</option>
+              <option value="INTERNAL">Internal</option>
+              <option value="VENDOR">Vendor</option>
+              <option value="DRIVER">Driver</option>
+              <option value="CLIENT">Client</option>
+            </select>
+          </label>
+          <label>
+            Role
+            <select
+              value={filters.roleId}
+              onChange={(event) => {
+                setPage(1);
+                setFilters({ ...filters, roleId: event.target.value });
+              }}
+            >
+              <option value="">All roles</option>
+              {roles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={filters.sessionState === "ACTIVE"}
+              onChange={(event) => {
+                setPage(1);
+                setFilters({
+                  ...filters,
+                  sessionState: event.target.checked ? "ACTIVE" : "",
+                });
+              }}
+            />
+            Active sessions only
+          </label>
+        </form>
         {loading ? (
           <p role="status">Loading users…</p>
         ) : users.length === 0 ? (
@@ -599,6 +779,25 @@ export function UsersPage() {
             ))}
           </div>
         )}
+        <div className="actions" aria-label="Directory pages">
+          <button
+            type="button"
+            disabled={page === 1}
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+          >
+            Previous page
+          </button>
+          <span>
+            Page {page} of {Math.max(1, Math.ceil(total / 25))}
+          </span>
+          <button
+            type="button"
+            disabled={page * 25 >= total}
+            onClick={() => setPage((value) => value + 1)}
+          >
+            Next page
+          </button>
+        </div>
       </section>
       {detail && (
         <section
@@ -650,6 +849,195 @@ export function UsersPage() {
               <dd>{detail.authorizationVersion}</dd>
             </div>
           </dl>
+          {canAdminUsers && dossier && (
+            <details>
+              <summary>Edit user profile</summary>
+              <p className="muted">
+                Contact changes apply to this tenant profile and future tenant
+                invitations or notifications. They do not silently change a
+                shared login identity used in another tenant.
+              </p>
+              <form
+                className="access-form"
+                onSubmit={(event) => void saveProfile(event)}
+              >
+                <label>
+                  Display name
+                  <input
+                    required
+                    minLength={2}
+                    value={profile.displayName}
+                    onChange={(event) =>
+                      setProfile({
+                        ...profile,
+                        displayName: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Employee code
+                  <input
+                    required
+                    value={profile.employeeCode}
+                    onChange={(event) =>
+                      setProfile({
+                        ...profile,
+                        employeeCode: event.target.value.toUpperCase(),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Tenant notification email (optional)
+                  <input
+                    type="email"
+                    value={profile.email}
+                    placeholder={dossier.profile.email ?? "Not provided"}
+                    onChange={(event) =>
+                      setProfile({ ...profile, email: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Tenant notification mobile in E.164 (optional)
+                  <input
+                    value={profile.mobile}
+                    placeholder={dossier.profile.mobile ?? "+919876543210"}
+                    onChange={(event) =>
+                      setProfile({ ...profile, mobile: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Portal audience
+                  <select
+                    value={profile.portalAudience}
+                    onChange={(event) =>
+                      setProfile({
+                        ...profile,
+                        portalAudience: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="INTERNAL">Internal</option>
+                    <option value="VENDOR">Vendor</option>
+                    <option value="DRIVER">Driver</option>
+                    <option value="CLIENT">Client</option>
+                  </select>
+                </label>
+                <label>
+                  Reason
+                  <input
+                    required
+                    minLength={10}
+                    value={profile.reason}
+                    onChange={(event) =>
+                      setProfile({ ...profile, reason: event.target.value })
+                    }
+                  />
+                </label>
+                <button className="primary">Save profile</button>
+              </form>
+            </details>
+          )}
+
+          {dossier && (
+            <section aria-labelledby="security-account-panels">
+              <h3 id="security-account-panels">Invitation, sessions and MFA</h3>
+              <dl className="details-grid">
+                <div>
+                  <dt>Invitation destination</dt>
+                  <dd>
+                    {dossier.invitation?.destination ?? "No current invitation"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Invitation expires</dt>
+                  <dd>
+                    {dossier.invitation
+                      ? new Date(dossier.invitation.expiresAt).toLocaleString()
+                      : "Not applicable"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Delivery state</dt>
+                  <dd>
+                    {words(
+                      dossier.invitation?.deliveryState ?? "Not applicable",
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Active MFA factors</dt>
+                  <dd>
+                    {dossier.mfa.filter((factor) => !factor.disabledAt).length}
+                  </dd>
+                </div>
+              </dl>
+              <div
+                className="table-region"
+                tabIndex={0}
+                aria-label="User sessions"
+              >
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Created</th>
+                      <th>Expires</th>
+                      <th>Assurance</th>
+                      <th>State</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dossier.sessions.map((session) => (
+                      <tr key={session.id}>
+                        <td>{new Date(session.createdAt).toLocaleString()}</td>
+                        <td>{new Date(session.expiresAt).toLocaleString()}</td>
+                        <td>{words(session.assuranceLevel)}</td>
+                        <td>
+                          {session.revokedAt
+                            ? `Revoked: ${words(session.revokedReason)}`
+                            : "Active"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <h3>Profile and security history</h3>
+              {dossier.history.length === 0 ? (
+                <p className="empty">No recorded history.</p>
+              ) : (
+                <div
+                  className="table-region"
+                  tabIndex={0}
+                  aria-label="Profile and security history"
+                >
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>Action</th>
+                        <th>Reason</th>
+                        <th>Reference</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dossier.history.map((item) => (
+                        <tr key={`${item.correlationId}-${item.occurredAt}`}>
+                          <td>{new Date(item.occurredAt).toLocaleString()}</td>
+                          <td>{words(item.action)}</td>
+                          <td>{item.reason ?? "—"}</td>
+                          <td>{item.correlationId}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
 
           <h3>Role and scope assignments</h3>
           {detail.assignments.length === 0 ? (

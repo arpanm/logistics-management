@@ -8,6 +8,8 @@ import { KernelService } from "./modules/kernel/index.js";
 import {
   intelligenceControllers,
   intelligenceProviders,
+  ControlWorkbenchController,
+  ControlWorkbenchService,
 } from "./modules/control/index.js";
 import {
   CanonicalController,
@@ -18,10 +20,31 @@ import {
   Mst01Controller,
   Mst01Service,
 } from "./modules/canonical/index.js";
+import {
+  AccessMastersController,
+  AccessMastersService,
+} from "./modules/remediation/index.js";
+import {
+  OperationsWorkbenchController,
+  OperationsWorkbenchService,
+} from "./modules/operations/index.js";
+import {
+  FinanceWorkbenchController,
+  FinanceWorkbenchService,
+} from "./modules/finance/index.js";
+import {
+  GovernanceWorkbenchController,
+  GovernanceWorkbenchService,
+} from "./modules/governance/index.js";
 
 @Module({
   controllers: [
     AccessController,
+    AccessMastersController,
+    OperationsWorkbenchController,
+    FinanceWorkbenchController,
+    ControlWorkbenchController,
+    GovernanceWorkbenchController,
     ...intelligenceControllers,
     Mst01Controller,
     AdvancedDomainController,
@@ -32,6 +55,11 @@ import {
   providers: [
     AppService,
     AccessService,
+    AccessMastersService,
+    OperationsWorkbenchService,
+    FinanceWorkbenchService,
+    ControlWorkbenchService,
+    GovernanceWorkbenchService,
     KernelService,
     ...intelligenceProviders,
     CanonicalService,

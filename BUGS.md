@@ -35,7 +35,7 @@ This register began with the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`
 | BUG-GAP-015 | E2E-GAP-OPS03-02            | OPS-03        | Test fixture        | P2 / Low      | Offline ordering scenario reused an immutable event key                                          | Resolved |
 | BUG-GAP-016 | FND01-04/05                 | FND-01        | Test navigation     | P2 / Low      | Lifecycle and tenant-selection checks assumed an obsolete landing route                          | Resolved |
 | BUG-GAP-017 | E2E-FOUND-FND01-05          | FND-01        | Product UI          | P1 / Medium   | Platform report rendered the integration-health object directly as a React child                 | Resolved |
-| BUG-GAP-018 | E2E-GOV01-01                | GOV-01        | Product routing     | P1 / High     | Policy URL renders the governed-evidence workspace, so policy create/edit fields are absent      | Open     |
+| BUG-GAP-018 | E2E-GOV01-01                | GOV-01        | Product routing     | P1 / High     | Policy URL renders the governed-evidence workspace, so policy create/edit fields are absent      | Resolved |
 | BUG-GAP-019 | Five UI cases × 2 viewports | FND-01/FND-02 | Test maintenance    | P2 / Medium   | Regression tests targeted superseded submit, invitation, permission-preview, and report controls | Resolved |
 
 ## Detailed RCA
@@ -46,7 +46,8 @@ This register began with the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`
 - **RCA:** The route is wired to `GovernanceWorkspace` (record evidence) instead of the policy administration workspace promised by the route and feature flow.
 - **Impact:** Tenant administrators cannot create or edit governance policies from the advertised URL.
 - **Evidence:** Focused Playwright timeout at `getByLabel("Code")`; screenshot retained in `test-results/all-features-intelligence--11858-nce-and-governance-features-chromium/test-failed-2.png`.
-- **Status:** Open; requires a GOV-01 production routing/UI fix.
+- **Resolution:** `/app/governance/policies` now renders structured policy list/create/edit/enable/disable controls backed by tenant-root authorized, idempotent APIs with role validation, optimistic concurrency, audit, and outbox evidence.
+- **Status:** Resolved in the rapid remediation batch; regression `GOV-WB-01` is Implemented / Not Run pending an explicitly requested test phase.
 
 ### BUG-GAP-019 — Legacy browser cases target superseded FND user interfaces
 

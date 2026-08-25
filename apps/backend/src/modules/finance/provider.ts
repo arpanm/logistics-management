@@ -2,12 +2,19 @@ import { financeManifests } from "./manifest.js";
 
 export type TaxLine = { taxableMinor: bigint; taxBasisPoints: bigint };
 
+export function roundBasisPointMinor(valueMinor: bigint, basisPoints: bigint) {
+  const numerator = valueMinor * basisPoints;
+  return numerator < 0n
+    ? -((-numerator + 5_000n) / 10_000n)
+    : (numerator + 5_000n) / 10_000n;
+}
+
 export function calculateInvoice(lines: readonly TaxLine[]) {
   let taxableMinor = 0n;
   let taxMinor = 0n;
   for (const line of lines) {
     taxableMinor += line.taxableMinor;
-    taxMinor += (line.taxableMinor * line.taxBasisPoints + 5_000n) / 10_000n;
+    taxMinor += roundBasisPointMinor(line.taxableMinor, line.taxBasisPoints);
   }
   return { taxableMinor, taxMinor, totalMinor: taxableMinor + taxMinor };
 }

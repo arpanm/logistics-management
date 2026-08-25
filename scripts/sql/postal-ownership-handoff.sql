@@ -30,10 +30,13 @@ ALTER TABLE postal_reference.postal_directory_versions OWNER TO logistics_postal
 ALTER TABLE postal_reference.postal_localities OWNER TO logistics_postal_owner;
 ALTER FUNCTION postal_reference.guard_postal_directory_mutation() OWNER TO logistics_postal_owner;
 
--- FND-01 databases created before MST-01 already have the postal tables in
--- postal_reference, while clean databases move them above. Install the MST-01
--- snapshot foreign keys only after both paths have converged on that schema.
+-- Clean databases move the directory above after all migrations; upgraded
+-- databases already have it in postal_reference before later migrations run.
+-- Install every deferred snapshot FK idempotently after both orders converge.
 DO $$
+DECLARE
+  target_table text;
+  prefix text;
 BEGIN
   IF to_regclass('app.organization_addresses') IS NOT NULL THEN
     IF NOT EXISTS (
@@ -57,12 +60,40 @@ BEGIN
         REFERENCES postal_reference.postal_directory_versions(id) ON DELETE RESTRICT;
     END IF;
   END IF;
+  FOREACH target_table IN ARRAY ARRAY['app.client_locations','app.vendors','app.drivers'] LOOP
+    IF to_regclass(target_table) IS NULL THEN
+      CONTINUE;
+    END IF;
+    prefix := split_part(target_table,'.',2);
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid=target_table::regclass
+        AND conname=prefix||'_postal_locality_fk'
+    ) THEN
+      EXECUTE format(
+        'ALTER TABLE %s ADD CONSTRAINT %I FOREIGN KEY(postal_locality_id) REFERENCES postal_reference.postal_localities(id) ON DELETE RESTRICT',
+        target_table,
+        prefix||'_postal_locality_fk'
+      );
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid=target_table::regclass
+        AND conname=prefix||'_postal_directory_version_fk'
+    ) THEN
+      EXECUTE format(
+        'ALTER TABLE %s ADD CONSTRAINT %I FOREIGN KEY(postal_directory_version_id) REFERENCES postal_reference.postal_directory_versions(id) ON DELETE RESTRICT',
+        target_table,
+        prefix||'_postal_directory_version_fk'
+      );
+    END IF;
+  END LOOP;
 END $$;
 
 REVOKE ALL ON SCHEMA postal_reference FROM PUBLIC,logistics_app,logistics_postal_importer;
 GRANT USAGE ON SCHEMA postal_reference TO logistics_app,logistics_postal_importer;
 REVOKE ALL ON postal_reference.postal_directory_versions,postal_reference.postal_localities FROM PUBLIC,logistics_app,logistics_postal_importer;
-GRANT SELECT ON postal_reference.postal_directory_versions,postal_reference.postal_localities TO logistics_app;
+GRANT SELECT,REFERENCES ON postal_reference.postal_directory_versions,postal_reference.postal_localities TO logistics_app;
 GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER ON postal_reference.postal_directory_versions,postal_reference.postal_localities TO logistics_postal_importer;
 REVOKE ALL ON FUNCTION postal_reference.guard_postal_directory_mutation() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION postal_reference.guard_postal_directory_mutation() TO logistics_app,logistics_postal_importer;

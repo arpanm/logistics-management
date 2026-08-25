@@ -12,6 +12,7 @@ const links = [
   ["/app/masters/lanes", "Lanes"],
   ["/app/masters/vendors", "Vendors"],
   ["/app/masters/fleet", "Fleet"],
+  ["/app/masters/catalogs", "Truck/body/cargo catalogs"],
   ["/app/masters/drivers", "Drivers"],
 ] as const;
 export function MastersNav() {

@@ -1,0 +1,131 @@
+.page {
+  display: grid;
+  gap: 1.25rem;
+}
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.hero h1 {
+  margin: 0.2rem 0;
+}
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.tab {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.55rem 0.85rem;
+  text-decoration: none;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+.metric,
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 1rem;
+}
+.metric strong {
+  font-size: 1.8rem;
+  display: block;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.tableWrap {
+  overflow: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 650px;
+}
+.table th,
+.table td {
+  padding: 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.actions button,
+.form button {
+  padding: 0.5rem 0.7rem;
+}
+.priority {
+  font-weight: 700;
+}
+.red {
+  color: #b42318;
+}
+.yellow {
+  color: #8a6100;
+}
+.green {
+  color: #18794e;
+}
+.form {
+  display: grid;
+  gap: 0.85rem;
+}
+.form label {
+  display: grid;
+  gap: 0.3rem;
+}
+.form input,
+.form select,
+.form textarea {
+  width: 100%;
+  padding: 0.65rem;
+}
+.line {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+  border: 1px solid var(--border);
+  padding: 0.75rem;
+  border-radius: 10px;
+}
+.notice {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: #ecfdf3;
+  color: #05603a;
+}
+.error {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: #fef3f2;
+  color: #b42318;
+}
+.empty {
+  color: var(--muted);
+  padding: 0.75rem 0;
+}
+@media (max-width: 720px) {
+  .hero {
+    display: grid;
+  }
+  .line {
+    grid-template-columns: 1fr;
+  }
+  .table {
+    min-width: 560px;
+  }
+}

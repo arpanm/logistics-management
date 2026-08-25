@@ -269,6 +269,31 @@ export class CanonicalService {
     return definition;
   }
 
+  private async referenceCode(
+    tx: Tx,
+    tenantId: string,
+    id: string | undefined,
+    kind: "TRUCK_TYPE" | "BODY_TYPE" | "CARGO_TYPE",
+    legacy?: string,
+  ) {
+    if (!id) return legacy ?? null;
+    const row = (
+      await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT code FROM app.transport_reference_masters WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind=$3 AND state='ACTIVE'`,
+        tenantId,
+        id,
+        kind,
+      )
+    )[0];
+    if (!row)
+      throw new AppError(
+        400,
+        "REFERENCE_INVALID",
+        `Select an active ${kind.toLowerCase().replaceAll("_", " ")}`,
+      );
+    return String(row.code);
+  }
+
   private async access(
     tx: Tx,
     actor: SessionActor,
@@ -918,6 +943,20 @@ export class CanonicalService {
     }
     if (resource === "lanes") {
       const v = laneCommandSchema.parse(raw);
+      const truckType = await this.referenceCode(
+        tx,
+        tenantId,
+        v.truckTypeId,
+        "TRUCK_TYPE",
+        v.truckType,
+      );
+      const cargoType = await this.referenceCode(
+        tx,
+        tenantId,
+        v.cargoTypeId,
+        "CARGO_TYPE",
+        v.cargoType,
+      );
       const contract = (
         await tx.$queryRawUnsafe<Array<Row>>(
           `SELECT contract_id AS "contractId" FROM app.contract_versions WHERE tenant_id=$1::uuid AND id=$2::uuid`,
@@ -951,7 +990,7 @@ export class CanonicalService {
           v.contractVersionId,
           v.originLocationId,
           v.destinationLocationId,
-          v.truckType,
+          truckType,
           v.effectiveFrom,
           v.effectiveTo ?? null,
           v.priority,
@@ -965,14 +1004,16 @@ export class CanonicalService {
         );
       const lane = (
         await tx.$queryRawUnsafe<Array<Row>>(
-          `INSERT INTO app.contract_lanes(tenant_id,contract_version_id,code,origin_location_id,destination_location_id,truck_type,cargo_type,quantity_min_milli,quantity_max_milli,priority) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6,$7,$8::bigint,$9::bigint,$10) RETURNING *`,
+          `INSERT INTO app.contract_lanes(tenant_id,contract_version_id,code,origin_location_id,destination_location_id,truck_type,cargo_type,truck_type_id,cargo_type_id,quantity_min_milli,quantity_max_milli,priority) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6,$7,$8::uuid,$9::uuid,$10::bigint,$11::bigint,$12) RETURNING *`,
           tenantId,
           v.contractVersionId,
           v.code,
           v.originLocationId,
           v.destinationLocationId,
-          v.truckType,
-          v.cargoType ?? null,
+          truckType,
+          cargoType,
+          v.truckTypeId ?? null,
+          v.cargoTypeId ?? null,
           v.quantityMinMilli,
           v.quantityMaxMilli ?? null,
           v.priority,
@@ -1051,13 +1092,23 @@ export class CanonicalService {
         "vendors",
         v.vendorId,
       );
+      const truckType = await this.referenceCode(
+        tx,
+        tenantId,
+        v.truckTypeId,
+        "TRUCK_TYPE",
+        v.vehicleType,
+      );
+      await this.referenceCode(tx, tenantId, v.bodyTypeId, "BODY_TYPE");
       return (
         await tx.$queryRawUnsafe<Array<Row>>(
-          `INSERT INTO app.vehicles(tenant_id,vendor_id,registration_number,vehicle_type,make,model,model_year,capacity_milli,gps_device_id) VALUES($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::bigint,$9) RETURNING *`,
+          `INSERT INTO app.vehicles(tenant_id,vendor_id,registration_number,vehicle_type,truck_type_id,body_type_id,make,model,model_year,capacity_milli,gps_device_id) VALUES($1::uuid,$2::uuid,$3,$4,$5::uuid,$6::uuid,$7,$8,$9,$10::bigint,$11) RETURNING *`,
           tenantId,
           v.vendorId,
           v.registrationNumber,
-          v.vehicleType,
+          truckType,
+          v.truckTypeId ?? null,
+          v.bodyTypeId ?? null,
           v.make ?? null,
           v.model ?? null,
           v.modelYear ?? null,
@@ -1156,6 +1207,20 @@ export class CanonicalService {
   private async createIndent(tx: Tx, actor: SessionActor, raw: unknown) {
     const v = indentCommandSchema.parse(raw);
     const tenantId = this.tenant(actor);
+    const cargoType = await this.referenceCode(
+      tx,
+      tenantId,
+      v.cargoTypeId,
+      "CARGO_TYPE",
+      v.cargoType,
+    );
+    const bodyType = await this.referenceCode(
+      tx,
+      tenantId,
+      v.bodyTypeId,
+      "BODY_TYPE",
+      v.bodyType,
+    );
     const resolved = (
       await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT cv.id AS "contractVersionId",cv.credit_days AS "creditDays",cv.pod_mode AS "podMode",cv.document_requirements AS "documentRequirements",s.placement_minutes AS "placementMinutes",r.amount_minor AS "rateMinor",r.tax_basis_points AS "taxBasisPoints",c.authorization_scope_node_id AS "scopeNodeId"
@@ -1204,8 +1269,8 @@ export class CanonicalService {
     const committed = v.committedPlacementAt ?? calculated;
     return (
       await tx.$queryRawUnsafe<Array<Row>>(
-        `INSERT INTO app.indents(tenant_id,indent_no,client_id,client_location_id,contract_version_id,lane_id,requested_vehicles,quantity_milli,pickup_window_start,pickup_window_end,committed_placement_at,commitment_override_reason,owner_membership_id,source,source_reference,cargo_type,body_type,commercial_snapshot,created_by)
-      VALUES($1::uuid,$2,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7,$8::bigint,$9::timestamptz,$10::timestamptz,$11::timestamptz,$12,$13::uuid,$14,$15,$16,$17,$18::jsonb,$19::uuid) RETURNING *`,
+        `INSERT INTO app.indents(tenant_id,indent_no,client_id,client_location_id,contract_version_id,lane_id,requested_vehicles,quantity_milli,pickup_window_start,pickup_window_end,committed_placement_at,commitment_override_reason,owner_membership_id,source,source_reference,cargo_type,body_type,cargo_type_id,body_type_id,commercial_snapshot,created_by)
+      VALUES($1::uuid,$2,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7,$8::bigint,$9::timestamptz,$10::timestamptz,$11::timestamptz,$12,$13::uuid,$14,$15,$16,$17,$18::uuid,$19::uuid,$20::jsonb,$21::uuid) RETURNING *`,
         tenantId,
         v.indentNo,
         v.clientId,
@@ -1221,8 +1286,10 @@ export class CanonicalService {
         v.ownerMembershipId ?? null,
         v.source,
         v.sourceReference ?? null,
-        v.cargoType ?? null,
-        v.bodyType ?? null,
+        cargoType,
+        bodyType,
+        v.cargoTypeId ?? null,
+        v.bodyTypeId ?? null,
         JSON.stringify(toJsonSafe(resolved)),
         actor.userId,
       )

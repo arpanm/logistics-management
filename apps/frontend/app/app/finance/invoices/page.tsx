@@ -1,7 +1,4 @@
-import {
-  CanonicalWorkspace,
-  canonicalManifests,
-} from "../../../../components/canonical";
+import { FinanceWorkbench } from "../../../../components/finance/finance-workbench";
 export default function Page() {
-  return <CanonicalWorkspace manifest={canonicalManifests.invoices} />;
+  return <FinanceWorkbench section="invoices" />;
 }

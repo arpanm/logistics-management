@@ -1,7 +1,4 @@
-import {
-  CanonicalWorkspace,
-  canonicalManifests,
-} from "../../../../components/canonical";
+import { OperationsWorkbench } from "../../../../components/operations";
 export default function Page() {
-  return <CanonicalWorkspace manifest={canonicalManifests.allocations} />;
+  return <OperationsWorkbench mode="allocations" />;
 }

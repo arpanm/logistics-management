@@ -12,6 +12,7 @@ export default defineConfig({
     "mst-01-operable-masters.spec.ts",
     "all-features-foundation-masters.spec.ts",
     "all-feature-gaps.spec.ts",
+    "access-master-remediation.spec.ts",
   ],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

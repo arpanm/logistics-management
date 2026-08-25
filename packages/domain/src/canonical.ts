@@ -346,7 +346,9 @@ export const laneCommandSchema = z
     code,
     originLocationId: uuid,
     destinationLocationId: uuid,
-    truckType: text(80),
+    truckTypeId: uuid.optional(),
+    truckType: text(80).optional(),
+    cargoTypeId: uuid.optional(),
     cargoType: z.string().trim().max(80).optional(),
     quantityMinMilli: z.number().int().safe().nonnegative().default(0),
     quantityMaxMilli: z.number().int().safe().positive().nullish(),
@@ -359,7 +361,11 @@ export const laneCommandSchema = z
     effectiveFrom: instant,
     effectiveTo: instant.nullish(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.truckTypeId || value.truckType, {
+    path: ["truckTypeId"],
+    message: "Select a configured truck type",
+  });
 
 export const vendorCommandSchema = z
   .object({
@@ -379,14 +385,20 @@ export const vehicleCommandSchema = z
   .object({
     vendorId: uuid,
     registrationNumber: text(30).transform((v) => v.toUpperCase()),
-    vehicleType: text(80),
+    truckTypeId: uuid.optional(),
+    bodyTypeId: uuid.optional(),
+    vehicleType: text(80).optional(),
     make: z.string().trim().max(80).optional(),
     model: z.string().trim().max(80).optional(),
     modelYear: z.number().int().min(1950).max(2200).optional(),
     capacityMilli: z.number().int().safe().positive(),
     gpsDeviceId: z.string().trim().max(120).nullish(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.truckTypeId || value.vehicleType, {
+    path: ["truckTypeId"],
+    message: "Select a configured truck type",
+  });
 
 export const driverCommandSchema = z
   .object({
@@ -417,6 +429,8 @@ export const indentCommandSchema = z
     ownerMembershipId: uuid.nullish(),
     source: z.enum(["MANUAL", "COPY", "IMPORT", "API"]),
     sourceReference: z.string().trim().max(120).nullish(),
+    cargoTypeId: uuid.optional(),
+    bodyTypeId: uuid.optional(),
     cargoType: z.string().trim().max(80).optional(),
     bodyType: z.string().trim().max(80).optional(),
   })

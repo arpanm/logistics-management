@@ -1,0 +1,87 @@
+.page {
+  display: grid;
+  gap: 1rem;
+}
+.head,
+.actions,
+.stepHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.panel,
+.policy {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  padding: 1rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.7rem;
+}
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.7rem;
+}
+.form label,
+.step label {
+  display: grid;
+  gap: 0.3rem;
+}
+.wide {
+  grid-column: 1/-1;
+}
+.steps {
+  display: grid;
+  gap: 0.6rem;
+}
+.step {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.7rem;
+}
+.status {
+  display: inline-flex;
+  border-radius: 1rem;
+  padding: 0.2rem 0.6rem;
+  background: #ecfdf3;
+  color: #067647;
+  font-weight: 750;
+}
+.inactive {
+  background: #f2f4f7;
+  color: #475467;
+}
+.dialog {
+  position: fixed;
+  inset: 4vh max(1rem, calc((100vw - 58rem) / 2));
+  z-index: 20;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 1.2rem;
+  box-shadow: 0 1.5rem 4rem #0004;
+}
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem;
+}
+@media (max-width: 650px) {
+  .step {
+    grid-template-columns: 1fr;
+  }
+  .dialog {
+    inset: 1rem;
+  }
+}

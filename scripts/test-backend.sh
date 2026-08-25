@@ -34,3 +34,15 @@ pnpm --filter @logistics/db run db:reset:test
 pnpm --filter @logistics/db run db:seed
 pnpm --filter @logistics/backend exec vitest run test/bug-e2e-canonical.integration.test.ts --maxWorkers=1 --no-file-parallelism
 pnpm --filter @logistics/backend exec vitest run test/all-feature-gaps.contract.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/db run db:reset:test
+pnpm --filter @logistics/db run db:seed
+pnpm --filter @logistics/backend exec vitest run test/access-master-remediation.integration.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/db run db:reset:test
+pnpm --filter @logistics/db run db:seed
+pnpm --filter @logistics/backend exec vitest run test/operations-workbench.contract.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/db run db:reset:test
+pnpm --filter @logistics/db run db:seed
+pnpm --filter @logistics/backend exec vitest run test/finance-workbench.contract.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/db run db:reset:test
+pnpm --filter @logistics/db run db:seed
+pnpm --filter @logistics/backend exec vitest run test/control-governance-workbench.contract.test.ts --maxWorkers=1 --no-file-parallelism

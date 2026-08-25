@@ -1,7 +1,4 @@
-import {
-  CanonicalWorkspace,
-  canonicalManifests,
-} from "../../../../components/canonical";
+import { RemediatedMasterWorkspace } from "../../../../components/masters";
 export default function Page() {
-  return <CanonicalWorkspace manifest={canonicalManifests.clientLocations} />;
+  return <RemediatedMasterWorkspace mode="client-locations" />;
 }

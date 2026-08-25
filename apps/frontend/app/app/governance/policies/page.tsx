@@ -1,4 +1,4 @@
-import { GovernanceWorkspace } from "../../../../components/canonical";
+import { PoliciesWorkbench } from "../../../../components/governance";
 export default function Page() {
-  return <GovernanceWorkspace />;
+  return <PoliciesWorkbench />;
 }

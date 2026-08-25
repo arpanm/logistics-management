@@ -102,23 +102,23 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 | ID     | Feature                                                        | Evidence                                       | Implementation status | Test status           | Depends on                  |
 | ------ | -------------------------------------------------------------- | ---------------------------------------------- | --------------------- | --------------------- | --------------------------- |
 | FND-01 | Multi-tenant product foundation                                | Product objective                              | Complete              | Passing               | —                           |
-| FND-02 | Identity, roles, and scoped access                             | Operating-model roles                          | Complete              | Passing               | FND-01                      |
+| FND-02 | Identity, roles, and scoped access                             | Operating-model roles                          | Complete              | Implemented / Not Run | FND-01                      |
 | MST-01 | Organization, employee, and geography masters                  | Workbook managers; stated hierarchy            | Complete              | Implemented / Not Run | FND-01, FND-02              |
-| MST-02 | Client, contract, lane, SLA, and rate-card masters             | Client/location forms; contract business model | Complete              | Passing               | MST-01                      |
-| MST-03 | Vendor, vehicle, driver, and compliance masters                | Vendor form; vendor/driver actors              | Complete              | Passing               | MST-01                      |
-| OPS-01 | Indent capture and lifecycle                                   | Indent form/workbook                           | Complete              | Passing               | MST-02                      |
-| OPS-02 | Vendor allocation and placement                                | Placement form/dashboard                       | Complete              | Passing               | OPS-01, MST-03              |
-| OPS-03 | Trip execution, loading, transit, and unloading                | Stated actors; dashboard mentions GPS          | Complete              | Passing               | OPS-02                      |
+| MST-02 | Client, contract, lane, SLA, and rate-card masters             | Client/location forms; contract business model | Complete              | Implemented / Not Run | MST-01                      |
+| MST-03 | Vendor, vehicle, driver, and compliance masters                | Vendor form; vendor/driver actors              | Complete              | Implemented / Not Run | MST-01                      |
+| OPS-01 | Indent capture and lifecycle                                   | Indent form/workbook                           | Complete              | Implemented / Not Run | MST-02                      |
+| OPS-02 | Vendor allocation and placement                                | Placement form/dashboard                       | Complete              | Implemented / Not Run | OPS-01, MST-03              |
+| OPS-03 | Trip execution, loading, transit, and unloading                | Stated actors; dashboard mentions GPS          | Complete              | Implemented / Not Run | OPS-02                      |
 | DOC-01 | POD and delivery-document workflow                             | POD form/dashboard                             | Complete              | Passing               | OPS-03                      |
-| FIN-01 | Client billing and invoice workflow                            | Invoice form/workbook                          | Complete              | Passing               | DOC-01, MST-02              |
-| FIN-02 | Receipts, reconciliation, and collections                      | Receipt/invoice forms/dashboard                | Complete              | Passing               | FIN-01                      |
-| FIN-03 | Vendor bills, deductions, and payments                         | Stated vendor-payment need                     | Complete              | Passing               | OPS-03, MST-03              |
-| CTL-01 | Control tower dashboards and drill-down reports                | Dashboard prototype                            | Complete              | Passing               | Transaction modules         |
+| FIN-01 | Client billing and invoice workflow                            | Invoice form/workbook                          | Complete              | Implemented / Not Run | DOC-01, MST-02              |
+| FIN-02 | Receipts, reconciliation, and collections                      | Receipt/invoice forms/dashboard                | Complete              | Implemented / Not Run | FIN-01                      |
+| FIN-03 | Vendor bills, deductions, and payments                         | Stated vendor-payment need                     | Complete              | Implemented / Not Run | OPS-03, MST-03              |
+| CTL-01 | Control tower dashboards and drill-down reports                | Dashboard prototype                            | Complete              | Implemented / Not Run | Transaction modules         |
 | ALT-01 | Alerts, escalation, and work queues                            | Traffic lights and operating need              | Complete              | Passing               | Transaction modules, FND-02 |
 | DAT-01 | Bulk import, validation, correction, and export                | Workbook/read-me/forms queue                   | Complete              | Passing               | Masters and transactions    |
-| GOV-01 | Documents, comments, audit, and approvals                      | Audit trail notes and regulated data           | Complete              | Passing               | FND-02                      |
+| GOV-01 | Documents, comments, audit, and approvals                      | Audit trail notes and regulated data           | Complete              | Implemented / Not Run | FND-02                      |
 | INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Passing               | FND-01, GOV-01              |
-| CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Passing               | FND-01                      |
+| CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Implemented / Not Run | FND-01                      |
 
 ### 5.0.1 Product UX remediation status
 
@@ -126,12 +126,12 @@ The register above records the canonical backend/contract baseline. A browser-le
 
 | Feature slice                         | Remediation state              | Test state                                                                                 | Remaining product gap                                                                                      |
 | ------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Access UX (`FND-02`)                  | Implemented locally            | Passing — `E2E-FND02-07..09`                                                               | Broader directory filtering/profile enrichment remains an explicit follow-up                               |
-| Address UX (`FND-01`, `MST-01/02/03`) | Tenant + organization complete | Implemented / Not Run — current selector maintenance is deferred to an explicit test phase | Reuse PIN-first addressing in client-location, vendor, and driver master forms                             |
-| Masters UX (`MST-01/02/03`, `CFG-01`) | Hub + MST-01 complete          | Implemented / Not Run — current full regression was stopped at user direction              | Add configured truck/body/cargo catalogs and complete MST-02/MST-03 product workflows                      |
-| Operations UX (`OPS-01/02/03`)        | Pending                        | Not run                                                                                    | Open-indent dashboard, contextual/manual/automatic allocation, rule setup, allocation/trip queues and CTAs |
-| Finance UX (`FIN-01/02/03`)           | Pending                        | Not run                                                                                    | Pending/all invoice and collection/payable workbenches with contextual CTAs                                |
-| Control-tower UX (`CTL-01`)           | Pending                        | Not run                                                                                    | Prototype-parity KPIs, filters, hierarchy drill, tables, export and record actions over canonical data     |
+| Access UX (`FND-02`)                  | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
+| Address UX (`FND-01`, `MST-01/02/03`) | Implemented locally | Implemented / Not Run | Unknown-PIN exception behavior remains a product decision |
+| Masters UX (`MST-01/02/03`, `CFG-01`) | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
+| Operations UX (`OPS-01/02/03`)        | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
+| Finance UX (`FIN-01/02/03`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
+| Control-tower UX (`CTL-01`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope |
 
 ### 5.1 Implemented delivery map
 
@@ -230,7 +230,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Every person sees and changes only the data and actions required for their role and operational scope.
 
@@ -299,7 +299,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Commercial and service commitments are versioned once and applied consistently to indents, billing, reporting, and alerts.
 
@@ -342,7 +342,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Operations can allocate only eligible supply, while finance can settle verified vendors securely.
 
@@ -377,7 +377,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Every customer truck requirement becomes a traceable, assigned, SLA-bound indent rather than a WhatsApp message.
 
@@ -413,7 +413,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Placement teams allocate demand to eligible vendors, capture vehicle/driver reporting, measure fill and delay, and escalate NTP consistently.
 
@@ -450,7 +450,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Field events replace WhatsApp updates and create an auditable trip record from gate-in through delivery.
 
@@ -522,7 +522,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Completed eligible services become accurate, approved, submitted client invoices with traceable commercial calculations.
 
@@ -558,7 +558,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Each bank credit is allocated transparently, invoice balances are derived, deductions remain visible, and collection owners work prioritized queues.
 
@@ -595,7 +595,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Vendor obligations are calculated from performed services, approved against evidence, and paid with full reconciliation and margin visibility.
 
@@ -632,7 +632,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Owners and managers move from portfolio risk to the exact actionable record without separate Excel preparation.
 
@@ -759,7 +759,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** Operational and financial decisions have secure evidence, discussion, authorization, and an immutable history.
 
@@ -831,7 +831,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** The same product supports different logistics operators without forks or customer-specific constants.
 
