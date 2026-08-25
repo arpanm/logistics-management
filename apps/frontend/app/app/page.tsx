@@ -14,11 +14,14 @@ export default function Page() {
         </div>
       </div>
       <div className="cards">
-        <Link className="panel" href="/app/access/probes">
-          Open work queue
+        <Link className="panel" href="/app/operations">
+          Open operations
         </Link>
         <Link className="panel" href="/app/access/users">
           Manage access
+        </Link>
+        <Link className="panel" href="/app/access/reports">
+          Review activity &amp; audit
         </Link>
       </div>
     </Shell>

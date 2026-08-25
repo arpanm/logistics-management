@@ -425,8 +425,34 @@ export class AccessService {
       const capabilities = [
         ...new Set(assignments.flatMap((a) => [...a.capabilities])),
       ].sort();
+      const root = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id FROM app.authorization_scope_nodes WHERE tenant_id=$1::uuid AND scope_type='TENANT' AND status='ACTIVE'`,
+          tenantId,
+        )
+      )[0];
+      const rootId = String(root?.id ?? "");
+      const rootAllows = async (capability: string, action: ScopeAction) =>
+        rootId
+          ? (
+              await this.decide(tx, actor, capability, action, {
+                tenantId,
+                nodeIds: [rootId],
+              })
+            ).decision.allowed
+          : false;
+      const actions = {
+        canReadTenantRoles: await rootAllows("identity.role.read", "READ"),
+        canAdminTenantUsers: await rootAllows("identity.user.admin", "ADMIN"),
+        canResetTenantSessions: await rootAllows(
+          "identity.session.admin",
+          "ADMIN",
+        ),
+        canResetMfa: await rootAllows("identity.mfa.admin", "ADMIN"),
+      };
       return {
         capabilities,
+        actions,
         navigation: {
           users: capabilities.includes("identity.user.read"),
           roles: capabilities.includes("identity.role.read"),
@@ -1119,6 +1145,10 @@ export class AccessService {
         "ADMIN",
         correlationId,
       );
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${tenantId}:membership:${membershipId}:invitation-rotation`,
+      );
       return this.idempotent(
         tx,
         actor,
@@ -1176,6 +1206,22 @@ export class AccessService {
               String(this.app.config.INVITATION_TTL_HOURS),
             )
           )[0]!;
+          const updatedMembership = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `UPDATE app.tenant_memberships SET version=version+1,updated_at=now()
+               WHERE tenant_id=$1::uuid AND id=$2::uuid AND version=$3
+               RETURNING version`,
+              tenantId,
+              membershipId,
+              expectedVersion,
+            )
+          )[0];
+          if (!updatedMembership)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Invitation changed; reload and retry",
+            );
           await tx.$executeRawUnsafe(
             `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key) VALUES($1::uuid,'TENANT','access_invitation',$2::uuid,'identity.invitation.requested.v1',$3::jsonb,$4)`,
             tenantId,
@@ -1203,11 +1249,8 @@ export class AccessService {
             membershipId,
             maskedDestination: masked,
             expiresAt: invite.expiresAt,
-            ...(this.app.config.ENABLE_TEST_HOOKS === "true"
-              ? {
-                  invitationUrl: `${this.app.config.FRONTEND_URL}/accept-access?token=${plain}`,
-                }
-              : {}),
+            version: Number(updatedMembership.version),
+            invitationUrl: `${this.app.config.FRONTEND_URL}/accept-access?token=${plain}`,
           };
         },
       );
@@ -2936,7 +2979,12 @@ export class AccessService {
     });
   }
 
-  async reports(actor: SessionActor, type: string, correlationId: string) {
+  async reports(
+    actor: SessionActor,
+    type: string,
+    correlationId: string,
+    search = "",
+  ) {
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.authorizeRoot(
@@ -2946,8 +2994,22 @@ export class AccessService {
         "READ",
         correlationId,
       );
+      const supported = [
+        "users",
+        "roles",
+        "sessions",
+        "audit-log",
+        "security-events",
+        "permission-changes",
+        "privileged-actions",
+        "failed-logins",
+        "dormant",
+      ];
+      if (!supported.includes(type))
+        throw new AppError(404, "RESOURCE_NOT_FOUND", "Report not found");
       if (
         [
+          "audit-log",
           "security-events",
           "permission-changes",
           "privileged-actions",
@@ -2964,45 +3026,62 @@ export class AccessService {
       let items: Row[];
       if (type === "sessions")
         items = await tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT m.id AS "membershipId",m.invited_name AS "displayName",count(s.id)::int count,max(s.last_seen_at) AS "lastSeenAt" FROM app.tenant_memberships m JOIN app.sessions s ON s.active_tenant_id=m.tenant_id AND s.membership_id=m.id WHERE m.tenant_id=$1::uuid AND s.revoked_at IS NULL AND s.expires_at>now() AND s.user_auth_version=(SELECT auth_version FROM app.users WHERE id=s.user_id) AND s.membership_auth_version=m.authorization_version GROUP BY m.id ORDER BY m.invited_name`,
+          `SELECT m.id AS "membershipId",m.invited_name AS "displayName",count(s.id)::int count,max(s.last_seen_at) AS "lastSeenAt" FROM app.tenant_memberships m JOIN app.sessions s ON s.active_tenant_id=m.tenant_id AND s.membership_id=m.id WHERE m.tenant_id=$1::uuid AND ($2='' OR position(lower($2) in lower(concat_ws(' ',m.invited_name,m.employee_code)))>0) AND s.revoked_at IS NULL AND s.expires_at>now() AND s.user_auth_version=(SELECT auth_version FROM app.users WHERE id=s.user_id) AND s.membership_auth_version=m.authorization_version GROUP BY m.id ORDER BY m.invited_name`,
           tenantId,
+          search.trim(),
         );
       else if (type === "security-events")
         items = await tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT id,event_type AS "eventType",outcome,safe_target_hash AS "safeTargetHash",metadata,correlation_id AS "correlationId",occurred_at AS "occurredAt" FROM app.security_events WHERE tenant_id=$1::uuid ORDER BY occurred_at DESC LIMIT 100`,
+          `SELECT e.id,coalesce(m.invited_name,'System') AS actor,e.event_type AS "eventType",e.outcome,e.safe_target_hash AS "safeTargetHash",e.correlation_id AS "correlationId",e.occurred_at AS "occurredAt"
+           FROM app.security_events e LEFT JOIN app.tenant_memberships m ON m.tenant_id=e.tenant_id AND m.id=e.membership_id
+           WHERE e.tenant_id=$1::uuid AND ($2='' OR position(lower($2) in lower(concat_ws(' ',m.invited_name,e.event_type,e.outcome,e.correlation_id,e.safe_target_hash)))>0)
+           ORDER BY e.occurred_at DESC,e.id DESC LIMIT 100`,
           tenantId,
+          search.trim(),
         );
-      else if (type === "permission-changes" || type === "privileged-actions")
+      else if (
+        type === "audit-log" ||
+        type === "permission-changes" ||
+        type === "privileged-actions"
+      )
         items = await tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT id,action,target_type AS "targetType",reason,correlation_id AS "correlationId",occurred_at AS "occurredAt" FROM audit.audit_events WHERE tenant_id=$1::uuid AND ($2='privileged-actions' OR action LIKE 'identity.%') ORDER BY occurred_at DESC LIMIT 100`,
+          `SELECT e.id,coalesce(m.invited_name,'System') AS actor,e.action,e.target_type AS "targetType",e.reason,e.correlation_id AS "correlationId",e.occurred_at AS "occurredAt"
+           FROM audit.audit_events e LEFT JOIN app.tenant_memberships m ON m.tenant_id=e.tenant_id AND m.user_id=e.actor_id
+           WHERE e.tenant_id=$1::uuid AND ($2='audit-log' OR $2='privileged-actions' OR e.action LIKE 'identity.%')
+             AND ($3='' OR position(lower($3) in lower(concat_ws(' ',m.invited_name,e.action,e.target_type,e.reason,e.correlation_id)))>0)
+           ORDER BY e.occurred_at DESC,e.id DESC LIMIT 100`,
           tenantId,
           type,
+          search.trim(),
         );
       else if (type === "roles")
         items = await tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT r.id,r.name,count(DISTINCT a.membership_id)::int AS users,count(DISTINCT g.id)::int AS grants FROM app.roles r LEFT JOIN app.membership_role_assignments a ON a.tenant_id=r.tenant_id AND a.role_id=r.id AND a.status='ACTIVE' LEFT JOIN app.scope_grants g ON g.tenant_id=a.tenant_id AND g.assignment_id=a.id AND g.status='ACTIVE' WHERE r.tenant_id=$1::uuid GROUP BY r.id ORDER BY r.name`,
+          `SELECT r.id,r.name,count(DISTINCT a.membership_id)::int AS users,count(DISTINCT g.id)::int AS grants FROM app.roles r LEFT JOIN app.membership_role_assignments a ON a.tenant_id=r.tenant_id AND a.role_id=r.id AND a.status='ACTIVE' LEFT JOIN app.scope_grants g ON g.tenant_id=a.tenant_id AND g.assignment_id=a.id AND g.status='ACTIVE' WHERE r.tenant_id=$1::uuid AND ($2='' OR position(lower($2) in lower(concat_ws(' ',r.name,r.code,r.description)))>0) GROUP BY r.id ORDER BY r.name`,
           tenantId,
+          search.trim(),
         );
       else if (type === "failed-logins")
         items = await tx.$queryRawUnsafe<Array<Row>>(
           `SELECT date_trunc('minute',occurred_at) AS bucket,event_type AS "eventType",count(*)::int count
-           FROM app.security_events WHERE tenant_id=$1::uuid AND event_type IN ('LOGIN_FAILED','LOGIN_THROTTLED')
+           FROM app.security_events WHERE tenant_id=$1::uuid AND event_type IN ('LOGIN_FAILED','LOGIN_THROTTLED') AND ($2='' OR position(lower($2) in lower(concat_ws(' ',event_type,outcome,correlation_id)))>0)
            GROUP BY bucket,event_type ORDER BY bucket DESC`,
           tenantId,
+          search.trim(),
         );
       else if (type === "dormant")
         items = await tx.$queryRawUnsafe<Array<Row>>(
           `SELECT m.id,m.invited_name AS "displayName",m.last_activity_at AS "lastActivityAt",(u.last_login_at IS NULL) AS "neverLoggedIn"
            FROM app.tenant_memberships m JOIN app.users u ON u.id=m.user_id
-           WHERE m.tenant_id=$1::uuid AND m.status='ACTIVE' AND (m.last_activity_at IS NULL OR m.last_activity_at<now()-interval '30 days')
+           WHERE m.tenant_id=$1::uuid AND m.status='ACTIVE' AND ($2='' OR position(lower($2) in lower(concat_ws(' ',m.invited_name,m.employee_code)))>0) AND (m.last_activity_at IS NULL OR m.last_activity_at<now()-interval '30 days')
            ORDER BY m.invited_name`,
           tenantId,
+          search.trim(),
         );
       else
         items = (
           await this.listUsers(
             actor,
-            "",
+            search,
             type === "dormant" ? "ACTIVE" : "",
             1,
             correlationId,
@@ -3013,12 +3092,12 @@ export class AccessService {
         items,
         total: items.length,
         asOf: new Date().toISOString(),
-        filters: {},
+        filters: { search: search.trim() },
       };
     });
   }
 
-  async alerts(actor: SessionActor, correlationId: string) {
+  async alerts(actor: SessionActor, correlationId: string, search = "") {
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.authorizeRoot(
@@ -3029,8 +3108,12 @@ export class AccessService {
         correlationId,
       );
       const items = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT id,alert_type AS "type",severity,state,occurrence_count AS "occurrenceCount",first_seen_at AS "firstSeenAt",last_seen_at AS "lastSeenAt",version FROM app.security_alerts WHERE tenant_id=$1::uuid ORDER BY last_seen_at DESC`,
+        `SELECT a.id,coalesce(m.invited_name,'System') AS actor,a.alert_type AS "type",a.severity,a.state,a.occurrence_count AS "occurrenceCount",a.first_seen_at AS "firstSeenAt",a.last_seen_at AS "lastSeenAt",a.resolution_reason AS "resolutionReason",a.version
+         FROM app.security_alerts a LEFT JOIN app.tenant_memberships m ON m.tenant_id=a.tenant_id AND m.id=a.membership_id
+         WHERE a.tenant_id=$1::uuid AND ($2='' OR position(lower($2) in lower(concat_ws(' ',m.invited_name,a.alert_type,a.severity,a.state,a.resolution_reason)))>0)
+         ORDER BY a.last_seen_at DESC,a.id DESC`,
         tenantId,
+        search.trim(),
       );
       return { items, total: items.length, asOf: new Date().toISOString() };
     });
@@ -3086,8 +3169,13 @@ export class AccessService {
     });
   }
 
-  async reportExport(actor: SessionActor, type: string, correlationId: string) {
-    const report = await this.reports(actor, type, correlationId);
+  async reportExport(
+    actor: SessionActor,
+    type: string,
+    correlationId: string,
+    search = "",
+  ) {
+    const report = await this.reports(actor, type, correlationId, search);
     const columns = [
       ...new Set(report.items.flatMap((item) => Object.keys(item))),
     ];

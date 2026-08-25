@@ -342,8 +342,77 @@ describe.sequential(
       const plaintext = inviteUrl.split("token=")[1]!;
       expect(stored[0]?.token_hash).not.toContain(plaintext);
       expect(stored[0]?.response_json).not.toHaveProperty("invitationUrl");
+      const pendingDetail = (await access.userDetail(
+        owner,
+        regionalMembership,
+        "fnd02-activation-detail",
+      )) as Record<string, unknown>;
+      const rotationKeys = [
+        "fnd02-activation-rotate-a",
+        "fnd02-activation-rotate-b",
+      ];
+      const rotations = await Promise.allSettled(
+        rotationKeys.map((rotationKey, index) =>
+          access.resendInvitation(
+            owner,
+            regionalMembership,
+            Number(pendingDetail.version),
+            "Administrator generated a replacement activation link",
+            rotationKey,
+            `fnd02-activation-rotate-request-${index}`,
+          ),
+        ),
+      );
+      const winners = rotations
+        .map((result, index) => ({ result, index }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            result: PromiseFulfilledResult<
+              Awaited<ReturnType<typeof access.resendInvitation>>
+            >;
+            index: number;
+          } => entry.result.status === "fulfilled",
+        );
+      const losers = rotations.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      expect(losers[0]?.reason).toMatchObject({ code: "VERSION_CONFLICT" });
+      const rotated = winners[0]!.result.value;
+      expect(rotated.version).toBe(Number(pendingDetail.version) + 1);
+      expect(rotated.invitationUrl).toContain("/accept-access?token=");
+      await expect(access.invitationPreview(plaintext)).rejects.toMatchObject({
+        code: "INVITATION_INVALID",
+      });
+      const rotationReplay = await access.resendInvitation(
+        owner,
+        regionalMembership,
+        Number(pendingDetail.version),
+        "Administrator generated a replacement activation link",
+        rotationKeys[winners[0]!.index]!,
+        "fnd02-activation-rotate-replay",
+      );
+      expect(rotationReplay.replayed).toBe(true);
+      expect(rotationReplay.invitationUrl).toBeUndefined();
+      await expect(
+        access.resendInvitation(
+          owner,
+          regionalMembership,
+          Number(pendingDetail.version),
+          "Administrator generated a stale replacement activation link",
+          "fnd02-activation-rotate-stale",
+          "fnd02-activation-rotate-stale-request",
+        ),
+      ).rejects.toMatchObject({ code: "VERSION_CONFLICT" });
+      const currentPlaintext = String(rotated.invitationUrl).split(
+        "token=",
+      )[1]!;
       const accepted = await access.acceptInvitation(
-        plaintext,
+        currentPlaintext,
         { displayName: "Regional User", password: "RegionalPass!234" },
         "fnd02-regional-accept",
       );
@@ -351,7 +420,7 @@ describe.sequential(
       regional = await app.session(regionalToken);
       await expect(
         access.acceptInvitation(
-          plaintext,
+          currentPlaintext,
           { displayName: "Regional User", password: "RegionalPass!234" },
           "fnd02-regional-replay",
         ),
@@ -1500,6 +1569,25 @@ describe.sequential(
         "fnd02-report-changes",
       );
       expect(Array.isArray(changes.items)).toBe(true);
+      const auditSearch = await access.reports(
+        owner,
+        "audit-log",
+        "fnd02-report-audit-search",
+        "replacement activation",
+      );
+      expect(auditSearch.items.length).toBeGreaterThan(0);
+      expect(
+        auditSearch.items.every((row) =>
+          [row.action, row.targetType, row.reason, row.correlationId]
+            .map(String)
+            .join(" ")
+            .toLowerCase()
+            .includes("replacement activation"),
+        ),
+      ).toBe(true);
+      await expect(
+        access.reports(owner, "raw-json", "fnd02-report-unknown"),
+      ).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
       const alerts = await access.alerts(owner, "fnd02-report-alerts");
       const canonicalAlerts = await withTenant(app.db, tenantA, (tx) =>
         tx.$queryRawUnsafe<Array<{ count: number }>>(

@@ -112,11 +112,8 @@ export function Shell({
           {area === "tenant" && effective?.navigation.roles && (
             <Link href="/app/access/roles">Roles</Link>
           )}
-          {area === "tenant" && effective?.navigation.probes && (
-            <Link href="/app/access/probes">Access proof</Link>
-          )}
           {area === "tenant" && effective?.navigation.reports && (
-            <Link href="/app/access/reports">Security</Link>
+            <Link href="/app/access/reports">Activity &amp; audit</Link>
           )}
           {area === "tenant" && effective && (
             <>

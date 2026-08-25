@@ -703,6 +703,219 @@ test("E2E-FND02-06: reports and alerts reconcile access evidence on accessible d
   await owner.context.close();
 });
 
+test("E2E-FND02-07: structured user administration and pending activation link copy", async ({
+  browser,
+  page,
+}, testInfo) => {
+  const fixture = await seedFnd02(page, testInfo, "ACCESS_MATRIX");
+  const owner = await actorPage(browser, fixture.actors.owner);
+  await owner.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await owner.page.goto("/app/access/users");
+
+  const regionalCard = owner.page
+    .locator("article.access-card")
+    .filter({ hasText: "FX-REGIONAL" });
+  await regionalCard.getByRole("button", { name: "View details" }).click();
+  const details = owner.page.getByRole("dialog");
+  await expect(details.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await expect(
+    details.getByText("Employee code", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    details.locator('[aria-label="Role and scope assignments"] table'),
+  ).toBeVisible();
+  await expect(details.locator("pre")).toHaveCount(0);
+  await details.getByRole("button", { name: "Close user details" }).click();
+
+  await regionalCard.getByRole("button", { name: "Suspend" }).click();
+  await expect(
+    owner.page
+      .locator("article.access-card")
+      .filter({ hasText: "FX-REGIONAL" })
+      .getByText("SUSPENDED", { exact: true }),
+  ).toBeVisible();
+  await owner.page
+    .locator("article.access-card")
+    .filter({ hasText: "FX-REGIONAL" })
+    .getByRole("button", { name: "Reactivate" })
+    .click();
+  await expect(
+    owner.page
+      .locator("article.access-card")
+      .filter({ hasText: "FX-REGIONAL" })
+      .getByText("ACTIVE", { exact: true }),
+  ).toBeVisible();
+
+  const suffix = fixture.namespace.slice(-8).toLowerCase();
+  const invited = await inviteThroughUi(owner.page, {
+    displayName: `Pending ${suffix}`,
+    employeeCode: `PN-${suffix}`.toUpperCase(),
+    email: `pending-${suffix}@test.local`,
+    portalAudience: "INTERNAL",
+    roleName: "Regional Manager",
+    scopePath: "North",
+    actions: ["READ"],
+  });
+  expect(invited.response.status(), await invited.response.text()).toBe(201);
+
+  const pendingCard = owner.page
+    .locator("article.access-card")
+    .filter({ hasText: `PN-${suffix}`.toUpperCase() });
+  await pendingCard.getByRole("button", { name: "View details" }).click();
+  const pendingDetails = owner.page.getByRole("dialog");
+  await expect(
+    pendingDetails.getByRole("heading", { name: "Pending activation" }),
+  ).toBeVisible();
+  const rotateResponse = owner.page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response
+        .url()
+        .endsWith(
+          `/api/v1/tenant/access/users/${invited.body.membershipId}/invitations/resend`,
+        ),
+  );
+  await pendingDetails
+    .getByRole("button", { name: "Generate new activation link" })
+    .click();
+  expect((await rotateResponse).status()).toBe(200);
+  const link = pendingDetails.getByLabel("New activation link");
+  await expect(link).toHaveValue(
+    /^http:\/\/127\.0\.0\.1:3000\/accept-access\?token=/,
+  );
+  expect(await link.inputValue()).not.toBe(invited.body.invitationUrl);
+  await pendingDetails
+    .getByRole("button", { name: "Copy activation link" })
+    .click();
+  await expect(pendingDetails.getByRole("status")).toHaveText(
+    "Activation link copied.",
+  );
+  expect(await owner.page.evaluate(() => navigator.clipboard.readText())).toBe(
+    await link.inputValue(),
+  );
+
+  await owner.context.close();
+});
+
+test("E2E-FND02-08: permission tester explains authorization and does not mutate records", async ({
+  browser,
+  page,
+}, testInfo) => {
+  const fixture = await seedFnd02(page, testInfo, "ACCESS_MATRIX");
+  const owner = await actorPage(browser, fixture.actors.owner);
+  const before = await accessApi(owner.page, "/probes");
+  expect(before.status(), await before.text()).toBe(200);
+  const beforeBody = await body(before);
+
+  await owner.page.goto("/app/access/probes");
+  await expect(
+    owner.page.getByRole("heading", { name: "Permission tester" }),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByText(/administrators and support/i),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByText(/makes no business transaction/i),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByRole("heading", { name: "How to use this diagnostic" }),
+  ).toBeVisible();
+
+  const north = requiredResource(fixture, "north");
+  const northCard = owner.page
+    .locator("article.access-card")
+    .filter({ hasText: north.label });
+  await northCard.getByRole("button", { name: "Test read permission" }).click();
+  const decision = owner.page.getByRole("status").filter({
+    has: owner.page.getByRole("heading", { name: "Permission decision" }),
+  });
+  await expect(decision.getByText("Allowed", { exact: true })).toBeVisible();
+  await expect(decision.locator("pre")).toHaveCount(0);
+
+  const after = await accessApi(owner.page, "/probes");
+  expect(after.status(), await after.text()).toBe(200);
+  const afterBody = await body(after);
+  expect(afterBody.total).toBe(beforeBody.total);
+  expect(afterBody.items).toEqual(beforeBody.items);
+  await owner.context.close();
+});
+
+test("E2E-FND02-09: searchable activity and audit tables are separate from actionable alerts", async ({
+  browser,
+  page,
+}, testInfo) => {
+  const fixture = await seedFnd02(page, testInfo, "REPORTS");
+  const owner = await actorPage(browser, fixture.actors.owner);
+  await owner.page.goto("/app/access/reports");
+  await expect(
+    owner.page.getByRole("heading", { name: "Activity & audit" }),
+  ).toBeVisible();
+  await expect(owner.page.getByText(/immutable audit evidence/i)).toBeVisible();
+  const alertsPanel = owner.page.locator("section.panel").filter({
+    has: owner.page.getByRole("heading", { name: "Security alerts" }),
+  });
+  await expect(
+    alertsPanel.getByText(/separate from the immutable audit log/i),
+  ).toBeVisible();
+
+  const auditLoaded = owner.page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("/api/v1/tenant/access/reports/audit-log"),
+  );
+  await owner.page.getByLabel("Evidence view").selectOption("audit-log");
+  expect((await auditLoaded).status()).toBe(200);
+  const auditTable = owner.page.locator(
+    '[aria-label="Audit Log results"] table',
+  );
+  await expect(auditTable).toBeVisible();
+  await expect(
+    auditTable.getByRole("columnheader", { name: "Actor" }),
+  ).toBeVisible();
+  await expect(
+    auditTable.getByRole("columnheader", { name: "Action" }),
+  ).toBeVisible();
+
+  const apiAudit = await accessApi(owner.page, "/reports/audit-log");
+  expect(apiAudit.status(), await apiAudit.text()).toBe(200);
+  const auditBody = await body(apiAudit);
+  const firstItem = (auditBody.items as Array<Record<string, unknown>>)[0];
+  const searchTerm = String(
+    firstItem?.action ?? firstItem?.actor ?? "identity",
+  );
+  await owner.page.getByLabel("Search").fill(searchTerm);
+  await expect(owner.page.getByText("Loading report…")).toHaveCount(0);
+  const filtered = await accessApi(
+    owner.page,
+    `/reports/audit-log?search=${encodeURIComponent(searchTerm)}`,
+  );
+  expect(filtered.status(), await filtered.text()).toBe(200);
+  const filteredBody = await body(filtered);
+  await expect(auditTable.getByRole("row")).toHaveCount(
+    Number(filteredBody.total) + 1,
+  );
+  await expect(owner.page.locator("main pre")).toHaveCount(0);
+
+  await owner.page.getByLabel("Search").fill("");
+  await expect(owner.page.getByText("Loading report…")).toHaveCount(0);
+  const alert = alertsPanel.locator("article.access-card").first();
+  await expect(alert).toBeVisible();
+  if (await alert.getByRole("button", { name: "Acknowledge" }).isVisible()) {
+    await alert.getByRole("button", { name: "Acknowledge" }).click();
+    await expect(alert.getByText(/Acknowledged/i)).toBeVisible();
+  }
+  await alert.getByRole("button", { name: "Resolve" }).click();
+  await expect(alert.getByText(/Resolved/i)).toBeVisible();
+  await expect(
+    alert.getByRole("button", { name: /Acknowledge|Resolve/ }),
+  ).toHaveCount(0);
+
+  expect(
+    Number((await body(await accessApi(owner.page, "/alerts"))).total),
+  ).toBe(fixture.expected.alerts);
+  await owner.context.close();
+});
+
 test("FND02-X-001: access screens expose keyboard focus, names, errors, dialogs, and status semantics", async ({
   browser,
   page,

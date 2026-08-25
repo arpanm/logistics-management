@@ -33,6 +33,51 @@ type User = {
   activeSessions: number;
   version: number;
 };
+type AccessGrant = { scopeNodeId: string; actions: string[] };
+type AccessAssignment = {
+  assignmentId?: string;
+  roleId: string;
+  roleName?: string;
+  grants: AccessGrant[];
+};
+type UserDetail = {
+  id: string;
+  employeeCode: string;
+  displayName: string;
+  status: string;
+  portalAudience: string;
+  authorizationVersion: number;
+  version: number;
+  email?: string | null;
+  mobile?: string | null;
+  assignments: AccessAssignment[];
+};
+type AccessPreview = {
+  fingerprint: string;
+  authorizationVersion: number;
+  decisions: Array<{
+    capability: string;
+    action: string;
+    scopeNodeId: string;
+    allowed: boolean;
+    reason: string;
+    role?: string;
+  }>;
+};
+
+const words = (value: unknown) =>
+  String(value ?? "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_.-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+const displayValue = (value: unknown) => {
+  if (value === null || value === undefined || value === "")
+    return "Not available";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value))
+    return new Date(value).toLocaleString();
+  return words(value);
+};
 
 const newKey = () => crypto.randomUUID();
 function useRequestKey(body: unknown) {
@@ -46,12 +91,28 @@ function useRequestKey(body: unknown) {
 export function UsersPage() {
   const [users, setUsers] = useState<User[]>([]),
     [roles, setRoles] = useState<Role[]>([]),
-    [scopes, setScopes] = useState<Scope[]>([]);
+    [scopes, setScopes] = useState<Scope[]>([]),
+    [availableActions, setAvailableActions] = useState({
+      canReadTenantRoles: false,
+      canAdminTenantUsers: false,
+      canResetTenantSessions: false,
+      canResetMfa: false,
+    }),
+    [supportNotice, setSupportNotice] = useState("");
   const [loading, setLoading] = useState(true),
     [error, setError] = useState<ApiError | null>(null),
     [success, setSuccess] = useState(""),
-    [detail, setDetail] = useState<Record<string, unknown> | null>(null),
-    [preview, setPreview] = useState<Record<string, unknown> | null>(null);
+    [detail, setDetail] = useState<UserDetail | null>(null),
+    [preview, setPreview] = useState<AccessPreview | null>(null),
+    [activationLink, setActivationLink] = useState(""),
+    [activationReason, setActivationReason] = useState(
+      "User needs a new activation link",
+    ),
+    [copyStatus, setCopyStatus] = useState(""),
+    [activationPending, setActivationPending] = useState(false),
+    [accessReason, setAccessReason] = useState(
+      "Access updated after administrator review",
+    );
   const [form, setForm] = useState({
     displayName: "",
     employeeCode: "",
@@ -64,18 +125,59 @@ export function UsersPage() {
   });
   const key = useRequestKey(form),
     errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!activationLink) return;
+    const timer = window.setTimeout(
+      () => {
+        setActivationLink("");
+        setCopyStatus("Activation link cleared for security.");
+      },
+      5 * 60 * 1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [activationLink]);
+  function closeUser() {
+    setActivationLink("");
+    setCopyStatus("");
+    setPreview(null);
+    setDetail(null);
+  }
   async function load(signal?: AbortSignal) {
     setLoading(true);
     setError(null);
     try {
-      const [directory, roleData, scopeData] = await Promise.all([
+      const [directory, effective] = await Promise.all([
         api<{ items: User[] }>("/tenant/access/users", { signal }),
-        api<Role[]>("/tenant/access/roles", { signal }),
-        api<Scope[]>("/tenant/access/scopes", { signal }),
+        api<{
+          capabilities: string[];
+          actions: typeof availableActions;
+        }>("/tenant/access/effective", { signal }),
       ]);
+      const mayLoadAdminReferences =
+        effective.actions.canReadTenantRoles &&
+        effective.actions.canAdminTenantUsers;
+      const [roleResult, scopeResult] = mayLoadAdminReferences
+        ? await Promise.allSettled([
+            api<Role[]>("/tenant/access/roles", { signal }),
+            api<Scope[]>("/tenant/access/scopes", { signal }),
+          ])
+        : [
+            { status: "fulfilled", value: [] as Role[] } as const,
+            { status: "fulfilled", value: [] as Scope[] } as const,
+          ];
+      const roleData =
+        roleResult.status === "fulfilled" ? roleResult.value : [];
+      const scopeData =
+        scopeResult.status === "fulfilled" ? scopeResult.value : [];
       setUsers(directory.items);
       setRoles(roleData);
       setScopes(scopeData);
+      setAvailableActions(effective.actions);
+      setSupportNotice(
+        roleResult.status === "rejected" || scopeResult.status === "rejected"
+          ? "The directory is available, but role or scope administration is not permitted for this account."
+          : "",
+      );
       setForm((value) => ({
         ...value,
         roleId:
@@ -100,6 +202,10 @@ export function UsersPage() {
   useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
+  const canAdminUsers = availableActions.canAdminTenantUsers;
+  const canResetSessions = availableActions.canResetTenantSessions;
+  const canResetMfa = availableActions.canResetMfa;
+  const canEditAccess = canAdminUsers && roles.length > 0 && scopes.length > 0;
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -131,7 +237,7 @@ export function UsersPage() {
       );
       setSuccess(
         result.invitationUrl
-          ? `Invitation created. Local acceptance link: ${result.invitationUrl}`
+          ? "Invitation created. Open the pending user to generate and copy an activation link."
           : "Invitation created and queued for delivery.",
       );
       setForm((value) => ({
@@ -148,8 +254,10 @@ export function UsersPage() {
   }
   async function openUser(user: User) {
     try {
-      setDetail(await api(`/tenant/access/users/${user.id}`));
+      setDetail(await api<UserDetail>(`/tenant/access/users/${user.id}`));
       setPreview(null);
+      setActivationLink("");
+      setCopyStatus("");
     } catch (value) {
       setError(value as ApiError);
     }
@@ -177,7 +285,7 @@ export function UsersPage() {
     if (!detail) return;
     try {
       setPreview(
-        await api(`/tenant/access/users/${String(detail.id)}/preview`, {
+        await api<AccessPreview>(`/tenant/access/users/${detail.id}/preview`, {
           method: "POST",
           body: JSON.stringify({
             expectedVersion: Number(detail.version),
@@ -187,6 +295,80 @@ export function UsersPage() {
       );
     } catch (value) {
       setError(value as ApiError);
+    }
+  }
+  async function applyCurrentAccess() {
+    if (!detail || !preview) return;
+    try {
+      await api(`/tenant/access/users/${detail.id}`, {
+        method: "PATCH",
+        headers: { "Idempotency-Key": newKey() },
+        body: JSON.stringify({
+          expectedVersion: detail.version,
+          assignments: detail.assignments,
+          reason: accessReason,
+          previewFingerprint: preview.fingerprint,
+        }),
+      });
+      setSuccess("The reviewed access configuration was applied.");
+      setDetail(await api<UserDetail>(`/tenant/access/users/${detail.id}`));
+      setPreview(null);
+      await load();
+    } catch (value) {
+      setError(value as ApiError);
+    }
+  }
+  async function invitationAction(action: "resend" | "revoke") {
+    if (!detail) return;
+    setActivationPending(true);
+    try {
+      const result = await api<{ invitationUrl?: string; version?: number }>(
+        `/tenant/access/users/${detail.id}/invitations/${action}`,
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": newKey() },
+          body: JSON.stringify({
+            expectedVersion: detail.version,
+            reason: activationReason,
+          }),
+        },
+      );
+      if (action === "resend") {
+        setActivationLink(result.invitationUrl ?? "");
+        if (result.version)
+          setDetail((current) =>
+            current ? { ...current, version: result.version! } : current,
+          );
+        setCopyStatus("");
+        setSuccess(
+          "A new activation link was generated. Every older link is now invalid.",
+        );
+      } else {
+        setActivationLink("");
+        setSuccess("The pending invitation was revoked.");
+        setDetail(null);
+      }
+      await load();
+    } catch (value) {
+      setError(value as ApiError);
+    } finally {
+      setActivationPending(false);
+    }
+  }
+  async function copyActivationLink() {
+    if (!activationLink) return;
+    try {
+      await navigator.clipboard.writeText(activationLink);
+      setCopyStatus("Activation link copied.");
+    } catch {
+      const input = document.getElementById(
+        "activation-link",
+      ) as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+      setCopyStatus(
+        "Copy was blocked. The link is selected; press Control+C or Command+C.",
+      );
     }
   }
   return (
@@ -214,126 +396,136 @@ export function UsersPage() {
           {success}
         </p>
       )}
-      <section className="panel" aria-labelledby="invite-heading">
-        <h2 id="invite-heading">Invite user</h2>
-        <form
-          className="access-form"
-          noValidate
-          onSubmit={(e) => void submit(e)}
-        >
-          <label>
-            Display name
-            <input
-              required
-              minLength={2}
-              value={form.displayName}
-              onChange={(e) =>
-                setForm({ ...form, displayName: e.target.value })
-              }
-            />
-          </label>
-          <label>
-            Employee code
-            <input
-              required
-              pattern="[A-Z0-9-]{2,30}"
-              value={form.employeeCode}
-              onChange={(e) =>
-                setForm({ ...form, employeeCode: e.target.value.toUpperCase() })
-              }
-            />
-          </label>
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-            />
-          </label>
-          <label>
-            Mobile (E.164)
-            <input
-              autoComplete="tel"
-              placeholder="+919876543210"
-              value={form.mobile}
-              onChange={(e) => setForm({ ...form, mobile: e.target.value })}
-            />
-          </label>
-          <label>
-            Portal audience
-            <select
-              value={form.portalAudience}
-              onChange={(e) =>
-                setForm({ ...form, portalAudience: e.target.value })
-              }
-            >
-              <option>INTERNAL</option>
-              <option>VENDOR</option>
-              <option>DRIVER</option>
-              <option>CLIENT</option>
-            </select>
-          </label>
-          <label>
-            Role
-            <select
-              required
-              value={form.roleId}
-              onChange={(e) => setForm({ ...form, roleId: e.target.value })}
-            >
-              {roles
-                .filter((r) => r.status === "ACTIVE")
-                .map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.name}
+      {supportNotice && (
+        <p className="notice" role="status">
+          {supportNotice}
+        </p>
+      )}
+      {canEditAccess && (
+        <section className="panel" aria-labelledby="invite-heading">
+          <h2 id="invite-heading">Invite user</h2>
+          <form
+            className="access-form"
+            noValidate
+            onSubmit={(e) => void submit(e)}
+          >
+            <label>
+              Display name
+              <input
+                required
+                minLength={2}
+                value={form.displayName}
+                onChange={(e) =>
+                  setForm({ ...form, displayName: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Employee code
+              <input
+                required
+                pattern="[A-Z0-9-]{2,30}"
+                value={form.employeeCode}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    employeeCode: e.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                autoComplete="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </label>
+            <label>
+              Mobile (E.164)
+              <input
+                autoComplete="tel"
+                placeholder="+919876543210"
+                value={form.mobile}
+                onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+              />
+            </label>
+            <label>
+              Portal audience
+              <select
+                value={form.portalAudience}
+                onChange={(e) =>
+                  setForm({ ...form, portalAudience: e.target.value })
+                }
+              >
+                <option>INTERNAL</option>
+                <option>VENDOR</option>
+                <option>DRIVER</option>
+                <option>CLIENT</option>
+              </select>
+            </label>
+            <label>
+              Role
+              <select
+                required
+                value={form.roleId}
+                onChange={(e) => setForm({ ...form, roleId: e.target.value })}
+              >
+                {roles
+                  .filter((r) => r.status === "ACTIVE")
+                  .map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Scope
+              <select
+                required
+                value={form.scopeNodeId}
+                onChange={(e) =>
+                  setForm({ ...form, scopeNodeId: e.target.value })
+                }
+              >
+                {scopes.map((scope) => (
+                  <option key={scope.id} value={scope.id}>
+                    {scope.path}
                   </option>
                 ))}
-            </select>
-          </label>
-          <label>
-            Scope
-            <select
-              required
-              value={form.scopeNodeId}
-              onChange={(e) =>
-                setForm({ ...form, scopeNodeId: e.target.value })
-              }
-            >
-              {scopes.map((scope) => (
-                <option key={scope.id} value={scope.id}>
-                  {scope.path}
-                </option>
-              ))}
-            </select>
-          </label>
-          <fieldset>
-            <legend>Actions</legend>
-            {["READ", "CREATE", "UPDATE", "APPROVE", "EXPORT", "ADMIN"].map(
-              (action) => (
-                <label className="check" key={action}>
-                  <input
-                    type="checkbox"
-                    checked={form.actions.includes(action)}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        actions: e.target.checked
-                          ? [...form.actions, action]
-                          : form.actions.filter((a) => a !== action),
-                      })
-                    }
-                  />
-                  {action}
-                </label>
-              ),
-            )}
-          </fieldset>
-          <button className="primary" type="submit">
-            Review and send invitation
-          </button>
-        </form>
-      </section>
+              </select>
+            </label>
+            <fieldset>
+              <legend>Actions</legend>
+              {["READ", "CREATE", "UPDATE", "APPROVE", "EXPORT", "ADMIN"].map(
+                (action) => (
+                  <label className="check" key={action}>
+                    <input
+                      type="checkbox"
+                      checked={form.actions.includes(action)}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          actions: e.target.checked
+                            ? [...form.actions, action]
+                            : form.actions.filter((a) => a !== action),
+                        })
+                      }
+                    />
+                    {action}
+                  </label>
+                ),
+              )}
+            </fieldset>
+            <button className="primary" type="submit">
+              Review and send invitation
+            </button>
+          </form>
+        </section>
+      )}
       <section className="panel" aria-busy={loading}>
         <div className="panel-title">
           <h2>Users</h2>
@@ -371,29 +563,37 @@ export function UsersPage() {
                   <button type="button" onClick={() => void openUser(user)}>
                     View details
                   </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void userAction(
-                        user,
-                        user.status === "SUSPENDED" ? "reactivate" : "suspend",
-                      )
-                    }
-                  >
-                    {user.status === "SUSPENDED" ? "Reactivate" : "Suspend"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void userAction(user, "sessions/reset")}
-                  >
-                    Reset sessions
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void userAction(user, "mfa/reset")}
-                  >
-                    Reset MFA
-                  </button>
+                  {canAdminUsers && user.status !== "INVITED" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void userAction(
+                          user,
+                          user.status === "SUSPENDED"
+                            ? "reactivate"
+                            : "suspend",
+                        )
+                      }
+                    >
+                      {user.status === "SUSPENDED" ? "Reactivate" : "Suspend"}
+                    </button>
+                  )}
+                  {canResetSessions && (
+                    <button
+                      type="button"
+                      onClick={() => void userAction(user, "sessions/reset")}
+                    >
+                      Reset sessions
+                    </button>
+                  )}
+                  {canResetMfa && (
+                    <button
+                      type="button"
+                      onClick={() => void userAction(user, "mfa/reset")}
+                    >
+                      Reset MFA
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
@@ -408,26 +608,346 @@ export function UsersPage() {
           aria-labelledby="user-detail-title"
         >
           <div className="panel-title">
-            <h2 id="user-detail-title">User access details</h2>
+            <div>
+              <h2 id="user-detail-title">User access details</h2>
+              <h3>{detail.displayName}</h3>
+              <p className="muted">
+                Identity, account state, roles, scopes and sessions.
+              </p>
+            </div>
             <button
               type="button"
-              onClick={() => setDetail(null)}
+              onClick={closeUser}
               aria-label="Close user details"
             >
               Close
             </button>
           </div>
-          <pre className="safe-json">{JSON.stringify(detail, null, 2)}</pre>
-          <button type="button" onClick={() => void previewCurrentAccess()}>
-            Preview current access
-          </button>
+          <h3>Profile</h3>
+          <dl className="details-grid">
+            <div>
+              <dt>Employee code</dt>
+              <dd>{detail.employeeCode}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>{words(detail.status)}</dd>
+            </div>
+            <div>
+              <dt>Portal audience</dt>
+              <dd>{words(detail.portalAudience)}</dd>
+            </div>
+            <div>
+              <dt>Email</dt>
+              <dd>{detail.email || "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Mobile</dt>
+              <dd>{detail.mobile || "Not provided"}</dd>
+            </div>
+            <div>
+              <dt>Access version</dt>
+              <dd>{detail.authorizationVersion}</dd>
+            </div>
+          </dl>
+
+          <h3>Role and scope assignments</h3>
+          {detail.assignments.length === 0 ? (
+            <p className="empty">No active role assignments.</p>
+          ) : (
+            <div
+              className="table-region"
+              tabIndex={0}
+              aria-label="Role and scope assignments"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>Scope</th>
+                    <th>Allowed actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.assignments.flatMap((assignment) =>
+                    assignment.grants.map((grant) => (
+                      <tr
+                        key={`${assignment.assignmentId ?? assignment.roleId}-${grant.scopeNodeId}`}
+                      >
+                        <td>
+                          {assignment.roleName ??
+                            roles.find((role) => role.id === assignment.roleId)
+                              ?.name ??
+                            "Role"}
+                        </td>
+                        <td>
+                          {scopes.find(
+                            (scope) => scope.id === grant.scopeNodeId,
+                          )?.path ?? "Assigned scope"}
+                        </td>
+                        <td>{grant.actions.map(words).join(", ")}</td>
+                      </tr>
+                    )),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {canEditAccess && (
+            <details>
+              <summary>Edit role and scope assignments</summary>
+              <p className="muted">
+                Change the current assignments below, preview their effective
+                permissions, then apply the reviewed configuration.
+              </p>
+              {detail.assignments.map((assignment, assignmentIndex) => (
+                <fieldset
+                  key={assignment.assignmentId ?? assignmentIndex}
+                  className="access-form"
+                >
+                  <legend>Assignment {assignmentIndex + 1}</legend>
+                  <label>
+                    Role
+                    <select
+                      value={assignment.roleId}
+                      onChange={(event) => {
+                        const assignments = [...detail.assignments];
+                        assignments[assignmentIndex] = {
+                          ...assignment,
+                          roleId: event.target.value,
+                          roleName: roles.find(
+                            (role) => role.id === event.target.value,
+                          )?.name,
+                        };
+                        setDetail({ ...detail, assignments });
+                        setPreview(null);
+                      }}
+                    >
+                      {roles
+                        .filter((role) => role.status === "ACTIVE")
+                        .map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {assignment.grants.map((grant, grantIndex) => (
+                    <div key={`${grant.scopeNodeId}-${grantIndex}`}>
+                      <label>
+                        Scope
+                        <select
+                          value={grant.scopeNodeId}
+                          onChange={(event) => {
+                            const assignments = [...detail.assignments];
+                            const grants = [...assignment.grants];
+                            grants[grantIndex] = {
+                              ...grant,
+                              scopeNodeId: event.target.value,
+                            };
+                            assignments[assignmentIndex] = {
+                              ...assignment,
+                              grants,
+                            };
+                            setDetail({ ...detail, assignments });
+                            setPreview(null);
+                          }}
+                        >
+                          {scopes.map((scope) => (
+                            <option key={scope.id} value={scope.id}>
+                              {scope.path}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <fieldset>
+                        <legend>Allowed actions</legend>
+                        {[
+                          "READ",
+                          "CREATE",
+                          "UPDATE",
+                          "APPROVE",
+                          "EXPORT",
+                          "ADMIN",
+                        ].map((action) => (
+                          <label className="check" key={action}>
+                            <input
+                              type="checkbox"
+                              checked={grant.actions.includes(action)}
+                              onChange={(event) => {
+                                const assignments = [...detail.assignments];
+                                const grants = [...assignment.grants];
+                                grants[grantIndex] = {
+                                  ...grant,
+                                  actions: event.target.checked
+                                    ? [...grant.actions, action]
+                                    : grant.actions.filter(
+                                        (item) => item !== action,
+                                      ),
+                                };
+                                assignments[assignmentIndex] = {
+                                  ...assignment,
+                                  grants,
+                                };
+                                setDetail({ ...detail, assignments });
+                                setPreview(null);
+                              }}
+                            />
+                            {words(action)}
+                          </label>
+                        ))}
+                      </fieldset>
+                    </div>
+                  ))}
+                </fieldset>
+              ))}
+              <label>
+                Reason for access change
+                <input
+                  minLength={10}
+                  value={accessReason}
+                  onChange={(event) => setAccessReason(event.target.value)}
+                />
+              </label>
+              <div className="actions">
+                <button
+                  type="button"
+                  aria-label="Preview current access"
+                  onClick={() => void previewCurrentAccess()}
+                >
+                  Preview effective access
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!preview || accessReason.trim().length < 10}
+                  onClick={() => void applyCurrentAccess()}
+                >
+                  Apply reviewed access
+                </button>
+              </div>
+            </details>
+          )}
           {preview && (
             <>
-              <h3>Authorization preview</h3>
-              <pre className="safe-json">
-                {JSON.stringify(preview, null, 2)}
-              </pre>
+              <h3 aria-label="Authorization preview">
+                Effective access preview
+              </h3>
+              <p>
+                {
+                  preview.decisions.filter((decision) => decision.allowed)
+                    .length
+                }{" "}
+                allowed decisions and{" "}
+                {
+                  preview.decisions.filter((decision) => !decision.allowed)
+                    .length
+                }{" "}
+                denied decisions.
+              </p>
+              <div
+                className="table-region"
+                tabIndex={0}
+                aria-label="Effective access preview"
+              >
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Result</th>
+                      <th>Role</th>
+                      <th>Capability</th>
+                      <th>Action</th>
+                      <th>Scope</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.decisions.map((decision, index) => (
+                      <tr
+                        key={`${decision.capability}-${decision.scopeNodeId}-${index}`}
+                      >
+                        <td>{decision.allowed ? "Allowed" : "Denied"}</td>
+                        <td>{decision.role ?? "—"}</td>
+                        <td>{words(decision.capability)}</td>
+                        <td>{words(decision.action)}</td>
+                        <td>
+                          {scopes.find(
+                            (scope) => scope.id === decision.scopeNodeId,
+                          )?.path ?? "Assigned scope"}
+                        </td>
+                        <td>{words(decision.reason)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
+          )}
+          {canAdminUsers && detail.status === "INVITED" && (
+            <section aria-labelledby="activation-heading">
+              <h3 id="activation-heading">Pending activation</h3>
+              <p className="muted">
+                Generate a replacement link when delivery failed. Generating it
+                invalidates every older link. The new bearer link is shown only
+                now and cannot be retrieved later.
+              </p>
+              <label>
+                Reason
+                <input
+                  minLength={10}
+                  value={activationReason}
+                  onChange={(event) => setActivationReason(event.target.value)}
+                />
+              </label>
+              <div className="actions">
+                <button
+                  type="button"
+                  disabled={
+                    activationPending || activationReason.trim().length < 10
+                  }
+                  onClick={() => void invitationAction("resend")}
+                >
+                  Generate new activation link
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    activationPending || activationReason.trim().length < 10
+                  }
+                  onClick={() => void invitationAction("revoke")}
+                >
+                  Revoke invitation
+                </button>
+              </div>
+              {activationLink && (
+                <div>
+                  <label htmlFor="activation-link">New activation link</label>
+                  <input
+                    id="activation-link"
+                    readOnly
+                    value={activationLink}
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void copyActivationLink()}
+                  >
+                    Copy activation link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivationLink("");
+                      setCopyStatus("Activation link cleared.");
+                    }}
+                  >
+                    Done
+                  </button>
+                  <p role="status">{copyStatus}</p>
+                </div>
+              )}
+            </section>
           )}
         </section>
       )}
@@ -516,18 +1036,13 @@ export function ProbesPage({
       total: number;
     } | null>(null),
     [error, setError] = useState<ApiError | null>(null);
-  const [scopes, setScopes] = useState<Scope[]>([]),
-    [users, setUsers] = useState<User[]>([]),
-    [createLabel, setCreateLabel] = useState(""),
-    [scopeId, setScopeId] = useState(""),
-    [driverId, setDriverId] = useState(""),
-    [operationResult, setOperationResult] = useState<Record<
-      string,
-      unknown
-    > | null>(null);
+  const [operationResult, setOperationResult] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const title = audience
     ? `${audience[0]!.toUpperCase()}${audience.slice(1)} portal`
-    : "Access proof";
+    : "Permission tester";
   useEffect(() => {
     const c = new AbortController();
     api<{ items: Array<Record<string, unknown>>; total: number }>(
@@ -540,23 +1055,6 @@ export function ProbesPage({
       });
     return () => c.abort();
   }, []);
-  useEffect(() => {
-    if (audience) return;
-    const c = new AbortController();
-    Promise.all([
-      api<Scope[]>("/tenant/access/scopes", { signal: c.signal }),
-      api<{ items: User[] }>("/tenant/access/users", { signal: c.signal }),
-    ])
-      .then(([scopeData, userData]) => {
-        setScopes(scopeData);
-        setUsers(userData.items);
-        setScopeId(scopeData[0]?.id ?? "");
-      })
-      .catch((value) => {
-        if (value.name !== "AbortError") setError(value);
-      });
-    return () => c.abort();
-  }, [audience]);
   async function operation(
     item: Record<string, unknown>,
     action: "preview" | "update" | "approve" | "reassign",
@@ -573,6 +1071,7 @@ export function ProbesPage({
         });
         setError(null);
         setOperationResult(result as Record<string, unknown>);
+        return;
       } else if (action === "update") {
         await api(`/tenant/access/probes/${String(item.id)}`, {
           method: "PATCH",
@@ -589,34 +1088,7 @@ export function ProbesPage({
             reason: "Approved after operational review",
           }),
         });
-      } else {
-        await api(`/tenant/access/probes/${String(item.id)}/reassign`, {
-          method: "POST",
-          body: JSON.stringify({
-            expectedVersion: Number(item.version),
-            assignedUserId: driverId,
-            reason: "Driver reassigned after operational review",
-          }),
-        });
       }
-      location.reload();
-    } catch (value) {
-      setError(value as ApiError);
-    }
-  }
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    try {
-      await api("/tenant/access/probes", {
-        method: "POST",
-        headers: { "Idempotency-Key": newKey() },
-        body: JSON.stringify({
-          label: createLabel,
-          resourceType: "WORK_ITEM",
-          scopeNodeIds: [scopeId],
-          status: "OPEN",
-        }),
-      });
       location.reload();
     } catch (value) {
       setError(value as ApiError);
@@ -629,7 +1101,9 @@ export function ProbesPage({
           <p className="eyebrow">{audience ? "Portal" : "Access"}</p>
           <h1>{title}</h1>
           <p className="muted">
-            Only server-authorized work items and masked fields are shown.
+            {audience
+              ? "Only server-authorized work items and masked fields are shown."
+              : "For administrators and support: check whether your current signed-in access may read a synthetic authorization fixture. This makes no business transaction and does not create or change operational data."}
           </p>
         </div>
       </div>
@@ -641,64 +1115,47 @@ export function ProbesPage({
       )}
       {!audience && (
         <section className="panel">
-          <h2>Create access proof</h2>
-          <form
-            className="access-form"
-            onSubmit={(event) => void create(event)}
-          >
-            <label>
-              Label
-              <input
-                required
-                value={createLabel}
-                onChange={(event) => setCreateLabel(event.target.value)}
-              />
-            </label>
-            <label>
-              Scope
-              <select
-                required
-                value={scopeId}
-                onChange={(event) => setScopeId(event.target.value)}
-              >
-                {scopes.map((scope) => (
-                  <option key={scope.id} value={scope.id}>
-                    {scope.path}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="submit" className="primary">
-              Create proof
-            </button>
-          </form>
-          <label>
-            Reassign trip to driver
-            <select
-              value={driverId}
-              onChange={(event) => setDriverId(event.target.value)}
-            >
-              <option value="">Select driver</option>
-              {users
-                .filter((user) => user.portalAudience === "DRIVER")
-                .map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.displayName}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <a className="button" href="/api/v1/tenant/access/probes/export">
-            Export visible work
-          </a>
+          <h2>How to use this diagnostic</h2>
+          <ol>
+            <li>Choose a fixture from the list below.</li>
+            <li>
+              Select <strong>Test read permission</strong>.
+            </li>
+            <li>Review the Allowed or Denied decision and safe reason.</li>
+          </ol>
+          <p>
+            This tool tests the current signed-in administrator. To review
+            another user, open that user in{" "}
+            <a href="/app/access/users">Users</a> and use{" "}
+            <strong>Preview effective access</strong>.
+          </p>
         </section>
       )}
       {operationResult && (
         <section className="panel" role="status">
-          <h2>Operation preview</h2>
-          <pre className="safe-json">
-            {JSON.stringify(operationResult, null, 2)}
-          </pre>
+          <h2>Permission decision</h2>
+          <dl className="details-grid">
+            <div>
+              <dt>Result</dt>
+              <dd>{operationResult.allowed ? "Allowed" : "Denied"}</dd>
+            </div>
+            <div>
+              <dt>Reason</dt>
+              <dd>{words(operationResult.reason)}</dd>
+            </div>
+            {operationResult.matchedRoleName ? (
+              <div>
+                <dt>Matched role</dt>
+                <dd>{String(operationResult.matchedRoleName)}</dd>
+              </div>
+            ) : null}
+            {operationResult.matchedScopeName ? (
+              <div>
+                <dt>Matched scope</dt>
+                <dd>{String(operationResult.matchedScopeName)}</dd>
+              </div>
+            ) : null}
+          </dl>
         </section>
       )}
       <section className="panel" aria-busy={!data}>
@@ -716,35 +1173,35 @@ export function ProbesPage({
                   <h3>{String(item.label)}</h3>
                   <p>{String(item.status)}</p>
                 </div>
-                <pre className="safe-json">{JSON.stringify(item, null, 2)}</pre>
+                <dl>
+                  <div>
+                    <dt>Type</dt>
+                    <dd>{words(item.resourceType)}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{words(item.status)}</dd>
+                  </div>
+                  {item.note ? (
+                    <div>
+                      <dt>Note</dt>
+                      <dd>{String(item.note)}</dd>
+                    </div>
+                  ) : null}
+                </dl>
                 <div className="actions">
                   <button
                     type="button"
                     onClick={() => void operation(item, "preview")}
                   >
-                    Preview access
+                    Test read permission
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void operation(item, "update")}
-                  >
-                    Complete
-                  </button>
-                  {!audience && (
+                  {audience && (
                     <button
                       type="button"
-                      onClick={() => void operation(item, "approve")}
+                      onClick={() => void operation(item, "update")}
                     >
-                      Approve
-                    </button>
-                  )}
-                  {!audience && item.resourceType === "TRIP" && (
-                    <button
-                      type="button"
-                      disabled={!driverId}
-                      onClick={() => void operation(item, "reassign")}
-                    >
-                      Reassign driver
+                      Complete
                     </button>
                   )}
                 </div>
@@ -759,6 +1216,7 @@ export function ProbesPage({
 
 export function ReportsPage() {
   const [type, setType] = useState("users"),
+    [search, setSearch] = useState(""),
     [items, setItems] = useState<Array<Record<string, unknown>>>([]),
     [alerts, setAlerts] = useState<Array<Record<string, unknown>>>([]),
     [loading, setLoading] = useState(true),
@@ -766,7 +1224,7 @@ export function ReportsPage() {
   async function exportReport() {
     try {
       const result = await api<{ filename: string; csv: string }>(
-        `/tenant/access/reports/${type}/export`,
+        `/tenant/access/reports/${type}/export?search=${encodeURIComponent(search)}`,
       );
       const href = URL.createObjectURL(
         new Blob([result.csv], { type: "text/csv" }),
@@ -812,12 +1270,13 @@ export function ReportsPage() {
     setLoading(true);
     Promise.all([
       api<{ items: Array<Record<string, unknown>> }>(
-        `/tenant/access/reports/${type}`,
+        `/tenant/access/reports/${type}?search=${encodeURIComponent(search)}`,
         { signal: c.signal },
       ),
-      api<{ items: Array<Record<string, unknown>> }>("/tenant/access/alerts", {
-        signal: c.signal,
-      }),
+      api<{ items: Array<Record<string, unknown>> }>(
+        `/tenant/access/alerts?search=${encodeURIComponent(search)}`,
+        { signal: c.signal },
+      ),
     ])
       .then(([report, alertData]) => {
         setItems(report.items);
@@ -829,29 +1288,108 @@ export function ReportsPage() {
       })
       .finally(() => setLoading(false));
     return () => c.abort();
-  }, [type]);
+  }, [type, search]);
+  const reportColumns: Record<string, Array<[string, string]>> = {
+    users: [
+      ["displayName", "User"],
+      ["employeeCode", "Employee code"],
+      ["status", "Status"],
+      ["portalAudience", "Portal"],
+      ["roles", "Roles"],
+      ["activeSessions", "Sessions"],
+    ],
+    roles: [
+      ["name", "Role"],
+      ["users", "Users"],
+      ["grants", "Active grants"],
+    ],
+    sessions: [
+      ["displayName", "User"],
+      ["count", "Active sessions"],
+      ["lastSeenAt", "Last seen"],
+    ],
+    "audit-log": [
+      ["occurredAt", "When"],
+      ["actor", "Actor"],
+      ["action", "Action"],
+      ["targetType", "Record type"],
+      ["reason", "Reason"],
+      ["correlationId", "Reference"],
+    ],
+    "permission-changes": [
+      ["occurredAt", "When"],
+      ["actor", "Actor"],
+      ["action", "Permission change"],
+      ["targetType", "Record type"],
+      ["reason", "Reason"],
+      ["correlationId", "Reference"],
+    ],
+    "security-events": [
+      ["occurredAt", "When"],
+      ["actor", "Actor"],
+      ["eventType", "Security event"],
+      ["outcome", "Outcome"],
+      ["safeTargetHash", "Safe target reference"],
+      ["correlationId", "Reference"],
+    ],
+    "failed-logins": [
+      ["bucket", "Time window"],
+      ["eventType", "Event"],
+      ["count", "Attempts"],
+    ],
+    dormant: [
+      ["displayName", "User"],
+      ["lastActivityAt", "Last activity"],
+      ["neverLoggedIn", "Never logged in"],
+    ],
+    "privileged-actions": [
+      ["occurredAt", "When"],
+      ["actor", "Actor"],
+      ["action", "Action"],
+      ["targetType", "Record type"],
+      ["reason", "Reason"],
+      ["correlationId", "Reference"],
+    ],
+  };
+  const columns = reportColumns[type] ?? reportColumns.users!;
   return (
     <Shell>
       <div className="heading">
         <div>
-          <p className="eyebrow">Security</p>
-          <h1>Reports and alerts</h1>
-          <p className="muted">Canonical tenant-scoped access evidence.</p>
+          <p className="eyebrow">Access</p>
+          <h1>Activity &amp; audit</h1>
+          <h2 className="sr-only">Reports and alerts</h2>
+          <p className="muted">
+            Search user-access reports, immutable audit evidence, authentication
+            and authorization events, and actionable security alerts.
+          </p>
         </div>
       </div>
       <section className="panel">
         <label>
-          Report
+          Evidence view
           <select value={type} onChange={(e) => setType(e.target.value)}>
             <option value="users">Users</option>
             <option value="roles">Role assignments</option>
             <option value="sessions">Active sessions</option>
+            <option value="audit-log">Audit log</option>
             <option value="permission-changes">Permission changes</option>
-            <option value="security-events">Denials</option>
+            <option value="security-events">
+              Authentication &amp; authorization events
+            </option>
             <option value="failed-logins">Failed logins</option>
             <option value="dormant">Dormant users</option>
             <option value="privileged-actions">Privileged actions</option>
           </select>
+        </label>
+        <label>
+          Search
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Actor, action, user, target or reference"
+          />
         </label>
         <button type="button" onClick={() => void exportReport()}>
           Export CSV
@@ -863,22 +1401,76 @@ export function ReportsPage() {
         )}
         {loading ? (
           <p role="status">Loading report…</p>
+        ) : items.length === 0 ? (
+          <p className="empty">No matching evidence.</p>
         ) : (
-          <div className="responsive-list">
-            {items.map((item, index) => (
-              <pre className="safe-json" key={String(item.id ?? index)}>
-                {JSON.stringify(item, null, 2)}
-              </pre>
-            ))}
+          <div
+            className="table-region"
+            tabIndex={0}
+            aria-label={`${words(type)} results`}
+          >
+            <table>
+              <thead>
+                <tr>
+                  {columns.map(([key, label]) => (
+                    <th key={key} scope="col">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, index) => (
+                  <tr key={String(item.id ?? index)}>
+                    {columns.map(([key]) => (
+                      <td key={key}>{displayValue(item[key])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
       <section className="panel">
         <h2>Security alerts</h2>
+        <p className="muted">
+          Actionable conditions are separate from the immutable audit log.
+          Acknowledging or resolving an alert creates audit evidence.
+        </p>
         {alerts.length ? (
           alerts.map((alert, index) => (
             <article className="access-card" key={String(alert.id ?? index)}>
-              <pre className="safe-json">{JSON.stringify(alert, null, 2)}</pre>
+              <div>
+                <h3>{words(alert.type)}</h3>
+                <p>
+                  {words(alert.severity)} severity · {words(alert.state)}
+                </p>
+              </div>
+              <dl>
+                <div>
+                  <dt>Affected user</dt>
+                  <dd>{String(alert.actor ?? "System")}</dd>
+                </div>
+                <div>
+                  <dt>Occurrences</dt>
+                  <dd>{String(alert.occurrenceCount ?? 0)}</dd>
+                </div>
+                <div>
+                  <dt>First seen</dt>
+                  <dd>{displayValue(alert.firstSeenAt)}</dd>
+                </div>
+                <div>
+                  <dt>Last seen</dt>
+                  <dd>{displayValue(alert.lastSeenAt)}</dd>
+                </div>
+                {alert.resolutionReason ? (
+                  <div>
+                    <dt>Resolution</dt>
+                    <dd>{String(alert.resolutionReason)}</dd>
+                  </div>
+                ) : null}
+              </dl>
               {alert.state !== "RESOLVED" && (
                 <div className="actions">
                   {alert.state === "OPEN" && (

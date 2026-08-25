@@ -420,6 +420,8 @@ export class AccessController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    res.setHeader("Cache-Control", "no-store, private");
+    res.setHeader("Pragma", "no-cache");
     return this.run(res, req, async () => {
       const actor = await this.actor(req);
       this.csrf(req, actor);
@@ -615,27 +617,43 @@ export class AccessController {
   @Get("tenant/access/reports/:type")
   report(
     @Param("type") type: string,
+    @Query("search") search: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
   ) {
     return this.run(res, req, async () =>
-      this.access.reports(await this.actor(req), type, requestId(req)),
+      this.access.reports(
+        await this.actor(req),
+        type,
+        requestId(req),
+        search ?? "",
+      ),
     );
   }
   @Get("tenant/access/reports/:type/export")
   reportExport(
     @Param("type") type: string,
+    @Query("search") search: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
   ) {
     return this.run(res, req, async () =>
-      this.access.reportExport(await this.actor(req), type, requestId(req)),
+      this.access.reportExport(
+        await this.actor(req),
+        type,
+        requestId(req),
+        search ?? "",
+      ),
     );
   }
   @Get("tenant/access/alerts")
-  alerts(@Req() req: Request, @Res() res: Response) {
+  alerts(
+    @Query("search") search: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     return this.run(res, req, async () =>
-      this.access.alerts(await this.actor(req), requestId(req)),
+      this.access.alerts(await this.actor(req), requestId(req), search ?? ""),
     );
   }
   @Post("tenant/access/alerts/:id/:action")
