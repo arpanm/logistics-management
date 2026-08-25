@@ -24,7 +24,8 @@ export default function DataImportsPage() {
   const [jobs, setJobs] = useState<Job[]>([]),
     [preview, setPreview] = useState<Job | null>(null),
     [error, setError] = useState<ApiError | null>(null),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [dataset, setDataset] = useState("CLIENT");
   const load = () =>
     api<Job[]>("/tenant/imports/status").then(setJobs).catch(setError);
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function DataImportsPage() {
           mediaType: file.type || "text/csv",
           byteSize: parsed.byteSize,
           checksum: parsed.checksum,
-          sourceTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          sourceTimezone: form.get("sourceTimezone"),
           importMode: form.get("mode"),
           headers: parsed.headers,
           rows: parsed.rows,
@@ -120,18 +121,54 @@ export default function DataImportsPage() {
         <form className="access-form" onSubmit={(e) => void submit(e)}>
           <label>
             Dataset
-            <select name="dataset">
+            <select
+              name="dataset"
+              value={dataset}
+              onChange={(event) => setDataset(event.target.value)}
+            >
               {datasets.map((v) => (
                 <option key={v}>{v}</option>
               ))}
             </select>
           </label>
+          <div className="field-help">
+            <strong>Sample files for {dataset}</strong>
+            <span>
+              Use the exact headers and formats shown in these examples.
+            </span>
+            <div className="button-row">
+              <a
+                className="button"
+                href={`/api/v1/tenant/imports/templates/${dataset}?format=csv`}
+                download
+              >
+                Download sample CSV
+              </a>
+              <a
+                className="button"
+                href={`/api/v1/tenant/imports/templates/${dataset}?format=xlsx`}
+                download
+              >
+                Download sample Excel
+              </a>
+            </div>
+          </div>
           <label>
             Import mode
             <select name="mode">
               <option>UPSERT</option>
               <option>FULL_FILE</option>
               <option>APPEND</option>
+            </select>
+          </label>
+          <label>
+            Source timezone
+            <select name="sourceTimezone" defaultValue="Asia/Kolkata">
+              <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+              <option value="Asia/Dhaka">Asia/Dhaka</option>
+              <option value="Asia/Dubai">Asia/Dubai</option>
+              <option value="Asia/Singapore">Asia/Singapore</option>
+              <option value="UTC">UTC</option>
             </select>
           </label>
           <label>

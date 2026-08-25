@@ -21,9 +21,8 @@ const tenantInput = (code: string, owner: string) =>
     address: {
       line1: "1 Canonical Road",
       line2: "",
-      city: "Kolkata",
-      region: "West Bengal",
       postalCode: "700001",
+      postalLocalityId: "70000100-0000-4000-8000-000000000001",
       country: "IN",
     },
     timezone: "Asia/Kolkata",

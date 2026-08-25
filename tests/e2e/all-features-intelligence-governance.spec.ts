@@ -15,6 +15,7 @@ type KernelRecord = {
   name: string;
   status: string;
   version: number;
+  data?: Record<string, unknown>;
 };
 
 function unique(prefix: string) {
@@ -31,7 +32,9 @@ test("30 real acceptance checks for intelligence and governance features", async
 }, testInfo) => {
   test.setTimeout(240_000);
   const results: Result[] = [];
+  const focusedAcceptanceId = process.env.E2E_ACCEPTANCE_ID;
   const run = async (id: string, action: () => Promise<string>) => {
+    if (focusedAcceptanceId && id !== focusedAcceptanceId) return;
     await test.step(id, async () => {
       try {
         const evidence = await action();
@@ -442,7 +445,7 @@ test("30 real acceptance checks for intelligence and governance features", async
       await pageA.getByLabel("Name").fill("High value approval policy");
       await pageA.getByLabel("Policy type").selectOption("APPROVAL");
       await pageA.getByLabel("Applies to").fill("vendor-payable");
-      await pageA.getByLabel("Rule JSON").fill('{"amountMinor":100000}');
+      await pageA.getByLabel("Rule values").fill("amountMinor=100000");
       await pageA
         .getByRole("button", { name: "Create governance policy" })
         .click();
@@ -456,6 +459,9 @@ test("30 real acceptance checks for intelligence and governance features", async
       const body = (await list.json()) as { items: KernelRecord[] };
       policy = body.items.find((item) => item.code === code);
       expect(policy).toBeTruthy();
+      expect(policy?.data).toMatchObject({
+        rule: { amountMinor: "100000" },
+      });
       return `policy ${policy!.id} created through UI and persisted through API`;
     });
 

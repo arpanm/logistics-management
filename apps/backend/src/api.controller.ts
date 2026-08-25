@@ -25,6 +25,7 @@ import {
   membershipFixtureSchema,
   probeCreateSchema,
   probeUpdateSchema,
+  postalLocalityQuerySchema,
   switchTenantSchema,
   tenantCreateSchemaFor,
 } from "@logistics/domain";
@@ -231,6 +232,22 @@ export class ApiController {
       ),
     );
   }
+  @Get("reference/postal-localities") postalLocalities(
+    @Query("country") country: string | undefined,
+    @Query("postalCode") postalCode: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      const query = postalLocalityQuerySchema.parse({ country, postalCode });
+      return this.service.postalLocalities(
+        actor,
+        query.country,
+        query.postalCode,
+      );
+    });
+  }
   @Post("platform/tenants") createTenant(
     @Body() body: unknown,
     @Headers("idempotency-key") key: string,
@@ -267,6 +284,29 @@ export class ApiController {
     return this.run(res, req, async () =>
       this.service.tenantDetail(await this.actor(req), id),
     );
+  }
+  @Post("platform/tenants/:id/owner-invitation/reissue")
+  reissueOwnerInvitation(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      const input = lifecycleSchema.parse(body);
+      return this.service.reissueOwnerInvitation(
+        actor,
+        id,
+        input.expectedVersion,
+        input.reason,
+        requestId(req),
+        key,
+        req.headers.origin ?? this.service.config.FRONTEND_URL,
+      );
+    });
   }
   @Post("platform/tenants/:id/deactivate") deactivate(
     @Param("id") id: string,
@@ -373,6 +413,33 @@ export class ApiController {
       res.setHeader(
         "Content-Disposition",
         'attachment; filename="isolation-records.csv"',
+      );
+      return res.status(200).send(`\uFEFF${csv}`);
+    } catch (error) {
+      return this.run(res, req, async () => {
+        throw error;
+      });
+    }
+  }
+  @Get("tenant/probes/template") async probeExportTemplate(
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    try {
+      const actor = await this.actor(req);
+      this.service.requireTenant(actor);
+      const csv = [
+        "Label,Note,Created at",
+        [
+          csvCell("Sample delivery proof"),
+          csvCell("Tenant-scoped example record"),
+          csvCell("2026-01-15T10:30:00.000Z"),
+        ].join(","),
+      ].join("\r\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="isolation-records-sample.csv"',
       );
       return res.status(200).send(`\uFEFF${csv}`);
     } catch (error) {

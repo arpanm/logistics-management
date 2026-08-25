@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { e164MobileSchema } from "./phone.js";
 
 const uuid = z.string().uuid();
 const code = z
@@ -53,10 +54,7 @@ export const employeeCommandSchema = z
     employeeCode: code,
     displayName: text(160),
     email: z.string().email().max(254).nullish(),
-    mobile: z
-      .string()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .nullish(),
+    mobile: e164MobileSchema.nullish(),
     managerId: uuid.nullish(),
     homeNodeId: uuid,
     linkedMembershipId: uuid.nullish(),
@@ -75,10 +73,7 @@ export const clientCommandSchema = z
     authorizationScopeNodeId: uuid.nullish(),
     taxIdentifier: z.string().trim().toUpperCase().max(32).nullish(),
     escalationEmail: z.string().email().max(254).nullish(),
-    escalationMobile: z
-      .string()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .nullish(),
+    escalationMobile: e164MobileSchema.nullish(),
     creditDays: z.number().int().min(0).max(365),
     podMode: z.enum(["PHYSICAL", "DIGITAL", "BOTH"]),
   })
@@ -93,10 +88,7 @@ export const clientLocationCommandSchema = z
     organizationNodeId: uuid,
     managerEmployeeId: uuid.nullish(),
     authorizationScopeNodeId: uuid.nullish(),
-    mobile: z
-      .string()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .nullish(),
+    mobile: e164MobileSchema.nullish(),
     geofence: z.record(z.unknown()).default({}),
   })
   .strict();
@@ -168,7 +160,7 @@ export const driverCommandSchema = z
     vendorId: uuid,
     code,
     displayName: text(160),
-    mobile: z.string().regex(/^\+[1-9]\d{7,14}$/),
+    mobile: e164MobileSchema,
     licenceNumber: text(40).transform((v) => v.toUpperCase()),
     licenceClass: text(40),
     licenceValidTo: isoDate,

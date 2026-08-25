@@ -19,9 +19,8 @@ const validTenant = {
   address: {
     line1: "1 Market Road",
     line2: "",
-    city: "Kolkata",
-    region: "West Bengal",
     postalCode: "700001",
+    postalLocalityId: "70000100-0000-4000-8000-000000000001",
     country: "in",
   },
   timezone: "Asia/Kolkata",
@@ -45,10 +44,14 @@ const validTenant = {
 
 describe("FND01-U-001 tenant validation and normalization", () => {
   it("normalizes codes, tax identifiers, country, currency, and emails", () => {
-    const parsed = tenantCreateSchema.parse(validTenant);
+    const parsed = tenantCreateSchema.parse({
+      ...validTenant,
+      support: { ...validTenant.support, mobile: "+91 99999-99999" },
+    });
     expect(parsed.code).toBe("ACME-A");
     expect(parsed.currency).toBe("INR");
     expect(parsed.owner.email).toBe("owner@acme.test");
+    expect(parsed.support.mobile).toBe("+919999999999");
   });
   it.each([
     { timezone: "Mars/Base" },
@@ -84,19 +87,56 @@ describe("FND01-U-001 tenant validation and normalization", () => {
       /Unsupported currency code/,
     );
   });
-  it("rejects branding colours that fail the defined WCAG AA text contrast", () => {
+  it.each(["012345", "12345", "1234567", "１２３４５６", "123 456"])(
+    "rejects non-canonical Indian PIN %s",
+    (postalCode) => {
+      expect(() =>
+        tenantCreateSchema.parse({
+          ...validTenant,
+          address: { ...validTenant.address, postalCode },
+        }),
+      ).toThrow(/valid 6-digit PIN/);
+    },
+  );
+  it("requires a locality reference and rejects caller-derived city/state", () => {
     expect(() =>
       tenantCreateSchema.parse({
         ...validTenant,
-        branding: { ...validTenant.branding, primaryColor: "#FFFFFF" },
+        address: { ...validTenant.address, postalLocalityId: undefined },
       }),
-    ).toThrow(/WCAG AA/);
+    ).toThrow();
     expect(() =>
       tenantCreateSchema.parse({
         ...validTenant,
-        branding: { ...validTenant.branding, accentColor: "#14213D" },
+        address: {
+          ...validTenant.address,
+          city: "Kolkata",
+          region: "West Bengal",
+        },
       }),
-    ).toThrow(/WCAG AA/);
+    ).toThrow();
+  });
+  it("accepts brand colours because the UI derives an accessible foreground", () => {
+    expect(
+      tenantCreateSchema.parse({
+        ...validTenant,
+        branding: {
+          ...validTenant.branding,
+          primaryColor: "#BD45BF",
+          accentColor: "#8B6D4B",
+        },
+      }).branding,
+    ).toEqual({
+      ...validTenant.branding,
+      primaryColor: "#BD45BF",
+      accentColor: "#8B6D4B",
+    });
+    expect(() =>
+      tenantCreateSchema.parse({
+        ...validTenant,
+        branding: { ...validTenant.branding, primaryColor: "purple" },
+      }),
+    ).toThrow();
   });
 });
 
@@ -183,7 +223,7 @@ describe("FND02-U-007 invitation and authentication validation", () => {
         .email,
     ).toBe("user@example.test");
     expect(
-      accessInviteSchema.parse({ ...access, mobile: "+919876543210" }).mobile,
+      accessInviteSchema.parse({ ...access, mobile: "+91 98765 43210" }).mobile,
     ).toBe("+919876543210");
     expect(() => accessInviteSchema.parse(access)).toThrow(/Email or mobile/);
     expect(() =>

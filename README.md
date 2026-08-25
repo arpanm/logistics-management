@@ -6,24 +6,24 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                     |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                                   |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                 |
-| Automated feature tests           | Passing — all non-browser gates and 180/180 desktop/mobile Playwright executions pass                      |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                       |
-| Feature implementation            | Complete — all 18 feature areas use the canonical authorized PostgreSQL implementation and pass acceptance |
+| Item                              | Status                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                              |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                            |
+| Automated feature tests           | Passing — FND-01 postal Playwright 2/2, FND-02 UX Playwright 3/3, and full regression 188/188 locally |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                  |
+| Feature implementation            | Canonical backend baseline complete; product-UX gap remediation is active and tracked in `TODO.md`    |
 
 Agents must update this summary, `FEATURES.md`, `TODO.md`, the relevant feature spec/test plan/completion evidence, and executable test case status at the end of every feature.
 
-The completed implementation includes normalized canonical stores and workflows for masters, operations, POD, finance, governance, configuration, control-tower, alerts, imports, and integrations. All recorded acceptance and gap defects are resolved; final evidence is recorded in `BUGS.md` and `specs/ALL-FEATURE-GAPS/completion.md`.
+The implementation includes normalized canonical stores and workflows for masters, operations, POD, finance, governance, configuration, control-tower, alerts, imports, and integrations. A product-UX audit found that several of those backend-complete areas still expose scaffolding or incomplete workbenches; the dependency-ordered remediation queue is recorded in `TODO.md`.
 
 ## Implemented feature surface
 
 | Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                         |
 | ------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| FND-01  | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | Tenant provisioning/lifecycle, branding, setup, isolation, health, reports, and alerts                                     |
-| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/probes`, `/mfa`                                  | Invitations, MFA, multi-role capabilities, resource scopes, masking, session invalidation, and access evidence             |
+| FND-01  | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant provisioning with derived city/state, lifecycle, branding, setup, isolation, health, reports, and alerts  |
+| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured access administration, secure activation links, permission review, Activity & audit, alerts, MFA, and sessions  |
 | MST-01  | `/app/masters/locations`, `/app/masters/employees`                                                      | Organization hierarchy, employees, ownership, impact analysis, reassignment, and cycle-safe moves                          |
 | MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Clients, locations, versioned contracts, lanes, SLA rules, and effective rate cards                                        |
 | MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted bank versions, vehicles, drivers, compliance, eligibility, and overrides                                |
@@ -45,7 +45,7 @@ The detailed fields, calculations, reports, alerts, acceptance criteria, and cro
 
 ### Pending production-adoption TODOs
 
-No accepted feature implementation or automated test is pending. Production adoption still requires the AWS environment below, DNS/TLS, monitoring/backups/restore drills, secret rotation, and selection of real messaging, malware-scanning, GPS, and accounting providers. Commercial/tax/approval/privacy decisions awaiting product-owner or legal confirmation are listed in [FEATURES.md](FEATURES.md) and tracked in [TODO.md](TODO.md). Local adapters deliberately report unavailable/pending states; they never claim a real external delivery or malware verdict.
+PIN-first derived addressing is complete for tenant provisioning. Reuse across organization, client-location, vendor, and driver masters remains queued with those master features. Master-data navigation, operations/allocation/trip workbenches, finance queues, and control-tower prototype parity also remain in [TODO.md](TODO.md). Production adoption requires the AWS environment below, a pinned official India postal dataset, DNS/TLS, monitoring/backups/restore drills, secret rotation, and selection of real messaging, malware-scanning, GPS, and accounting providers.
 
 ## Engineering baseline
 
@@ -77,6 +77,8 @@ Default project resources:
 
 Other projects may use the same container with their own database/schema names.
 
+Local and E2E bootstrap uses a small deterministic India postal fixture, including `500016`, `560043`, `700001`, and an ambiguous `110001`. It is test data, not the production directory. Production readiness rejects that fixture and requires the checksum-verified offline import described in the AWS section.
+
 ## Application commands
 
 ```bash
@@ -106,7 +108,7 @@ corepack enable
 corepack prepare pnpm@11.19.0 --activate
 ```
 
-Then run:
+Installing pnpm only installs the package manager; it does **not** install this repository's dependencies or configure its Git hooks. Run the following sequence once after cloning, and run `make bootstrap` again whenever `package.json` or `pnpm-lock.yaml` changes:
 
 ```bash
 cp .env.example .env
@@ -117,7 +119,30 @@ make deploy-local
 make health
 ```
 
-Open <http://127.0.0.1:3000/login>. Unless overridden in `.env`, the local bootstrap account is `admin@local.test` / `LocalAdmin!234`; never reuse these credentials outside local development.
+Do not skip `make bootstrap` with `git commit --no-verify`. The commit hook deliberately runs the repository policy and workspace checks, so a new checkout without `node_modules` will fail even when the `pnpm` executable itself is installed.
+
+### Administrator login
+
+Local `make deploy-local` applies migrations and runs the deterministic seed. Unless overridden in `.env`, sign in at <http://127.0.0.1:3000/login> with:
+
+| Field    | Local development value |
+| -------- | ----------------------- |
+| Email    | `admin@local.test`      |
+| Password | `LocalAdmin!234`        |
+
+This is the **Platform Admin** account used to provision and manage tenants. It is not a Tenant Owner account. Each tenant's first Tenant Owner sets their own credentials through the invitation created during tenant provisioning; Vendor, Driver, Client, and employee users likewise use their individual invitation credentials.
+
+Local and default self-hosted adapters do not send real email. If the initial owner link is missed, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link. After activation, the Tenant Owner manages users, roles, scopes, invitation resend/revoke, suspension, MFA, and session resets at `/app/access/users`; Platform Admin does not impersonate tenant administrators.
+
+`make deploy-local` reseeds the Platform Admin and therefore resets its password to the current `PLATFORM_ADMIN_PASSWORD` value in `.env`. Never use the committed local default in AWS or any shared environment.
+
+In local/test environments, `http://localhost:3000` and `http://127.0.0.1:3000` are treated as equivalent loopback origins on the configured port. Production accepts only the exact HTTPS origin configured in `FRONTEND_URL`.
+
+Tenant primary and accent colors may use any valid six-digit hex value. Tenant-branded surfaces automatically select black or white foreground text for WCAG AA contrast; administrators do not need to alter a valid brand color merely to match a fixed text color.
+
+Mobile fields accept common spaces, hyphens, dots, and parentheses and normalize them to E.164 for storage. Include the leading country code and `+`; for example, `+91 7766974950` is stored as `+917766974950`.
+
+If a commit reports `rg: command not found`, pull the current scripts: the policy check no longer depends on ripgrep. If it reports `pnpm: command not found` or missing packages, install pnpm and run `make bootstrap`. A later PostgreSQL `42P01 relation "app.users" does not exist` in the attached log was a concurrent test-database reset, not a pnpm installation failure; wait for the other test/commit process to finish and rerun the commit once.
 
 ### Recommended manual flow
 
@@ -130,6 +155,8 @@ Open <http://127.0.0.1:3000/login>. Unless overridden in `.env`, the local boots
 7. Invite Vendor, Driver, and Client users and verify their restricted `/portal/vendor`, `/portal/driver`, and `/portal/client` views.
 
 Use unique codes and idempotency keys when repeating mutations. The UI creates these keys automatically; API clients must send `Idempotency-Key` where required.
+
+The setup checklist derives completion from live tenant records and links directly to Organization, Users, Branches, Clients, Vendors, Commercial settings, Imports, and Branding. Its isolation-record panel provides both a sample CSV showing the export columns and a current-tenant-only CSV export.
 
 ### Automated real-service flows
 
@@ -184,11 +211,15 @@ The default VPC is adequate for this first deployment. Create:
 3. Place it in the same VPC, attach `logistics-rds-sg`, disable public access, enable deletion protection, automated backups, and encryption at rest.
 4. Record the private RDS endpoint. Application connections use TLS (`sslmode=require`; use `verify-full` with the RDS CA bundle for stricter certificate verification).
 
-After EC2 exists, connect through Session Manager and create the non-master application role:
+After EC2 exists, connect through Session Manager and create separate non-master runtime and postal-import roles. Use different generated passwords; the backend never receives the importer credential:
 
 ```sql
+CREATE ROLE logistics_postal_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 CREATE ROLE logistics_app LOGIN PASSWORD 'GENERATE_A_LONG_UNIQUE_PASSWORD';
+CREATE ROLE logistics_postal_importer LOGIN PASSWORD 'GENERATE_A_DIFFERENT_LONG_PASSWORD'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 GRANT CONNECT, TEMPORARY, CREATE ON DATABASE logistics TO logistics_app;
+GRANT CONNECT ON DATABASE logistics TO logistics_postal_importer;
 ```
 
 ### 5. Create and bootstrap EC2
@@ -196,7 +227,7 @@ GRANT CONNECT, TEMPORARY, CREATE ON DATABASE logistics TO logistics_app;
 1. In IAM, create an EC2 role with `AmazonSSMManagedInstanceCore`; attach it to the instance.
 2. Launch an Ubuntu Server 24.04 LTS `t3.micro` in the same VPC with `logistics-ec2-sg`, the IAM role, encrypted 20 GiB `gp3`, and tags `Application=logistics-management`, `Environment=production`.
 3. Connect using EC2 → Connect → Session Manager. Ubuntu AWS AMIs normally include SSM Agent; verify it with `systemctl status snap.amazon-ssm-agent.amazon-ssm-agent.service` or `systemctl status amazon-ssm-agent`.
-4. Install the runtime and add swap:
+4. Install the runtime and add swap. EC2 uses RDS and therefore does not need Docker:
 
 ```bash
 sudo apt-get update
@@ -220,7 +251,10 @@ Clone the repository into `/opt/logistics-management`. For a private repository,
 
 ```bash
 sudo -u logistics git clone git@github.com:GITHUB_OWNER/GITHUB_REPOSITORY.git /opt/logistics-management
+sudo -u logistics bash -lc 'cd /opt/logistics-management && make bootstrap-production'
 ```
+
+`make bootstrap-production` installs the locked workspace dependencies and performs repository policy checks without requiring the local Docker/PostgreSQL stack. The recurring GitHub deployment also installs the exact lockfile before migration and build.
 
 ### 6. Configure application secrets and services
 
@@ -241,7 +275,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable logistics-backend.service logistics-frontend.service
 ```
 
-Set `FRONTEND_URL` to the final HTTPS origin, keep `BACKEND_URL=http://127.0.0.1:4000`, set `APP_ENV=production`, keep `ENABLE_TEST_HOOKS=false`, URL-encode the database password, and use the private RDS endpoint in `DATABASE_URL`.
+Set `FRONTEND_URL` to the final HTTPS origin, keep `BACKEND_URL=http://127.0.0.1:4000`, set `APP_ENV=production`, keep `ENABLE_TEST_HOOKS=false`, URL-encode both database passwords, and use the private RDS endpoint in `DATABASE_URL` and `POSTAL_IMPORT_DATABASE_URL`. The two URLs must use `logistics_app` and `logistics_postal_importer` respectively.
+
+Download the current authorized **All India Pincode Directory** CSV from the Department of Posts/Open Government Data catalog on an administrator workstation, review its license/source metadata, compute SHA-256, and copy the exact file to the protected path configured by `POSTAL_DIRECTORY_FILE` (the example uses `/opt/logistics-secrets/india-post-pincode-directory.csv`). Do not commit it and do not let the application download it at runtime.
+
+```bash
+sha256sum india-post-pincode-directory.csv
+sudo install -o logistics -g logistics -m 0400 \
+  india-post-pincode-directory.csv \
+  /opt/logistics-secrets/india-post-pincode-directory.csv
+```
+
+Set the resulting digest and source release metadata in `/etc/logistics-management.env`: `POSTAL_DIRECTORY_SHA256`, `POSTAL_DIRECTORY_VERSION`, `POSTAL_DIRECTORY_SOURCE_NAME`, `POSTAL_DIRECTORY_SOURCE_URI`, and `POSTAL_DIRECTORY_IMPORTED_BY`. The importer validates the checksum, expected `logistics` database, separate PostgreSQL identity, minimum production row count, and source metadata before atomically activating a version. The official catalog is <https://www.data.gov.in/catalog/all-india-pincode-directory-through-webservice>.
 
 Allow only the deployment account to restart these two services:
 
@@ -255,12 +300,26 @@ Add this single line:
 logistics ALL=(root) NOPASSWD: /usr/bin/systemctl restart logistics-backend.service logistics-frontend.service, /usr/bin/systemctl is-active --quiet logistics-backend.service, /usr/bin/systemctl is-active --quiet logistics-frontend.service
 ```
 
-Run the first migration/build/seed once. Later deployments never reseed the administrator:
+Before the first seed, replace `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` in `/etc/logistics-management.env`. Use a real operations mailbox and a unique password of at least 12 characters; production startup rejects the committed local password. Then apply migrations as the application role. Using a temporary RDS-master connection that is never written to the application environment, perform the one-time idempotent ownership handoff; this moves the reference tables and guard into `postal_reference`, owned by the NOLOGIN role, so the runtime cannot disable the immutability controls.
 
 ```bash
-sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && corepack pnpm install --frozen-lockfile && corepack pnpm run db:migrate && corepack pnpm run build && corepack pnpm run db:seed'
+sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && pnpm run db:migrate'
+
+# Run interactively from the Session Manager shell. Do not save the master URL.
+read -rsp 'RDS master PostgreSQL URL: ' RDS_MASTER_URL; echo
+psql "$RDS_MASTER_URL" -v ON_ERROR_STOP=1 \
+  -f /opt/logistics-management/scripts/sql/postal-ownership-handoff.sql
+unset RDS_MASTER_URL
+
+sudo -u logistics bash -lc 'cd /opt/logistics-management && set -a && source /etc/logistics-management.env && set +a && pnpm --filter @logistics/db postal:verify-ownership && pnpm --filter @logistics/db postal:import -- --file "$POSTAL_DIRECTORY_FILE" --version "$POSTAL_DIRECTORY_VERSION" --sha256 "$POSTAL_DIRECTORY_SHA256" --source-name "$POSTAL_DIRECTORY_SOURCE_NAME" --source-uri "$POSTAL_DIRECTORY_SOURCE_URI" --imported-by "$POSTAL_DIRECTORY_IMPORTED_BY" --activate true && pnpm run build && pnpm run db:seed'
 sudo systemctl start logistics-backend.service logistics-frontend.service
 ```
+
+The handoff is required once for a blank RDS database and is safe to repeat. Recurring GitHub deployments verify ownership and stop before import/restart if it is missing; they do not require or store the RDS master password.
+
+After Nginx and TLS are configured, sign in at `https://YOUR_DOMAIN/login` using the exact production `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` that were present for this seed. There is no universal production password and the local `admin@local.test` account is not created unless you explicitly configure it—which you must not do.
+
+The seed upserts the Platform Admin by email and rewrites its password hash. To rotate that bootstrap password, update `PLATFORM_ADMIN_PASSWORD` in the protected environment file and run `pnpm run db:seed` once from a Session Manager shell. Do not run the seed on every deployment. Tenant users continue to authenticate with their invitation-created credentials and MFA policy, independently of this Platform Admin.
 
 ### 7. Configure Nginx, DNS, and TLS
 
@@ -280,7 +339,7 @@ sudo certbot --nginx -d logistics.example.com
 
 ### 8. Configure GitHub OIDC and deployment permissions
 
-The committed `Quality` workflow runs `make check`. After a successful `main` run, `.github/workflows/deploy-aws.yml` deploys that exact verified commit through SSM. It uses GitHub OIDC, so no long-lived AWS access key is stored in GitHub.
+The committed `Quality` workflow runs `make check`. After a successful `main` run, `.github/workflows/deploy-aws.yml` deploys that exact verified commit through SSM. The deployment validates the protected pinned CSV configuration, applies migrations, performs the idempotent postal activation, builds, restarts, and checks readiness. It uses GitHub OIDC, so no long-lived AWS access key is stored in GitHub.
 
 1. IAM → Identity providers → Add provider: OpenID Connect, URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
 2. Replace placeholders in `deploy/aws/github-oidc-trust-policy.json`. Create an IAM role (for example `LogisticsGitHubDeploy`) with that trust policy.

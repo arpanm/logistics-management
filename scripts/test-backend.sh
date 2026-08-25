@@ -5,6 +5,8 @@ cd "$repo_dir"
 
 if [[ -f .env ]]; then set -a; source .env; set +a; else set -a; source .env.example; set +a; fi
 export DATABASE_URL="$TEST_DATABASE_URL"
+export POSTAL_IMPORT_DATABASE_URL="${TEST_POSTAL_IMPORT_DATABASE_URL:?TEST_POSTAL_IMPORT_DATABASE_URL is required}"
+export POSTAL_IMPORT_EXPECTED_DATABASE="${POSTGRES_TEST_DB:-logistics_test}"
 export APP_ENV=test
 export NODE_ENV=test
 export ENABLE_TEST_HOOKS=true
@@ -12,6 +14,8 @@ export ENABLE_TEST_HOOKS=true
 bash scripts/test-fnd02-populated-upgrade.sh
 bash scripts/prepare-clean-test-database.sh
 pnpm --filter @logistics/db exec prisma migrate deploy
+bash scripts/postgres-postal-handoff.sh "${POSTGRES_TEST_DB:-logistics_test}"
+pnpm --filter @logistics/db postal:verify-ownership
 # A second deploy is an explicit idempotency proof: it must report no pending
 # migration and must leave the unrelated sentinel schema untouched.
 pnpm --filter @logistics/db exec prisma migrate deploy

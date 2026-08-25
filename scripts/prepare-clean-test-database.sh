@@ -8,6 +8,7 @@ if [[ ! "$test_url" =~ /logistics_test([?]|$) ]]; then
 fi
 
 container_name="${CENTRAL_POSTGRES_CONTAINER:-shared-postgres}"
+admin_user="${CENTRAL_POSTGRES_ADMIN_USER:-postgres}"
 app_user="${POSTGRES_APP_USER:-logistics_app}"
 test_database="${POSTGRES_TEST_DB:-logistics_test}"
 if [[ ! "$test_database" =~ ^[a-z_][a-z0-9_]*$ ]] || [[ "$test_database" != "logistics_test" ]]; then
@@ -18,6 +19,9 @@ if ! docker container inspect "$container_name" >/dev/null 2>&1; then
   echo "Shared PostgreSQL container is missing: $container_name" >&2
   exit 1
 fi
+
+docker exec "$container_name" psql -U "$admin_user" -d "$test_database" -v ON_ERROR_STOP=1 \
+  -c "DROP SCHEMA IF EXISTS postal_reference CASCADE; CREATE SCHEMA postal_reference AUTHORIZATION logistics_postal_owner;" >/dev/null
 
 docker exec -i "$container_name" psql -U "$app_user" -d "$test_database" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE SCHEMA IF NOT EXISTS fnd01_unrelated_sentinel;

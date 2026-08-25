@@ -20,6 +20,29 @@ const schema = z.object({
   SUPPORTED_CURRENCIES: z.string().default("AED,EUR,GBP,INR,SGD,USD"),
 });
 export type RuntimeConfig = z.infer<typeof schema>;
+
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+export function isRequestOriginAllowed(
+  requestOrigin: string,
+  config: Pick<RuntimeConfig, "APP_ENV" | "FRONTEND_URL">,
+): boolean {
+  try {
+    const expected = new URL(config.FRONTEND_URL);
+    const actual = new URL(requestOrigin);
+    if (actual.origin === expected.origin) return true;
+    if (config.APP_ENV === "production") return false;
+    return (
+      loopbackHosts.has(actual.hostname) &&
+      loopbackHosts.has(expected.hostname) &&
+      actual.protocol === expected.protocol &&
+      actual.port === expected.port
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuntimeConfig {

@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppError, AppService } from "../src/app.service.js";
 import { tenantCreateSchema } from "@logistics/domain";
-import { withPlatform, withTenant } from "@logistics/db";
+import { createDatabase, withPlatform, withTenant } from "@logistics/db";
+import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const input = (code: string, email: string) =>
   tenantCreateSchema.parse({
@@ -12,9 +20,8 @@ const input = (code: string, email: string) =>
     address: {
       line1: "1 Main Road",
       line2: "",
-      city: "Kolkata",
-      region: "West Bengal",
       postalCode: "700001",
+      postalLocalityId: "70000100-0000-4000-8000-000000000001",
       country: "IN",
     },
     timezone: "Asia/Kolkata",
@@ -40,6 +47,7 @@ describe.sequential(
     let tenantA = "";
     let tenantB = "";
     let inviteA = "";
+    let inviteB = "";
     beforeAll(async () => {
       const login = await service.login(
         process.env.PLATFORM_ADMIN_EMAIL ?? "admin@local.test",
@@ -80,12 +88,294 @@ describe.sequential(
         "202608250007_all_feature_canonical",
         "202608250008_all_feature_gap_repairs",
         "202608250009_alert_tenant_root_fallback",
+        "202608250010_fnd01_postal_localities",
+        "202608250011_fnd01_postal_directory_hardening",
+        "202608250012_fnd01_postal_importer_identity",
+        "202608250013_fnd01_postal_importer_fk_privilege",
+        "202608250014_fnd01_postal_importer_table_privileges",
+        "202608250015_fnd01_postal_runtime_lock_privilege",
+        "202608250016_fnd01_postal_owner_handoff_contract",
       ]);
       await expect(service.ready()).resolves.toMatchObject({
         status: "ready",
         migration: "ready",
-        migrationCount: 8,
+        migrationCount: 15,
       });
+    });
+
+    it("FND01-PIN-C-001: returns authorized canonical localities in stable order", async () => {
+      await expect(
+        service.postalLocalities(admin, "IN", "500016"),
+      ).resolves.toMatchObject({
+        country: "IN",
+        postalCode: "500016",
+        items: [
+          {
+            id: "50001600-0000-4000-8000-000000000001",
+            locality: "Begumpet",
+            district: "Hyderabad",
+            city: "Hyderabad",
+            region: "Telangana",
+          },
+        ],
+      });
+      const ambiguous = await service.postalLocalities(admin, "IN", "110001");
+      expect(ambiguous.items.map((row) => row.locality)).toEqual([
+        "Connaught Place",
+        "Parliament Street",
+      ]);
+      await expect(
+        service.postalLocalities(
+          { ...admin, platformAdmin: false },
+          "IN",
+          "500016",
+        ),
+      ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+      await expect(
+        service.postalLocalities(admin, "IN", "999999"),
+      ).rejects.toMatchObject({ status: 404, code: "POSTAL_CODE_NOT_FOUND" });
+    });
+
+    it("FND01-PIN-M-001: protects immutable active directory rows and records lifecycle metadata", async () => {
+      const versions = await service.db.$queryRawUnsafe<
+        Array<Record<string, unknown>>
+      >(
+        `SELECT version,status,active,row_count AS "rowCount",activated_at AS "activatedAt",activated_by AS "activatedBy"
+         FROM postal_reference.postal_directory_versions WHERE country='IN'`,
+      );
+      expect(versions.filter((version) => version.active)).toHaveLength(1);
+      expect(
+        versions.find((version) => version.version === "2026-08-25-fixture"),
+      ).toEqual(
+        expect.objectContaining({
+          status: "ACTIVE",
+          active: true,
+          rowCount: 5,
+          activatedAt: expect.any(Date),
+          activatedBy: expect.any(String),
+        }),
+      );
+      await expect(
+        withPlatform(service.db, async (tx) => {
+          await tx.$executeRawUnsafe(
+            `SELECT set_config('app.postal_import_context','on',true)`,
+          );
+          return tx.$executeRawUnsafe(
+            `UPDATE postal_reference.postal_localities SET locality_name='Tampered'
+             WHERE id='50001600-0000-4000-8000-000000000001'::uuid`,
+          );
+        }),
+      ).rejects.toThrow(/permission denied|require logistics_postal_importer/);
+      const ownership = await service.db.$queryRawUnsafe<
+        Array<{ runtime: string; schemaOwner: string; tableOwners: string[] }>
+      >(
+        `SELECT session_user AS runtime,
+          (SELECT r.rolname FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE n.nspname='postal_reference') AS "schemaOwner",
+          (SELECT array_agg(DISTINCT r.rolname ORDER BY r.rolname) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='postal_reference' AND c.relname IN ('postal_directory_versions','postal_localities')) AS "tableOwners"`,
+      );
+      expect(ownership[0]).toEqual({
+        runtime: "logistics_app",
+        schemaOwner: "logistics_postal_owner",
+        tableOwners: ["logistics_postal_owner"],
+      });
+      await expect(
+        service.db.$executeRawUnsafe(
+          `ALTER TABLE postal_reference.postal_localities DISABLE TRIGGER postal_localities_import_only`,
+        ),
+      ).rejects.toThrow(/must be owner|permission denied/);
+      await expect(
+        service.db.$executeRawUnsafe(
+          `DROP FUNCTION postal_reference.guard_postal_directory_mutation() CASCADE`,
+        ),
+      ).rejects.toThrow(/must be owner|permission denied/);
+      await expect(
+        service.db.$executeRawUnsafe(`DROP SCHEMA postal_reference CASCADE`),
+      ).rejects.toThrow(/must be owner|permission denied/);
+    });
+
+    it("FND01-PIN-M-002: checksum-verified offline import is idempotent and conflict-safe", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "logistics-postal-"));
+      const original =
+        "pincode,officename,Districtname,statename,Taluk\n600001,Chennai GPO,Chennai,Tamil Nadu,Chennai\n600002,Anna Road,Chennai,Tamil Nadu,Chennai\n";
+      const changed = original.replace("Anna Road", "Mount Road");
+      const importVersion = `fnd01-import-test-${randomUUID()}`;
+      const firstFile = join(directory, "official.csv");
+      const changedFile = join(directory, "changed.csv");
+      await writeFile(firstFile, original, "utf8");
+      await writeFile(changedFile, changed, "utf8");
+      const run = (
+        file: string,
+        checksum: string,
+        importDatabaseUrl = process.env.TEST_POSTAL_IMPORT_DATABASE_URL,
+        environment: NodeJS.ProcessEnv = {},
+      ) =>
+        execFileAsync(
+          "pnpm",
+          [
+            "--filter",
+            "@logistics/db",
+            "postal:import",
+            "--",
+            "--file",
+            file,
+            "--version",
+            importVersion,
+            "--sha256",
+            checksum,
+            "--source-name",
+            "Department of Posts OGD test extract",
+            "--source-uri",
+            "https://www.data.gov.in/catalog/all-india-pincode-directory",
+            "--imported-by",
+            "fnd01-integration",
+          ],
+          {
+            cwd: resolve(import.meta.dirname, "../../.."),
+            env: {
+              ...process.env,
+              APP_ENV: "test",
+              POSTAL_DIRECTORY_MIN_ROWS: "2",
+              POSTAL_IMPORT_DATABASE_URL: importDatabaseUrl,
+              POSTAL_IMPORT_EXPECTED_DATABASE: "logistics_test",
+              ...environment,
+            },
+          },
+        );
+      try {
+        const checksum = createHash("sha256").update(original).digest("hex");
+        const testImportUrl = process.env.TEST_POSTAL_IMPORT_DATABASE_URL;
+        if (!testImportUrl)
+          throw new Error("TEST_POSTAL_IMPORT_DATABASE_URL is required");
+        const wrongDatabaseUrl = testImportUrl.replace(
+          "/logistics_test?",
+          "/logistics?",
+        );
+        await expect(
+          run(firstFile, checksum, wrongDatabaseUrl),
+        ).rejects.toMatchObject({
+          stderr: expect.stringContaining("same host, port, and database"),
+        });
+        await expect(
+          run(firstFile, checksum, process.env.TEST_DATABASE_URL),
+        ).rejects.toMatchObject({
+          stderr: expect.stringContaining("username separate from the runtime"),
+        });
+        await expect(
+          run(firstFile, checksum, testImportUrl, { APP_ENV: "production" }),
+        ).rejects.toMatchObject({
+          stderr: expect.stringContaining(
+            "cannot target a test/dev/local database",
+          ),
+        });
+        expect((await run(firstFile, checksum)).stdout).toContain(
+          '"replayed":false',
+        );
+        expect((await run(firstFile, checksum)).stdout).toContain(
+          '"replayed":true',
+        );
+        const snapshot = await service.provision(
+          admin,
+          input("PIN-SNAPSHOT", "pin-snapshot@test.local"),
+          "pin-snapshot-before-activation",
+          "pin-snapshot-before-activation",
+        );
+        const snapshotBefore = (
+          await service.tenantDetail(admin, String(snapshot.tenant.id))
+        ).tenant.address;
+        const activated = await execFileAsync(
+          "pnpm",
+          [
+            "--filter",
+            "@logistics/db",
+            "postal:import",
+            "--",
+            "--file",
+            firstFile,
+            "--version",
+            importVersion,
+            "--sha256",
+            checksum,
+            "--source-name",
+            "Department of Posts OGD test extract",
+            "--source-uri",
+            "https://www.data.gov.in/catalog/all-india-pincode-directory",
+            "--imported-by",
+            "fnd01-integration",
+            "--activate",
+            "true",
+          ],
+          {
+            cwd: resolve(import.meta.dirname, "../../.."),
+            env: {
+              ...process.env,
+              APP_ENV: "test",
+              POSTAL_DIRECTORY_MIN_ROWS: "2",
+              POSTAL_IMPORT_DATABASE_URL:
+                process.env.TEST_POSTAL_IMPORT_DATABASE_URL,
+              POSTAL_IMPORT_EXPECTED_DATABASE: "logistics_test",
+            },
+          },
+        );
+        expect(activated.stdout).toContain('"status":"ACTIVE"');
+        const lifecycle = await service.db.$queryRawUnsafe<
+          Array<{ version: string; status: string; active: boolean }>
+        >(
+          `SELECT version,status,active FROM postal_reference.postal_directory_versions WHERE country='IN' ORDER BY version`,
+        );
+        expect(lifecycle.filter((version) => version.active)).toHaveLength(1);
+        expect(
+          lifecycle.find((version) => version.version === "2026-08-25-fixture"),
+        ).toEqual(
+          expect.objectContaining({ status: "RETIRED", active: false }),
+        );
+        expect(
+          lifecycle.find((version) => version.version === importVersion),
+        ).toEqual(expect.objectContaining({ status: "ACTIVE", active: true }));
+        await expect(
+          service.postalLocalities(admin, "IN", "600001"),
+        ).resolves.toMatchObject({
+          items: [expect.objectContaining({ locality: "Chennai GPO" })],
+        });
+        await expect(service.ready()).resolves.toMatchObject({
+          status: "ready",
+        });
+        expect(
+          (await service.tenantDetail(admin, String(snapshot.tenant.id))).tenant
+            .address,
+        ).toEqual(snapshotBefore);
+        const importUrl = process.env.TEST_POSTAL_IMPORT_DATABASE_URL;
+        if (!importUrl)
+          throw new Error("TEST_POSTAL_IMPORT_DATABASE_URL is required");
+        const importDb = createDatabase(importUrl);
+        try {
+          await importDb.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+              `UPDATE postal_reference.postal_directory_versions SET active=false,status='RETIRED'
+               WHERE country='IN' AND status='ACTIVE'`,
+            );
+            await tx.$executeRawUnsafe(
+              `UPDATE postal_reference.postal_directory_versions
+               SET active=true,status='ACTIVE',activated_at=now(),activated_by='fnd01-fixture-restore'
+               WHERE country='IN' AND version='2026-08-25-fixture'`,
+            );
+          });
+        } finally {
+          await importDb.$disconnect();
+        }
+        await expect(
+          service.postalLocalities(admin, "IN", "700001"),
+        ).resolves.toMatchObject({
+          items: [expect.objectContaining({ locality: "Kolkata GPO" })],
+        });
+        const changedChecksum = createHash("sha256")
+          .update(changed)
+          .digest("hex");
+        await expect(run(changedFile, changedChecksum)).rejects.toMatchObject({
+          stderr: expect.stringContaining("Postal version conflict"),
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     });
 
     it("FND01-A-006: every live tenant table has forced RLS, a policy, tenant-leading index and declared nullability", async () => {
@@ -271,6 +561,36 @@ describe.sequential(
         entities: 1,
         events: 1,
       });
+      const detail = await service.tenantDetail(admin, tenantA);
+      expect(detail.tenant.address).toMatchObject({
+        country: "IN",
+        postalCode: "700001",
+        postalLocalityId: "70000100-0000-4000-8000-000000000001",
+        locality: "Kolkata GPO",
+        city: "Kolkata",
+        region: "West Bengal",
+        district: "Kolkata",
+        directoryVersion: "2026-08-25-fixture",
+        postalReferenceStatus: "DIRECTORY",
+      });
+      await expect(
+        service.provision(
+          admin,
+          {
+            ...input("TENANT-PIN-MISMATCH", "pin-mismatch@test.local"),
+            address: {
+              ...input("TENANT-PIN-MISMATCH", "pin-mismatch@test.local")
+                .address,
+              postalCode: "500016",
+            },
+          },
+          "test-key-pin-mismatch",
+          "provision-pin-mismatch",
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        code: "POSTAL_REFERENCE_CHANGED",
+      });
     });
 
     it("FND01-I-003: injected provisioning failure rolls back and reconciles one safe alert", async () => {
@@ -347,6 +667,7 @@ describe.sequential(
         );
       const b = winner.value;
       tenantB = String(b.tenant.id);
+      inviteB = String(b.invitationUrl).split("token=")[1]!;
       const duplicateFacts = await withPlatform(service.db, (tx) =>
         tx.$queryRawUnsafe<Array<{ tenants: number; invitations: number }>>(
           `SELECT (SELECT count(*) FROM app.tenants WHERE code='TENANT-B')::int tenants,(SELECT count(*) FROM app.owner_invitations i JOIN app.tenants t ON t.id=i.tenant_id WHERE t.code='TENANT-B')::int invitations`,
@@ -401,11 +722,59 @@ describe.sequential(
       ).toBe(true);
     });
 
+    it("FND01-C-007: Platform Admin can reissue a missed owner activation link safely", async () => {
+      const before = await service.tenantDetail(admin, tenantB);
+      const invitation = (
+        before.invitations as Array<{ id: string; version: number }>
+      )[0]!;
+      const result = await service.reissueOwnerInvitation(
+        admin,
+        tenantB,
+        invitation.version,
+        "Owner did not receive the original invitation",
+        "owner-invitation-reissue",
+        "owner-invitation-reissue-key",
+        "http://localhost:3000",
+      );
+      expect(result.activationUrl).toMatch(
+        /^http:\/\/localhost:3000\/accept-invitation\?token=/,
+      );
+      await expect(service.invitationPreview(inviteB)).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+      const replacementToken = String(result.activationUrl).split("token=")[1]!;
+      await expect(
+        service.invitationPreview(replacementToken),
+      ).resolves.toMatchObject({
+        name: "TENANT-B Logistics",
+      });
+      const replay = await service.reissueOwnerInvitation(
+        admin,
+        tenantB,
+        invitation.version,
+        "Owner did not receive the original invitation",
+        "owner-invitation-reissue-replay",
+        "owner-invitation-reissue-key",
+        "http://localhost:3000",
+      );
+      expect(replay.activationUrl).toBeNull();
+      const evidence = await withPlatform(service.db, (tx) =>
+        tx.$queryRawUnsafe<Array<{ versions: number; audits: number }>>(
+          `SELECT (SELECT version FROM app.owner_invitations WHERE id=$1::uuid)::int versions,(SELECT count(*) FROM audit.audit_events WHERE action='owner.invitation.reissued' AND target_id=$1::uuid)::int audits`,
+          invitation.id,
+        ),
+      );
+      expect(evidence[0]).toEqual({
+        versions: invitation.version + 1,
+        audits: 1,
+      });
+    });
+
     it("FND01-R-001: platform report reconciles canonical tenants without probe payload", async () => {
       const report = await service.platformReport(admin);
-      expect(report.totals).toMatchObject({ total: 2, active: 2, inactive: 0 });
+      expect(report.totals).toMatchObject({ total: 3, active: 3, inactive: 0 });
       expect(JSON.stringify(report)).not.toContain("B secret");
-      expect(report.tenants).toHaveLength(2);
+      expect(report.tenants).toHaveLength(3);
     });
 
     it("FND01-A-007: mixed platform/tenant operational tables isolate A from B and platform rows", async () => {
@@ -584,7 +953,7 @@ describe.sequential(
         tenantId: tenantA,
         jobKey: "tenant-a-job",
       });
-      expect((await service.platformReport(admin)).totals.active).toBe(2);
+      expect((await service.platformReport(admin)).totals.active).toBe(3);
     });
 
     it("FND01-I-005: lifecycle retries are stable and mismatched payloads conflict", async () => {

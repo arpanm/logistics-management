@@ -229,6 +229,15 @@ export class AdvancedDomainController {
       201,
     );
   }
+  @Get("contracts/versions") contractVersions(
+    @Query("search") search: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () =>
+      this.service.contractVersions(await this.actor(req), search ?? ""),
+    );
+  }
   @Post("vendors/:id/banks") bank(
     @Param("id") id: string,
     @Body() body: unknown,
@@ -735,6 +744,15 @@ export class AdvancedDomainController {
         );
       },
       201,
+    );
+  }
+  @Get("payment-batches") paymentBatches(
+    @Query("search") search: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () =>
+      this.service.paymentBatches(await this.actor(req), search ?? ""),
     );
   }
   @Post("payment-batches/:id/transition") paymentTransition(

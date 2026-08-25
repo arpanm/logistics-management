@@ -8,9 +8,18 @@ export type CanonicalField = {
     | "datetime-local"
     | "select"
     | "textarea"
-    | "json";
+    | "list"
+    | "key-value"
+    | "records"
+    | "geofence"
+    | "reference"
+    | "timezone"
+    | "currency";
   required?: boolean;
   options?: readonly string[];
+  help?: string;
+  referenceResource?: string;
+  recordColumns?: readonly { key: string; label: string; kind?: "number" }[];
 };
 export type CanonicalManifest = {
   feature: string;
@@ -25,6 +34,20 @@ const ref = (key: string, label: string, required = true): CanonicalField => ({
   key,
   label,
   required,
+});
+const reference = (
+  key: string,
+  label: string,
+  referenceResource: string,
+  required = true,
+  help?: string,
+): CanonicalField => ({
+  key,
+  label,
+  kind: "reference",
+  referenceResource,
+  required,
+  help,
 });
 const number = (
   key: string,
@@ -61,12 +84,34 @@ export const canonicalManifests = {
         required: true,
         options: ["LEGAL_ENTITY", "REGION", "BRANCH", "TEAM", "HUB"],
       },
-      ref("parentId", "Parent node ID", false),
-      ref("authorizationScopeNodeId", "Authorization scope ID", false),
-      ref("timezone", "Timezone"),
+      reference(
+        "parentId",
+        "Parent node",
+        "organization-nodes",
+        false,
+        "The node directly above this one in the organization hierarchy.",
+      ),
+      reference(
+        "authorizationScopeNodeId",
+        "Authorization scope",
+        "organization-nodes",
+        false,
+        "Controls which scoped users can see and manage this record. Leave empty to inherit an allowed scope.",
+      ),
+      { key: "timezone", label: "Timezone", kind: "timezone", required: true },
       { key: "address", label: "Address", kind: "textarea" },
-      { key: "postalCodes", label: "Postal codes (JSON array)", kind: "json" },
-      { key: "geofence", label: "Geofence (JSON)", kind: "json" },
+      {
+        key: "postalCodes",
+        label: "Postal codes",
+        kind: "list",
+        help: "Enter one or more postal codes separated by commas.",
+      },
+      {
+        key: "geofence",
+        label: "Geofence",
+        kind: "geofence",
+        help: "Draw a polygon, choose a fixed point and radius, or use a radius around the contextual pickup/drop/office point.",
+      },
       date("activeFrom", "Active from"),
       date("activeTo", "Active to", false),
     ],
@@ -84,9 +129,15 @@ export const canonicalManifests = {
       ref("displayName", "Display name"),
       ref("email", "Email", false),
       ref("mobile", "Mobile", false),
-      ref("managerId", "Manager ID", false),
-      ref("homeNodeId", "Home node ID"),
-      ref("linkedMembershipId", "Linked user membership", false),
+      reference("managerId", "Manager", "employees", false),
+      reference("homeNodeId", "Home organization node", "organization-nodes"),
+      reference(
+        "linkedMembershipId",
+        "Linked user membership",
+        "access-users",
+        false,
+        "Connects this employee to an activated application user.",
+      ),
       date("activeFrom", "Active from"),
       date("activeTo", "Active to", false),
     ],
@@ -103,9 +154,20 @@ export const canonicalManifests = {
       ref("code", "Client code"),
       ref("legalName", "Legal name"),
       ref("industry", "Industry", false),
-      ref("billingEntityId", "Billing entity node ID"),
-      ref("accountManagerEmployeeId", "Account manager ID", false),
-      ref("authorizationScopeNodeId", "Authorization scope ID", false),
+      reference("billingEntityId", "Billing entity", "organization-nodes"),
+      reference(
+        "accountManagerEmployeeId",
+        "Account manager",
+        "employees",
+        false,
+      ),
+      reference(
+        "authorizationScopeNodeId",
+        "Authorization scope",
+        "organization-nodes",
+        false,
+        "Controls scoped access; leave empty to inherit an allowed scope.",
+      ),
       ref("taxIdentifier", "GSTIN / tax ID", false),
       ref("escalationEmail", "Escalation email", false),
       ref("escalationMobile", "Escalation mobile", false),
@@ -127,15 +189,24 @@ export const canonicalManifests = {
     singular: "client location",
     description: "Client-owned service locations, managers and geofences.",
     fields: [
-      ref("clientId", "Client ID"),
+      reference("clientId", "Client", "clients"),
       ref("code", "Location code"),
       ref("name", "Name"),
       ref("locationType", "Location type"),
-      ref("organizationNodeId", "Organization node ID"),
-      ref("managerEmployeeId", "Manager ID", false),
-      ref("authorizationScopeNodeId", "Authorization scope ID", false),
+      reference(
+        "organizationNodeId",
+        "Organization node",
+        "organization-nodes",
+      ),
+      reference("managerEmployeeId", "Manager", "employees", false),
+      reference(
+        "authorizationScopeNodeId",
+        "Authorization scope",
+        "organization-nodes",
+        false,
+      ),
       ref("mobile", "Mobile", false),
-      { key: "geofence", label: "Geofence (JSON)", kind: "json" },
+      { key: "geofence", label: "Geofence", kind: "geofence" },
     ],
     transitions: { ACTIVE: ["INACTIVE"], INACTIVE: ["ACTIVE"] },
   },
@@ -146,7 +217,7 @@ export const canonicalManifests = {
     singular: "contract",
     description: "Effective, versioned client terms and document requirements.",
     fields: [
-      ref("clientId", "Client ID"),
+      reference("clientId", "Client", "clients"),
       ref("code", "Contract code"),
       ref("name", "Name"),
       date("effectiveFrom", "Effective from"),
@@ -161,10 +232,16 @@ export const canonicalManifests = {
       },
       {
         key: "documentRequirements",
-        label: "Required documents (JSON array)",
-        kind: "json",
+        label: "Required documents",
+        kind: "list",
+        help: "Enter document names separated by commas; the application creates the structured list.",
       },
-      { key: "terms", label: "Terms (JSON)", kind: "json" },
+      {
+        key: "terms",
+        label: "Terms",
+        kind: "key-value",
+        help: "Enter comma-separated key=value terms, for example detentionHours=4, fuelSurcharge=true.",
+      },
     ],
     transitions: {
       DRAFT: ["PENDING_APPROVAL"],
@@ -181,10 +258,18 @@ export const canonicalManifests = {
     description:
       "Published lane coverage, SLA commitment and exact client rate.",
     fields: [
-      ref("contractVersionId", "Contract version ID"),
+      reference(
+        "contractVersionId",
+        "Contract version",
+        "commands/contracts/versions",
+      ),
       ref("code", "Lane code"),
-      ref("originLocationId", "Origin location ID"),
-      ref("destinationLocationId", "Destination location ID"),
+      reference("originLocationId", "Origin location", "client-locations"),
+      reference(
+        "destinationLocationId",
+        "Destination location",
+        "client-locations",
+      ),
       ref("truckType", "Truck type"),
       ref("cargoType", "Cargo type", false),
       number("quantityMinMilli", "Minimum quantity", false),
@@ -215,8 +300,18 @@ export const canonicalManifests = {
       number("tdsBasisPoints", "TDS basis points", false),
       ref("msmeNumber", "MSME number", false),
       number("paymentTermsDays", "Payment terms", false),
-      ref("onboardingEmployeeId", "Onboarding employee", false),
-      ref("authorizationScopeNodeId", "Authorization scope ID", false),
+      reference(
+        "onboardingEmployeeId",
+        "Onboarding employee",
+        "employees",
+        false,
+      ),
+      reference(
+        "authorizationScopeNodeId",
+        "Authorization scope",
+        "organization-nodes",
+        false,
+      ),
     ],
     transitions: {
       ONBOARDING: ["ACTIVE", "BLOCKED"],
@@ -232,7 +327,7 @@ export const canonicalManifests = {
     singular: "vehicle",
     description: "Vendor-owned fleet with capacity and GPS identity.",
     fields: [
-      ref("vendorId", "Vendor ID"),
+      reference("vendorId", "Vendor", "vendors"),
       ref("registrationNumber", "Registration number"),
       ref("vehicleType", "Vehicle type"),
       ref("make", "Make", false),
@@ -254,7 +349,7 @@ export const canonicalManifests = {
     singular: "driver",
     description: "Licensed, portal-linked drivers and safety eligibility.",
     fields: [
-      ref("vendorId", "Vendor ID"),
+      reference("vendorId", "Vendor", "vendors"),
       ref("code", "Driver code"),
       ref("displayName", "Display name"),
       ref("mobile", "Mobile"),
@@ -262,7 +357,13 @@ export const canonicalManifests = {
       ref("licenceClass", "Licence class"),
       date("licenceValidTo", "Licence valid to"),
       ref("emergencyContact", "Emergency contact", false),
-      ref("portalMembershipId", "Portal membership ID", false),
+      reference(
+        "portalMembershipId",
+        "Portal user membership",
+        "access-users",
+        false,
+        "The activated user account used to sign in to the driver portal.",
+      ),
     ],
     transitions: {
       ACTIVE: ["BLOCKED", "INACTIVE"],
@@ -279,9 +380,9 @@ export const canonicalManifests = {
       "Client-filtered, SLA-bound demand with immutable commercial snapshot.",
     fields: [
       ref("indentNo", "Indent number"),
-      ref("clientId", "Client ID"),
-      ref("clientLocationId", "Client location ID"),
-      ref("laneId", "Lane ID"),
+      reference("clientId", "Client", "clients"),
+      reference("clientLocationId", "Client location", "client-locations"),
+      reference("laneId", "Lane", "lanes"),
       number("requestedVehicles", "Requested vehicles"),
       number("quantityMilli", "Quantity milli-units"),
       instant("pickupWindowStart", "Pickup start"),
@@ -292,7 +393,13 @@ export const canonicalManifests = {
         label: "Override reason",
         kind: "textarea",
       },
-      ref("ownerMembershipId", "Owner membership", false),
+      reference(
+        "ownerMembershipId",
+        "Operational owner",
+        "access-users",
+        false,
+        "Application user responsible for this indent.",
+      ),
       {
         key: "source",
         label: "Source",
@@ -319,8 +426,8 @@ export const canonicalManifests = {
     description:
       "Split demand, eligible vendor offers and append-only assignments.",
     fields: [
-      ref("indentId", "Indent ID"),
-      ref("vendorId", "Vendor ID"),
+      reference("indentId", "Indent", "indents"),
+      reference("vendorId", "Vendor", "vendors"),
       number("allottedVehicles", "Allotted vehicles"),
       number("offeredRateMinor", "Offered rate"),
       {
@@ -332,7 +439,12 @@ export const canonicalManifests = {
       },
       instant("offeredAt", "Offered at"),
       instant("expiresAt", "Expires at"),
-      ref("ownerMembershipId", "Owner membership", false),
+      reference(
+        "ownerMembershipId",
+        "Operational owner",
+        "access-users",
+        false,
+      ),
     ],
     transitions: {
       OFFERED: ["ACCEPTED", "REJECTED", "EXPIRED"],
@@ -384,16 +496,27 @@ export const canonicalManifests = {
       "Server-calculated billing lines, posting lock and compensating reversal.",
     fields: [
       ref("invoiceNo", "Invoice number"),
-      ref("clientId", "Client ID"),
-      ref("clientLocationId", "Client location ID"),
+      reference("clientId", "Client", "clients"),
+      reference("clientLocationId", "Client location", "client-locations"),
       date("invoiceDate", "Invoice date"),
-      ref("currency", "Currency"),
+      { key: "currency", label: "Currency", kind: "currency", required: true },
       number("creditDays", "Credit days"),
       {
         key: "lines",
-        label: "Billable lines (JSON)",
-        kind: "json",
+        label: "Billable lines",
+        kind: "records",
         required: true,
+        help: "Add one line per row. Structured invoice JSON is created automatically.",
+        recordColumns: [
+          { key: "description", label: "Description" },
+          {
+            key: "quantityMilli",
+            label: "Quantity milli-units",
+            kind: "number",
+          },
+          { key: "rateMinor", label: "Rate minor units", kind: "number" },
+          { key: "taxBasisPoints", label: "Tax basis points", kind: "number" },
+        ],
       },
     ],
     transitions: {
@@ -414,7 +537,7 @@ export const canonicalManifests = {
       "Append-only receipt allocation, deduction, on-account and reversal ledger.",
     fields: [
       ref("receiptRef", "Receipt reference"),
-      ref("clientId", "Client ID"),
+      reference("clientId", "Client", "clients"),
       date("paymentDate", "Payment date"),
       number("amountMinor", "Amount minor units"),
       {
@@ -469,9 +592,10 @@ export const canonicalManifests = {
       },
       {
         key: "value",
-        label: "Configuration JSON",
-        kind: "json",
+        label: "Configuration values",
+        kind: "key-value",
         required: true,
+        help: "Enter comma-separated key=value settings. The application creates the configuration object.",
       },
       instant("effectiveFrom", "Effective from"),
       instant("effectiveTo", "Effective to", false),

@@ -109,14 +109,25 @@ export default function IntegrationsPage() {
     }
   }
   async function addMapping(endpoint: Endpoint) {
-    const raw = window.prompt("Mapping JSON", '{"fields":{}}');
+    const raw = window.prompt(
+      "Enter comma-separated source=destination field mappings",
+      "customerCode=clientCode, shipmentNo=indentNo",
+    );
     if (!raw) return;
     try {
+      const fields = Object.fromEntries(
+        raw.split(",").map((entry) => {
+          const [source, ...destination] = entry.split("=");
+          if (!source?.trim() || !destination.length)
+            throw new Error("Use source=destination for every mapping.");
+          return [source.trim(), destination.join("=").trim()];
+        }),
+      );
       await api(`/tenant/integrations/${endpoint.id}/mappings`, {
         method: "POST",
         body: JSON.stringify({
           schema: { type: "object" },
-          mapping: JSON.parse(raw),
+          mapping: { fields },
         }),
       });
       await load();

@@ -264,6 +264,16 @@ export class CanonicalController {
       201,
     );
   }
+  @Get("governance/documents")
+  governedDocuments(
+    @Query("search") search: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(req, res, async () =>
+      this.canonical.documents(await this.actor(req), search ?? ""),
+    );
+  }
   @Post("governance/documents")
   uploadDocument(
     @Body() body: unknown,

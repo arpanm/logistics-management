@@ -18,9 +18,8 @@ const tenantInput = (code: string, owner: string) =>
     address: {
       line1: "1 Scope Road",
       line2: "",
-      city: "Kolkata",
-      region: "West Bengal",
       postalCode: "700001",
+      postalLocalityId: "70000100-0000-4000-8000-000000000001",
       country: "IN",
     },
     timezone: "Asia/Kolkata",
@@ -153,8 +152,8 @@ describe.sequential(
 
     it("FND02-M-001: clean migration and runtime provisioning create deterministic owner authorization", async () => {
       await expect(app.ready()).resolves.toMatchObject({
-        latestMigration: "202608250009_alert_tenant_root_fallback",
-        migrationCount: 8,
+        latestMigration: "202608250016_fnd01_postal_owner_handoff_contract",
+        migrationCount: 15,
       });
       const facts = await withTenant(app.db, tenantA, (tx) =>
         tx.$queryRawUnsafe<

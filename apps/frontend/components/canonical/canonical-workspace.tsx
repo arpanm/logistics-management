@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
+import { SmartField } from "../forms/smart-field";
 import type { CanonicalField, CanonicalManifest } from "./manifests";
 
 type Row = Record<string, unknown> & {
@@ -25,9 +26,100 @@ const stateOf = (row: Row) => String(row.state ?? "ACTIVE");
 function inputValue(field: CanonicalField, value: string) {
   if (field.kind === "number")
     return /Minor$/.test(field.key) ? value : Number(value);
-  if (field.kind === "json") return JSON.parse(value);
+  if (field.kind === "list")
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  if (field.kind === "key-value")
+    return Object.fromEntries(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => {
+          const split = item.indexOf("=");
+          if (split < 1)
+            throw new SyntaxError("Each setting must use key=value.");
+          const key = item.slice(0, split).trim(),
+            raw = item.slice(split + 1).trim();
+          return [
+            key,
+            /^(true|false)$/i.test(raw)
+              ? raw.toLowerCase() === "true"
+              : /^-?\d+(\.\d+)?$/.test(raw)
+                ? Number(raw)
+                : raw,
+          ];
+        }),
+    );
+  if (field.kind === "records")
+    return value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const cells = line.split("|").map((cell) => cell.trim());
+        if (cells.length !== field.recordColumns?.length)
+          throw new SyntaxError(
+            "Each record must contain every displayed column.",
+          );
+        return Object.fromEntries(
+          field.recordColumns.map((column, index) => [
+            column.key,
+            column.kind === "number" ? cells[index] : cells[index],
+          ]),
+        );
+      });
+  if (field.kind === "geofence") return JSON.parse(value);
   if (field.kind === "datetime-local") return new Date(value).toISOString();
   return value;
+}
+const commaList = (value: string) =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+const keyValues = (value: string) =>
+  Object.fromEntries(
+    commaList(value).map((item) => {
+      const index = item.indexOf("=");
+      if (index < 1) throw new SyntaxError("Use key=value for every term.");
+      return [item.slice(0, index).trim(), item.slice(index + 1).trim()];
+    }),
+  );
+
+function CommandReference({
+  fieldKey,
+  label,
+  resource,
+  value,
+  required = true,
+  help,
+  onChange,
+}: {
+  fieldKey: string;
+  label: string;
+  resource: string;
+  value: string;
+  required?: boolean;
+  help?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <SmartField
+      field={{
+        key: fieldKey,
+        label,
+        kind: "reference",
+        referenceResource: resource,
+        required,
+        help,
+      }}
+      value={value}
+      onChange={onChange}
+    />
+  );
 }
 
 export function CanonicalWorkspace({
@@ -41,7 +133,10 @@ export function CanonicalWorkspace({
 }) {
   const [items, setItems] = useState<Row[]>([]),
     [selected, setSelected] = useState<Row | null>(null),
-    [values, setValues] = useState<Record<string, string>>({});
+    [values, setValues] = useState<Record<string, string>>(() => ({
+      timezone: "Asia/Kolkata",
+      currency: "INR",
+    }));
   const [loading, setLoading] = useState(true),
     [error, setError] = useState<ApiError | null>(null),
     [notice, setNotice] = useState(""),
@@ -89,7 +184,7 @@ export function CanonicalWorkspace({
         headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify(body),
       });
-      setValues({});
+      setValues({ timezone: "Asia/Kolkata", currency: "INR" });
       setNotice(`${manifest.singular} created.`);
       await load();
     } catch (value) {
@@ -103,10 +198,19 @@ export function CanonicalWorkspace({
   }
   async function open(row: Row) {
     try {
-      setSelected(await api<Row>(`${base}/${row.id}`));
-      if (manifest.resource === "vendors")
+      const detail = await api<Row>(`${base}/${row.id}`);
+      setSelected(detail);
+      const bankVendorId =
+        manifest.resource === "vendors"
+          ? row.id
+          : manifest.resource === "vendor-bills"
+            ? String(detail.vendorId ?? detail.vendor_id ?? "")
+            : "";
+      if (bankVendorId)
         setBanks(
-          await api<Array<Row>>(`/domain/commands/vendors/${row.id}/banks`),
+          await api<Array<Row>>(
+            `/domain/commands/vendors/${bankVendorId}/banks`,
+          ),
         );
       else setBanks([]);
       const subjectType =
@@ -227,44 +331,14 @@ export function CanonicalWorkspace({
             onSubmit={(event) => void create(event)}
           >
             {manifest.fields.map((field) => (
-              <label key={field.key} htmlFor={`canonical-${field.key}`}>
-                {field.label}
-                {field.kind === "select" ? (
-                  <select
-                    id={`canonical-${field.key}`}
-                    required={field.required}
-                    value={values[field.key] ?? ""}
-                    onChange={(event) =>
-                      setValues({ ...values, [field.key]: event.target.value })
-                    }
-                  >
-                    <option value="">Select…</option>
-                    {field.options?.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                ) : field.kind === "textarea" || field.kind === "json" ? (
-                  <textarea
-                    id={`canonical-${field.key}`}
-                    required={field.required}
-                    rows={field.kind === "json" ? 5 : 3}
-                    value={values[field.key] ?? ""}
-                    onChange={(event) =>
-                      setValues({ ...values, [field.key]: event.target.value })
-                    }
-                  />
-                ) : (
-                  <input
-                    id={`canonical-${field.key}`}
-                    type={field.kind ?? "text"}
-                    required={field.required}
-                    value={values[field.key] ?? ""}
-                    onChange={(event) =>
-                      setValues({ ...values, [field.key]: event.target.value })
-                    }
-                  />
-                )}
-              </label>
+              <SmartField
+                key={field.key}
+                field={field}
+                value={values[field.key] ?? ""}
+                onChange={(value) =>
+                  setValues((current) => ({ ...current, [field.key]: value }))
+                }
+              />
             ))}
             <button className="primary" type="submit">
               Create {manifest.singular}
@@ -296,16 +370,13 @@ export function CanonicalWorkspace({
               });
             }}
           >
-            <label>
-              Vendor ID
-              <input
-                required
-                value={values.vendorId ?? ""}
-                onChange={(e) =>
-                  setValues({ ...values, vendorId: e.target.value })
-                }
-              />
-            </label>
+            <CommandReference
+              fieldKey="vendorId"
+              label="Vendor"
+              resource="vendors"
+              value={values.vendorId ?? ""}
+              onChange={(value) => setValues({ ...values, vendorId: value })}
+            />
             <label>
               Vendor invoice number
               <input
@@ -327,16 +398,13 @@ export function CanonicalWorkspace({
                 }
               />
             </label>
-            <label>
-              Delivered trip ID
-              <input
-                required
-                value={values.tripId ?? ""}
-                onChange={(e) =>
-                  setValues({ ...values, tripId: e.target.value })
-                }
-              />
-            </label>
+            <CommandReference
+              fieldKey="tripId"
+              label="Delivered trip"
+              resource="trips"
+              value={values.tripId ?? ""}
+              onChange={(value) => setValues({ ...values, tripId: value })}
+            />
             <label>
               Claimed amount (minor)
               <input
@@ -407,24 +475,49 @@ export function CanonicalWorkspace({
               />
             </label>
             <label>
-              Verified bank version ID
-              <input
+              Verified bank account
+              <select
                 required
                 value={values.bankVersionId ?? ""}
                 onChange={(event) =>
                   setValues({ ...values, bankVersionId: event.target.value })
                 }
-              />
+              >
+                <option value="">Select a verified bank account…</option>
+                {banks
+                  .filter((bank) => bank.state === "VERIFIED")
+                  .map((bank) => (
+                    <option key={bank.id} value={bank.id}>
+                      {String(bank.accountHolder)} · ••••
+                      {String(bank.accountLast4)}
+                    </option>
+                  ))}
+              </select>
+              <small>
+                Only bank versions verified by a different authorized user are
+                available.
+              </small>
             </label>
             <label>
-              Approved vendor bill ID
-              <input
+              Approved vendor bill
+              <select
                 required
                 value={values.paymentBillId ?? ""}
                 onChange={(event) =>
                   setValues({ ...values, paymentBillId: event.target.value })
                 }
-              />
+              >
+                <option value="">Select an approved bill…</option>
+                {items
+                  .filter((item) =>
+                    ["APPROVED", "POSTED"].includes(stateOf(item)),
+                  )
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {titleOf(item)}
+                    </option>
+                  ))}
+              </select>
             </label>
             <label>
               Amount (minor)
@@ -456,18 +549,21 @@ export function CanonicalWorkspace({
             }}
           >
             <h3>Payment lifecycle</h3>
-            <label>
-              Batch ID
-              <input
-                required
-                value={values.existingBatchId ?? ""}
-                onChange={(event) =>
-                  setValues({ ...values, existingBatchId: event.target.value })
-                }
-              />
-            </label>
+            <CommandReference
+              fieldKey="existingBatchId"
+              label="Payment batch"
+              resource="commands/payment-batches"
+              value={values.existingBatchId ?? ""}
+              onChange={(value) =>
+                setValues({ ...values, existingBatchId: value })
+              }
+            />
             <label>
               Current version
+              <small>
+                Shown on the selected payment batch. It prevents overwriting a
+                newer change.
+              </small>
               <input
                 required
                 type="number"
@@ -616,15 +712,17 @@ export function CanonicalWorkspace({
               }}
             >
               <h3>Move hierarchy node</h3>
-              <label>
-                New parent ID
-                <input
-                  value={command.parentId ?? ""}
-                  onChange={(e) =>
-                    setCommand({ ...command, parentId: e.target.value })
-                  }
-                />
-              </label>
+              <CommandReference
+                fieldKey="parentId"
+                label="New parent node"
+                resource="organization-nodes"
+                required={false}
+                help="Optional. Leave empty to move the node to the top level."
+                value={command.parentId ?? ""}
+                onChange={(value) =>
+                  setCommand({ ...command, parentId: value })
+                }
+              />
               <label>
                 Reason
                 <input
@@ -656,19 +754,15 @@ export function CanonicalWorkspace({
                 }}
               >
                 <h3>Reassign and deactivate</h3>
-                <label>
-                  Replacement employee ID
-                  <input
-                    required
-                    value={command.replacementEmployeeId ?? ""}
-                    onChange={(e) =>
-                      setCommand({
-                        ...command,
-                        replacementEmployeeId: e.target.value,
-                      })
-                    }
-                  />
-                </label>
+                <CommandReference
+                  fieldKey="replacementEmployeeId"
+                  label="Replacement employee"
+                  resource="employees"
+                  value={command.replacementEmployeeId ?? ""}
+                  onChange={(value) =>
+                    setCommand({ ...command, replacementEmployeeId: value })
+                  }
+                />
                 <label>
                   Reason
                   <input
@@ -725,27 +819,28 @@ export function CanonicalWorkspace({
                   <option>QUEUE_OWNER</option>
                 </select>
               </label>
-              <label>
-                Organization node ID
-                <input
-                  value={command.organizationNodeId ?? ""}
-                  onChange={(event) =>
-                    setCommand({
-                      ...command,
-                      organizationNodeId: event.target.value,
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Client ID
-                <input
-                  value={command.clientId ?? ""}
-                  onChange={(event) =>
-                    setCommand({ ...command, clientId: event.target.value })
-                  }
-                />
-              </label>
+              <CommandReference
+                fieldKey="organizationNodeId"
+                label="Organization node"
+                resource="organization-nodes"
+                required={false}
+                help="Optional unless the assignment is organization-scoped."
+                value={command.organizationNodeId ?? ""}
+                onChange={(value) =>
+                  setCommand({ ...command, organizationNodeId: value })
+                }
+              />
+              <CommandReference
+                fieldKey="clientId"
+                label="Client"
+                resource="clients"
+                required={false}
+                help="Optional unless the assignment is client-scoped."
+                value={command.clientId ?? ""}
+                onChange={(value) =>
+                  setCommand({ ...command, clientId: value })
+                }
+              />
               <label>
                 Effective from
                 <input
@@ -772,8 +867,8 @@ export function CanonicalWorkspace({
                   expectedVersion: selected.version,
                   creditDays: Number(command.creditDays),
                   podMode: command.podMode,
-                  documentRequirements: JSON.parse(command.documents || "[]"),
-                  terms: JSON.parse(command.terms || "{}"),
+                  documentRequirements: commaList(command.documents || ""),
+                  terms: keyValues(command.terms || ""),
                   reason: command.reason,
                 });
               }}
@@ -806,18 +901,20 @@ export function CanonicalWorkspace({
                 </select>
               </label>
               <label>
-                Document requirements
+                Document requirements (Optional)
                 <textarea
-                  value={command.documents ?? "[]"}
+                  placeholder="POD, invoice copy, e-way bill"
+                  value={command.documents ?? ""}
                   onChange={(e) =>
                     setCommand({ ...command, documents: e.target.value })
                   }
                 />
               </label>
               <label>
-                Terms
+                Terms (Optional)
                 <textarea
-                  value={command.terms ?? "{}"}
+                  placeholder="detentionHours=4, fuelSurcharge=true"
+                  value={command.terms ?? ""}
                   onChange={(e) =>
                     setCommand({ ...command, terms: e.target.value })
                   }
@@ -1045,28 +1142,26 @@ export function CanonicalWorkspace({
                 }}
               >
                 <h3>Assign or replace vehicle and driver</h3>
+                <CommandReference
+                  fieldKey="vehicleId"
+                  label="Vehicle"
+                  resource="vehicles"
+                  value={command.vehicleId ?? ""}
+                  onChange={(value) =>
+                    setCommand({ ...command, vehicleId: value })
+                  }
+                />
+                <CommandReference
+                  fieldKey="driverId"
+                  label="Driver"
+                  resource="drivers"
+                  value={command.driverId ?? ""}
+                  onChange={(value) =>
+                    setCommand({ ...command, driverId: value })
+                  }
+                />
                 <label>
-                  Vehicle ID
-                  <input
-                    required
-                    value={command.vehicleId ?? ""}
-                    onChange={(e) =>
-                      setCommand({ ...command, vehicleId: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  Driver ID
-                  <input
-                    required
-                    value={command.driverId ?? ""}
-                    onChange={(e) =>
-                      setCommand({ ...command, driverId: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  Replacement reason
+                  Replacement reason (Optional)
                   <input
                     value={command.reason ?? ""}
                     onChange={(e) =>
@@ -1119,7 +1214,7 @@ export function CanonicalWorkspace({
                 </select>
               </label>
               <label>
-                Evidence note
+                Evidence note (Optional)
                 <input
                   value={command.reason ?? ""}
                   onChange={(e) =>
@@ -1272,15 +1367,17 @@ export function CanonicalWorkspace({
               }}
             >
               <h3>Allocate receipt</h3>
-              <label>
-                Invoice ID
-                <input
-                  value={command.invoiceId ?? ""}
-                  onChange={(e) =>
-                    setCommand({ ...command, invoiceId: e.target.value })
-                  }
-                />
-              </label>
+              <CommandReference
+                fieldKey="invoiceId"
+                label="Invoice"
+                resource="invoices"
+                required={false}
+                help="Optional for deductions or on-account receipts."
+                value={command.invoiceId ?? ""}
+                onChange={(value) =>
+                  setCommand({ ...command, invoiceId: value })
+                }
+              />
               <label>
                 Entry type
                 <select
@@ -1309,7 +1406,7 @@ export function CanonicalWorkspace({
                 />
               </label>
               <label>
-                Reason
+                Reason (Optional)
                 <input
                   value={command.reason ?? ""}
                   onChange={(e) =>
@@ -1351,17 +1448,19 @@ export function CanonicalWorkspace({
                   }
                 />
               </label>
+              <CommandReference
+                fieldKey="documentId"
+                label="Governed document"
+                resource="governance/documents"
+                required={false}
+                help="Optional. Attach governed evidence, or leave empty when no document is required."
+                value={command.documentId ?? ""}
+                onChange={(value) =>
+                  setCommand({ ...command, documentId: value })
+                }
+              />
               <label>
-                Governed document ID
-                <input
-                  value={command.documentId ?? ""}
-                  onChange={(e) =>
-                    setCommand({ ...command, documentId: e.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Valid from
+                Valid from (Optional)
                 <input
                   type="date"
                   value={command.validFrom ?? ""}
@@ -1371,7 +1470,7 @@ export function CanonicalWorkspace({
                 />
               </label>
               <label>
-                Valid to
+                Valid to (Optional)
                 <input
                   type="date"
                   value={command.validTo ?? ""}

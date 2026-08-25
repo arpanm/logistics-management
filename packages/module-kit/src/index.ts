@@ -18,7 +18,8 @@ export type FieldKind =
   | "date"
   | "boolean"
   | "select"
-  | "json";
+  | "key-value"
+  | "timezone";
 
 export type ModuleField = {
   key: string;
@@ -81,7 +82,7 @@ export const resourceManifests = {
       },
       { key: "parentCode", label: "Parent code", kind: "text" },
       { key: "address", label: "Address", kind: "textarea" },
-      { key: "timezone", label: "Timezone", kind: "text" },
+      { key: "timezone", label: "Timezone", kind: "timezone", required: true },
     ],
     initialStatus: "DRAFT",
     transitions: lifecycle,
@@ -160,7 +161,13 @@ export const resourceManifests = {
         options: ["APPROVAL", "DELEGATION", "CONTROL"],
       },
       { key: "appliesTo", label: "Applies to", kind: "text", required: true },
-      { key: "rule", label: "Rule", kind: "json", required: true },
+      {
+        key: "rule",
+        label: "Rule values",
+        kind: "key-value",
+        required: true,
+        help: "Enter comma-separated key=value conditions.",
+      },
       { key: "owner", label: "Control owner", kind: "text" },
     ],
     initialStatus: "DRAFT",
@@ -197,8 +204,9 @@ export const resourceManifests = {
       { key: "namespace", label: "Namespace", kind: "text", required: true },
       {
         key: "value",
-        label: "Configuration JSON",
-        kind: "json",
+        label: "Configuration values",
+        kind: "key-value",
+        help: "Enter comma-separated key=value settings.",
         required: true,
       },
       { key: "effectiveFrom", label: "Effective from", kind: "date" },

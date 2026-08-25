@@ -36,7 +36,12 @@ type ListResult = {
   pageSize: number;
 };
 const empty = (manifest: UiManifest) =>
-  Object.fromEntries(manifest.fields.map((field) => [field.key, ""]));
+  Object.fromEntries(
+    manifest.fields.map((field) => [
+      field.key,
+      field.kind === "timezone" ? "Asia/Kolkata" : "",
+    ]),
+  );
 
 function Field({
   field,
@@ -61,6 +66,8 @@ function Field({
   return (
     <label htmlFor={common.id}>
       {field.label}
+      {field.required ? "" : " (Optional)"}
+      {field.help && <small>{field.help}</small>}
       {field.kind === "select" ? (
         <select {...common}>
           <option value="">Select…</option>
@@ -68,11 +75,23 @@ function Field({
             <option key={option}>{option}</option>
           ))}
         </select>
-      ) : field.kind === "textarea" || field.kind === "json" ? (
+      ) : field.kind === "timezone" ? (
+        <select {...common}>
+          <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+          <option value="Asia/Dhaka">Asia/Dhaka</option>
+          <option value="Asia/Dubai">Asia/Dubai</option>
+          <option value="Asia/Singapore">Asia/Singapore</option>
+          <option value="UTC">UTC</option>
+        </select>
+      ) : field.kind === "textarea" || field.kind === "key-value" ? (
         <textarea
           {...common}
-          rows={field.kind === "json" ? 5 : 3}
-          placeholder={field.kind === "json" ? '{"key":"value"}' : undefined}
+          rows={3}
+          placeholder={
+            field.kind === "key-value"
+              ? "key=value, anotherKey=value"
+              : undefined
+          }
         />
       ) : (
         <input
@@ -139,8 +158,18 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
         .map((field) => {
           const value = values[field.key]!;
           if (field.kind === "number") return [field.key, Number(value)];
-          if (field.kind === "json")
-            return [field.key, JSON.parse(value) as unknown];
+          if (field.kind === "key-value")
+            return [
+              field.key,
+              Object.fromEntries(
+                value.split(",").map((entry) => {
+                  const [key, ...rest] = entry.split("=");
+                  if (!key?.trim() || !rest.length)
+                    throw new SyntaxError("Use key=value for every setting.");
+                  return [key.trim(), rest.join("=").trim()];
+                }),
+              ),
+            ];
           return [field.key, value];
         }),
     );
@@ -170,7 +199,7 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
         value instanceof SyntaxError
           ? {
               code: "INVALID_JSON",
-              message: "Enter valid JSON in JSON fields.",
+              message: "Enter every structured setting as key=value.",
             }
           : (value as ApiError),
       );

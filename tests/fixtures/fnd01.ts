@@ -8,6 +8,16 @@ export const adminCredentials = {
 
 export type TenantFixture = ReturnType<typeof tenantFixture>;
 
+export type PostalLocality = {
+  id: string;
+  country: string;
+  postalCode: string;
+  locality: string;
+  district: string;
+  city: string;
+  region: string;
+};
+
 export function tenantFixture(label: string) {
   const suffix = crypto
     .randomUUID()
@@ -47,7 +57,7 @@ export function tenantFixture(label: string) {
   };
 }
 
-export function tenantPayload(data: TenantFixture) {
+export function tenantPayload(data: TenantFixture, postalLocalityId: string) {
   return {
     name: data.name,
     code: data.code,
@@ -56,9 +66,8 @@ export function tenantPayload(data: TenantFixture) {
     address: {
       line1: data.line1,
       line2: data.line2,
-      city: data.city,
-      region: data.region,
       postalCode: data.postalCode,
+      postalLocalityId,
       country: data.country,
     },
     timezone: data.timezone,
@@ -131,10 +140,19 @@ export async function api(
 }
 
 export async function provisionViaApi(page: Page, data: TenantFixture) {
+  const localities = await lookupPostalLocalities(page, data.postalCode);
+  const selected =
+    localities.find(
+      (item) => item.city === data.city && item.region === data.region,
+    ) ?? localities[0];
+  expect(
+    selected,
+    `postal directory contains a locality for ${data.postalCode}`,
+  ).toBeTruthy();
   const response = await api(page, "/platform/tenants", {
     method: "POST",
     headers: { "Idempotency-Key": `e2e-${crypto.randomUUID()}` },
-    data: tenantPayload(data),
+    data: tenantPayload(data, selected!.id),
   });
   expect(response.status(), await response.text()).toBe(201);
   return response.json() as Promise<{
@@ -142,6 +160,16 @@ export async function provisionViaApi(page: Page, data: TenantFixture) {
     invitation: { id: string; expiresAt: string };
     invitationUrl: string;
   }>;
+}
+
+export async function lookupPostalLocalities(page: Page, postalCode: string) {
+  const response = await api(
+    page,
+    `/reference/postal-localities?country=IN&postalCode=${encodeURIComponent(postalCode)}`,
+  );
+  expect(response.status(), await response.text()).toBe(200);
+  const body = (await response.json()) as { items: PostalLocality[] };
+  return body.items;
 }
 
 export async function openTenantForm(page: Page) {
@@ -156,15 +184,27 @@ export async function fillTenantForm(page: Page, data: TenantFixture) {
   await page.getByLabel("Legal name").fill(data.legalName);
   await page.getByLabel("GSTIN / tax identifier").fill(data.taxIdentifier);
   await page.getByLabel("Short name").fill(data.shortName);
+  const postalResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("/api/v1/reference/postal-localities") &&
+      response.url().includes(`postalCode=${data.postalCode}`),
+  );
+  await page.getByLabel("PIN code").fill(data.postalCode);
+  expect((await postalResponse).status()).toBe(200);
+  const locality = page.getByLabel("Locality");
+  if (await locality.isVisible()) {
+    await locality.selectOption({ index: 1 });
+  }
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue(data.city);
+  await expect(page.getByLabel("State", { exact: true })).toHaveValue(
+    data.region,
+  );
   await page.getByLabel("Address line 1").fill(data.line1);
   await page.getByLabel("Address line 2").fill(data.line2);
-  await page.getByLabel("City").fill(data.city);
-  await page.getByLabel("State / region").fill(data.region);
-  await page.getByLabel("Postal code").fill(data.postalCode);
-  await page.getByLabel("Country code").fill(data.country);
-  await page.getByLabel("Timezone").fill(data.timezone);
+  await page.getByLabel("Timezone").selectOption(data.timezone);
   await page.getByLabel("Locale").fill(data.locale);
-  await page.getByLabel("Currency").fill(data.currency);
+  await page.getByLabel("Currency").selectOption(data.currency);
   await page.getByLabel("Fiscal month").fill(data.fiscalMonth);
   await page.getByLabel("Fiscal day").fill(data.fiscalDay);
   await page.getByLabel("Entity name").fill(data.entityName);

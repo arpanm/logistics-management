@@ -95,16 +95,39 @@ test("E2E-FND02-01: invitation validation, identity verification, MFA, and role 
     actions: ["READ", "CREATE", "UPDATE", "EXPORT"],
   });
   expect(invited.response.status(), await invited.response.text()).toBe(201);
-  expect(invited.body.invitationUrl).toMatch(
+  const pendingCard = owner
+    .locator("article.access-card")
+    .filter({ hasText: `RM-${suffix}`.toUpperCase() });
+  await pendingCard.getByRole("button", { name: "View details" }).click();
+  const activationPanel = owner.getByRole("dialog");
+  await expect(
+    activationPanel.getByRole("heading", { name: "Pending activation" }),
+  ).toBeVisible();
+  const activationResponse = owner.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response
+        .url()
+        .endsWith(
+          `/api/v1/tenant/access/users/${invited.body.membershipId}/invitations/resend`,
+        ),
+  );
+  await activationPanel
+    .getByRole("button", { name: "Generate new activation link" })
+    .click();
+  expect((await activationResponse).status()).toBe(200);
+  const activationLink = activationPanel.getByLabel("New activation link");
+  await expect(activationLink).toHaveValue(
     /^http:\/\/127\.0\.0\.1:3000\/accept-access\?token=/,
   );
-  await expect(
-    owner.getByText(/Invitation created\. Local acceptance link/),
-  ).toBeVisible();
+  const activationUrl = await activationLink.inputValue();
+  await activationPanel
+    .getByRole("button", { name: "Close user details" })
+    .click();
 
   const invitedContext = await browser.newContext();
   const invitedPage = await invitedContext.newPage();
-  await invitedPage.goto(invited.body.invitationUrl!);
+  await invitedPage.goto(activationUrl);
   await expect(
     invitedPage.getByRole("heading", { name: "Accept access invitation" }),
   ).toBeVisible();
@@ -157,23 +180,30 @@ test("E2E-FND02-02: access lifecycle invalidates two sessions and restores narro
 }, testInfo) => {
   const fixture = await seedFnd02(page, testInfo, "ACCESS_MATRIX");
   const kam = requiredActor(fixture, "kam");
+  const northDiagnostic = requiredResource(fixture, "north");
   const ownerSession = await actorPage(browser, fixture.actors.owner);
   const first = await actorPage(browser, kam);
   const second = await actorPage(browser, kam);
 
-  await ownerSession.page.goto("/app/access/users");
-  const kamCard = ownerSession.page
-    .locator("article.access-card")
-    .filter({ hasText: "FX-KAM" });
-  await kamCard.getByRole("button", { name: "View details" }).click();
+  await ownerSession.page.goto("/app/access/probes");
   await expect(
-    ownerSession.page.getByRole("dialog", { name: "User access details" }),
+    ownerSession.page.getByRole("heading", { name: "Permission tester" }),
   ).toBeVisible();
-  await ownerSession.page
-    .getByRole("button", { name: "Preview current access" })
+  const diagnosticCard = ownerSession.page
+    .locator("article.access-card")
+    .filter({ hasText: northDiagnostic.label });
+  await diagnosticCard
+    .getByRole("button", { name: "Test read permission" })
     .click();
   await expect(
-    ownerSession.page.getByRole("heading", { name: "Authorization preview" }),
+    ownerSession.page
+      .getByRole("status")
+      .filter({
+        has: ownerSession.page.getByRole("heading", {
+          name: "Permission decision",
+        }),
+      })
+      .getByText("Allowed", { exact: true }),
   ).toBeVisible();
 
   const current = await accessApi(
@@ -652,20 +682,27 @@ test("E2E-FND02-06: reports and alerts reconcile access evidence on accessible d
   const owner = await actorPage(browser, fixture.actors.owner);
   await owner.page.goto("/app/access/reports");
   await expect(
-    owner.page.getByRole("heading", { name: "Reports and alerts" }),
+    owner.page.getByRole("heading", { name: "Activity & audit" }),
   ).toBeVisible();
+  await expect(owner.page.getByLabel("Search")).toBeVisible();
 
-  for (const [option, type] of [
-    ["Users", "users"],
-    ["Role assignments", "roles"],
-    ["Dormant users", "dormant"],
-    ["Failed logins", "failed-logins"],
-    ["Active sessions", "sessions"],
-    ["Privileged actions", "privileged-actions"],
-    ["Permission changes", "permission-changes"],
-    ["Denials", "security-events"],
+  for (const [option, type, tableLabel] of [
+    ["Users", "users", "Users results"],
+    ["Role assignments", "roles", "Roles results"],
+    ["Dormant users", "dormant", "Dormant results"],
+    ["Failed logins", "failed-logins", "Failed Logins results"],
+    ["Active sessions", "sessions", "Sessions results"],
+    ["Privileged actions", "privileged-actions", "Privileged Actions results"],
+    ["Permission changes", "permission-changes", "Permission Changes results"],
+    [
+      "Authentication & authorization events",
+      "security-events",
+      "Security Events results",
+    ],
   ] as const) {
-    await owner.page.getByLabel("Report").selectOption({ label: option });
+    await owner.page
+      .getByLabel("Evidence view")
+      .selectOption({ label: option });
     await expect(
       owner.page.getByRole("status", { name: /Loading report/ }),
     ).toHaveCount(0);
@@ -673,9 +710,13 @@ test("E2E-FND02-06: reports and alerts reconcile access evidence on accessible d
     expect(response.status(), await response.text()).toBe(200);
     const report = await body(response);
     expect(Number(report.total)).toBeGreaterThanOrEqual(0);
-    await expect(owner.page.locator("main")).toContainText(
-      /\{|No .*|Users|Role/i,
-    );
+    if (Number(report.total) > 0)
+      await expect(
+        owner.page.locator(`[aria-label="${tableLabel}"] table`),
+      ).toBeVisible();
+    else
+      await expect(owner.page.getByText("No matching evidence.")).toBeVisible();
+    await expect(owner.page.locator("main pre")).toHaveCount(0);
   }
   const alerts = await accessApi(owner.page, "/alerts");
   expect(alerts.status()).toBe(200);

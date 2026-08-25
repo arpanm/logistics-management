@@ -1,5 +1,7 @@
 import { z } from "zod";
 export * from "./canonical.js";
+export * from "./phone.js";
+import { e164MobileSchema } from "./phone.js";
 
 const trimmed = (min: number, max: number) =>
   z.string().trim().min(min).max(max);
@@ -19,21 +21,6 @@ export const DEFAULT_CURRENCIES = [
   "SGD",
   "USD",
 ] as const;
-const luminance = (colour: string) => {
-  const channels = colour
-    .slice(1)
-    .match(/.{2}/g)!
-    .map((part) => Number.parseInt(part, 16) / 255)
-    .map((value) =>
-      value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
-    );
-  return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
-};
-const contrast = (first: string, second: string) => {
-  const values = [luminance(first), luminance(second)].sort((a, b) => b - a);
-  return (values[0]! + 0.05) / (values[1]! + 0.05);
-};
-
 const tenantCreateBaseSchema = z
   .object({
     name: trimmed(2, 120),
@@ -48,9 +35,10 @@ const tenantCreateBaseSchema = z
       .object({
         line1: trimmed(2, 160),
         line2: z.string().trim().max(160).optional().default(""),
-        city: trimmed(2, 80),
-        region: trimmed(2, 80),
-        postalCode: trimmed(2, 20),
+        postalCode: z
+          .string()
+          .regex(/^[1-9][0-9]{5}$/, "Enter a valid 6-digit PIN code"),
+        postalLocalityId: z.string().uuid(),
         country: z
           .string()
           .trim()
@@ -111,11 +99,7 @@ const tenantCreateBaseSchema = z
       .object({
         name: trimmed(2, 100),
         email,
-        mobile: z
-          .string()
-          .trim()
-          .regex(/^\+[1-9]\d{7,14}$/)
-          .optional(),
+        mobile: e164MobileSchema.optional(),
       })
       .strict(),
     owner: z.object({ name: trimmed(2, 100), email }).strict(),
@@ -147,24 +131,21 @@ export function tenantCreateSchemaFor(
         path: ["currency"],
         message: "Unsupported currency code",
       });
-    if (contrast(value.branding.primaryColor, "#FFFFFF") < 4.5)
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["branding", "primaryColor"],
-        message: "Primary colour must meet WCAG AA contrast with white text",
-      });
-    if (contrast(value.branding.accentColor, "#14213D") < 4.5)
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["branding", "accentColor"],
-        message: "Accent colour must meet WCAG AA contrast with dark text",
-      });
   });
 }
 
 export const tenantCreateSchema = tenantCreateSchemaFor();
 
 export type TenantCreateInput = z.infer<typeof tenantCreateSchema>;
+
+export const postalLocalityQuerySchema = z
+  .object({
+    country: z.string().trim().toUpperCase().length(2).default("IN"),
+    postalCode: z
+      .string()
+      .regex(/^[1-9][0-9]{5}$/, "Enter a valid 6-digit PIN code"),
+  })
+  .strict();
 
 export const loginSchema = z
   .object({
@@ -245,11 +226,7 @@ export const scopeActionSchema = z.enum([
 const identifierFields = z
   .object({
     email: email.optional(),
-    mobile: z
-      .string()
-      .trim()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .optional(),
+    mobile: e164MobileSchema.optional(),
   })
   .refine((v) => Boolean(v.email || v.mobile), {
     message: "Email or mobile is required",
@@ -347,11 +324,7 @@ export const probeAccessCreateSchema = z
     assignedUserId: z.string().uuid().optional(),
     status: z.enum(["OPEN", "COMPLETED"]).default("OPEN"),
     taxIdentifier: z.string().trim().max(32).optional(),
-    mobile: z
-      .string()
-      .trim()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .optional(),
+    mobile: e164MobileSchema.optional(),
     bankDetail: z.string().trim().max(64).optional(),
     commercialRateMinor: z.number().int().safe().optional(),
     paymentMinor: z.number().int().safe().optional(),

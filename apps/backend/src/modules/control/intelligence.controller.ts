@@ -10,11 +10,13 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import ExcelJS from "exceljs";
 import { z, ZodError } from "zod";
 import { AppError, AppService } from "../../app.service.js";
 import { AccessService } from "../../access.service.js";
 import { AlertsProvider } from "../alerts/alerts.provider.js";
 import { DataProvider } from "../data/data.provider.js";
+import { importProfiles } from "../data/manifest.js";
 import { IntegrationsProvider } from "../integrations/integrations.provider.js";
 import { ControlProvider } from "./control.provider.js";
 
@@ -27,6 +29,63 @@ const lens = z.enum([
   "vendor-payable",
 ]);
 const uuid = z.string().uuid();
+const importDataset = z.enum([
+  "CLIENT",
+  "LOCATION",
+  "VENDOR",
+  "INDENT_PLACEMENT",
+  "POD",
+  "INVOICE_COLLECTION",
+  "PAYMENT_RECEIPT",
+]);
+const templateSamples: Record<
+  z.infer<typeof importDataset>,
+  readonly string[]
+> = {
+  CLIENT: ["CLIENT-001", "Example Client Pvt Ltd", "EMP-001", "30"],
+  LOCATION: ["CLIENT-001", "BLR-WH-01", "Bengaluru Warehouse", "4"],
+  VENDOR: [
+    "VENDOR-001",
+    "Example Transporters",
+    "+919876543210",
+    "EMP-001",
+    "2026-08-25",
+  ],
+  INDENT_PLACEMENT: [
+    "IND-0001",
+    "2026-08-25 10:30",
+    "CLIENT-001",
+    "BLR-WH-01",
+    "Bengaluru",
+    "Hyderabad",
+    "32FT",
+    "2026-08-25 14:30",
+    "OPEN",
+  ],
+  POD: [
+    "LR-0001",
+    "CLIENT-001",
+    "BLR-WH-01",
+    "INV-0001",
+    "KA01AB1234",
+    "2026-08-25",
+    "2026-08-26",
+  ],
+  INVOICE_COLLECTION: [
+    "INV-0001",
+    "2026-08-25",
+    "CLIENT-001",
+    "BLR-WH-01",
+    "125000.00",
+  ],
+  PAYMENT_RECEIPT: [
+    "RCPT-0001",
+    "CLIENT-001",
+    "2026-08-25",
+    "125000.00",
+    "BANK_TRANSFER",
+  ],
+};
 
 @Controller("tenant")
 export class IntelligenceController {
@@ -278,6 +337,56 @@ export class IntelligenceController {
         jobId ? uuid.parse(jobId) : undefined,
       ),
     );
+  }
+  @Get("imports/templates/:dataset")
+  async importTemplate(
+    @Param("dataset") datasetValue: string,
+    @Query("format") formatValue: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.authorized(req, "data.import.admin");
+      const dataset = importDataset.parse(datasetValue);
+      const format = z.enum(["csv", "xlsx"]).default("csv").parse(formatValue);
+      const headers = [...importProfiles[dataset]],
+        sample = [...templateSamples[dataset]];
+      const filename = `${dataset.toLowerCase()}-import-sample.${format}`;
+      if (format === "csv") {
+        const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
+        const content = `${headers.map(escape).join(",")}\r\n${sample.map(escape).join(",")}\r\n`;
+        return res.type("text/csv").attachment(filename).send(content);
+      }
+      const workbook = new ExcelJS.Workbook(),
+        sheet = workbook.addWorksheet("Sample import");
+      sheet.addRow(headers);
+      sheet.addRow(sample);
+      sheet.getRow(1).font = { bold: true };
+      sheet.columns.forEach((column) => {
+        column.width = 24;
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      return res
+        .type(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .attachment(filename)
+        .send(Buffer.from(buffer));
+    } catch (error) {
+      if (error instanceof AppError)
+        return res
+          .status(error.status)
+          .json({ code: error.code, message: error.message });
+      if (error instanceof ZodError)
+        return res.status(400).json({
+          code: "VALIDATION_FAILED",
+          message: "Choose a supported dataset and format.",
+        });
+      return res.status(500).json({
+        code: "INTERNAL_ERROR",
+        message: "The sample could not be generated.",
+      });
+    }
   }
   @Get("imports/:id/errors") importErrors(
     @Param("id") id: string,

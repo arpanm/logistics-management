@@ -100,12 +100,17 @@ test("E2E-FND01-02: validation focuses errors and creates no partial tenant stat
   expect(await tenantCount()).toBe(0);
   await openTenantForm(page);
 
-  await page.getByRole("button", { name: "Provision tenant" }).click();
-  await expect(page.getByLabel("Tenant name")).toBeFocused();
+  const provision = page.getByRole("button", { name: "Provision tenant" });
+  await expect(provision).toBeDisabled();
+  expect(
+    await page
+      .getByLabel("Tenant name")
+      .evaluate((input: HTMLInputElement) => input.checkValidity()),
+  ).toBe(false);
   expect(await tenantCount()).toBe(0);
 
   await fillTenantForm(page, tenant);
-  await page.getByLabel("Timezone").fill("Mars/Olympus");
+  await page.getByLabel("Locale").fill("not_a_locale");
   const invalidResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -117,27 +122,26 @@ test("E2E-FND01-02: validation focuses errors and creates no partial tenant stat
     "Check the highlighted fields",
   );
   await expect(page.locator(".error[role=alert]")).toBeFocused();
-  const timezone = page.getByLabel("Timezone");
-  await expect(timezone).toHaveAttribute("aria-invalid", "true");
-  const describedBy = await timezone.getAttribute("aria-describedby");
+  const locale = page.getByLabel("Locale");
+  await expect(locale).toHaveAttribute("aria-invalid", "true");
+  const describedBy = await locale.getAttribute("aria-describedby");
   expect(describedBy).toBeTruthy();
-  await expect(page.locator(`#${describedBy}`)).toContainText(
-    "Invalid IANA timezone",
-  );
+  await expect(page.locator(`#${describedBy}`)).toContainText("Invalid locale");
   await expect(
-    page.locator('.error[role="alert"] a[href="#timezone"]'),
-  ).toContainText("timezone");
+    page.locator('.error[role="alert"] a[href="#locale"]'),
+  ).toContainText("locale");
   await expectNoSeriousAccessibilityViolations(page, "tenant form validation");
   expect(await tenantCount()).toBe(0);
 
-  await timezone.fill(tenant.timezone);
-  await expect(timezone).not.toHaveAttribute("aria-invalid", "true");
-  await expect(timezone).not.toHaveAttribute("aria-describedby", /.+/);
+  await locale.fill(tenant.locale);
+  await expect(locale).not.toHaveAttribute("aria-invalid", "true");
+  await expect(locale).not.toHaveAttribute("aria-describedby", /.+/);
   await page.getByRole("button", { name: "Provision tenant" }).click();
   await expect(page.getByRole("status")).toContainText("Tenant provisioned");
   expect(await tenantCount()).toBe(1);
 
   await openTenantForm(page);
+  await page.getByLabel("PIN code").clear();
   await fillTenantForm(page, {
     ...tenant,
     ownerEmail: `duplicate-${tenant.ownerEmail}`,
@@ -536,4 +540,213 @@ test("FND01-X-002: narrow and desktop views avoid page overflow and recover from
     page.locator('[aria-label="Tenant health table"]'),
   ).toBeVisible();
   await expectNoPageOverflow(page);
+});
+
+test("E2E-FND01-PIN-01: PostgreSQL PIN lookup derives and persists a canonical tenant address", async ({
+  browser,
+  page,
+}) => {
+  const tenant = {
+    ...tenantFixture("Postal"),
+    postalCode: "110001",
+    city: "New Delhi",
+    region: "Delhi",
+  };
+  await login(page);
+  await openTenantForm(page);
+  await fillTenantForm(page, {
+    ...tenant,
+    postalCode: "700001",
+    city: "Kolkata",
+    region: "West Bengal",
+  });
+
+  const before = await api(page, `/platform/tenants?search=${tenant.code}`);
+  expect(before.status()).toBe(200);
+  expect(((await before.json()) as { total: number }).total).toBe(0);
+
+  const pin = page.getByLabel("PIN code");
+  await pin.fill("012345");
+  await pin.blur();
+  expect(
+    await pin.evaluate((input: HTMLInputElement) => input.checkValidity()),
+  ).toBe(false);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Enter exactly six digits" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("State", { exact: true })).toHaveValue("");
+
+  const unknownResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("postalCode=999999"),
+  );
+  await pin.fill("999999");
+  expect((await unknownResponse).status()).toBe(404);
+  await expect(
+    page.getByRole("status").filter({ hasText: "not in the postal directory" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry PIN lookup" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("");
+
+  const singleResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("postalCode=700001"),
+  );
+  await pin.fill("700001");
+  expect((await singleResponse).status()).toBe(200);
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("Kolkata");
+  await expect(page.getByLabel("State", { exact: true })).toHaveValue(
+    "West Bengal",
+  );
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Derived Kolkata, West Bengal" }),
+  ).toContainText("Kolkata GPO, Kolkata district");
+  await expect(page.getByLabel("City", { exact: true })).toHaveAttribute(
+    "readonly",
+    "",
+  );
+  await expect(page.getByLabel("State", { exact: true })).toHaveAttribute(
+    "readonly",
+    "",
+  );
+
+  const ambiguousResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("postalCode=110001"),
+  );
+  await pin.fill("110001");
+  expect((await ambiguousResponse).status()).toBe(200);
+  const locality = page.getByLabel("Locality");
+  await expect(locality).toBeVisible();
+  await expect(locality).toHaveValue("");
+  await expect(locality.locator("option")).toHaveText([
+    "Select locality",
+    "Connaught Place — New Delhi district",
+    "Parliament Street — New Delhi district",
+  ]);
+  await locality.focus();
+  await page.keyboard.press("c");
+  await page.keyboard.press("Tab");
+  await expect(locality).toHaveValue("11000100-0000-4000-8000-000000000001");
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue(
+    "New Delhi",
+  );
+  await expect(page.getByLabel("State", { exact: true })).toHaveValue("Delhi");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Derived New Delhi, Delhi" }),
+  ).toContainText("Connaught Place, New Delhi district");
+
+  await expectNoSeriousAccessibilityViolations(page, "tenant PIN lookup");
+  await expectNoPageOverflow(page);
+  const line1 = page.getByLabel("Address line 1");
+  const line2 = page.getByLabel("Address line 2");
+  await locality.evaluate((select: HTMLSelectElement) => {
+    const stale = document.createElement("option");
+    stale.value = "70000100-0000-4000-8000-000000000001";
+    stale.text = "Previously selected locality";
+    stale.selected = true;
+    select.append(stale);
+  });
+  const staleResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/v1/platform/tenants"),
+  );
+  const refreshedLookup = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.url().includes("postalCode=110001"),
+  );
+  await page.getByRole("button", { name: "Provision tenant" }).click();
+  expect((await staleResponse).status()).toBe(409);
+  expect((await refreshedLookup).status()).toBe(200);
+  await expect(page.locator(".error[role=alert]")).toContainText(
+    "selected locality is no longer valid",
+  );
+  await expect(line1).toHaveValue(tenant.line1);
+  await expect(line2).toHaveValue(tenant.line2);
+  await expect(locality).toHaveValue("");
+  await expect(locality.locator("option")).toHaveText([
+    "Select locality",
+    "Connaught Place — New Delhi district",
+    "Parliament Street — New Delhi district",
+  ]);
+  await locality.selectOption("11000100-0000-4000-8000-000000000001");
+  await expect(locality).toHaveValue("11000100-0000-4000-8000-000000000001");
+
+  const createdResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/v1/platform/tenants"),
+  );
+  await page.getByRole("button", { name: "Provision tenant" }).click();
+  const response = await createdResponse;
+  expect(response.status(), await response.text()).toBe(201);
+  const created = (await response.json()) as {
+    tenant: { id: string };
+    invitationUrl: string;
+  };
+
+  const detailResponse = await api(
+    page,
+    `/platform/tenants/${created.tenant.id}`,
+  );
+  expect(detailResponse.status()).toBe(200);
+  const detail = (await detailResponse.json()) as {
+    tenant: {
+      address: {
+        country: string;
+        postalCode: string;
+        postalLocalityId: string;
+        locality: string;
+        city: string;
+        region: string;
+        directoryVersion: string;
+        postalReferenceStatus: string;
+      };
+    };
+    invitations: unknown[];
+  };
+  expect(detail.tenant.address).toMatchObject({
+    country: "IN",
+    postalCode: "110001",
+    postalLocalityId: "11000100-0000-4000-8000-000000000001",
+    locality: "Connaught Place",
+    city: "New Delhi",
+    region: "Delhi",
+    directoryVersion: "2026-08-25-fixture",
+    postalReferenceStatus: "DIRECTORY",
+  });
+  expect(detail.invitations).toHaveLength(1);
+  const after = await api(page, `/platform/tenants?search=${tenant.code}`);
+  expect(((await after.json()) as { total: number }).total).toBe(1);
+
+  const anonymousContext = await browser.newContext();
+  const anonymous = await anonymousContext.newPage();
+  const anonymousLookup = await api(
+    anonymous,
+    "/reference/postal-localities?country=IN&postalCode=700001",
+  );
+  expect(anonymousLookup.status()).toBe(401);
+  expect(await anonymousLookup.text()).not.toContain("Kolkata GPO");
+  await anonymousContext.close();
+
+  const ownerContext = await browser.newContext();
+  const owner = await ownerContext.newPage();
+  await acceptInvitation(owner, created.invitationUrl, tenant.ownerName);
+  const tenantOnlyLookup = await api(
+    owner,
+    "/reference/postal-localities?country=IN&postalCode=700001",
+  );
+  expect(tenantOnlyLookup.status()).toBe(403);
+  expect(await tenantOnlyLookup.text()).not.toContain("Kolkata GPO");
+  await ownerContext.close();
 });

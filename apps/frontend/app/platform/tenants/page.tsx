@@ -14,6 +14,15 @@ type Tenant = {
   setup_total: number;
   invitationState: string;
 };
+type PostalLocality = {
+  id: string;
+  country: string;
+  postalCode: string;
+  locality: string;
+  district: string;
+  city: string;
+  region: string;
+};
 const defaults = {
   timezone: "Asia/Kolkata",
   locale: "en-IN",
@@ -36,6 +45,12 @@ export default function Tenants() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [postalCode, setPostalCode] = useState("");
+  const [postalItems, setPostalItems] = useState<PostalLocality[]>([]);
+  const [postalLocalityId, setPostalLocalityId] = useState("");
+  const [postalBusy, setPostalBusy] = useState(false);
+  const [postalError, setPostalError] = useState("");
+  const [postalLookupNonce, setPostalLookupNonce] = useState(0);
   const [success, setSuccess] = useState<{ id: string; url?: string } | null>(
     null,
   );
@@ -59,6 +74,38 @@ export default function Tenants() {
   useEffect(() => {
     if (error) summary.current?.focus();
   }, [error]);
+  useEffect(() => {
+    setPostalItems([]);
+    setPostalLocalityId("");
+    setPostalError("");
+    if (!/^[1-9][0-9]{5}$/.test(postalCode)) return;
+    const controller = new AbortController();
+    setPostalBusy(true);
+    api<{ items: PostalLocality[] }>(
+      `/reference/postal-localities?country=IN&postalCode=${encodeURIComponent(postalCode)}`,
+      { signal: controller.signal },
+    )
+      .then(({ items }) => {
+        setPostalItems(items);
+        if (items.length === 1) setPostalLocalityId(items[0]!.id);
+      })
+      .catch((value: ApiError | DOMException | TypeError) => {
+        if (value instanceof DOMException && value.name === "AbortError")
+          return;
+        setPostalError(
+          "code" in value
+            ? value.message
+            : "Could not reach the postal directory. Check your connection and retry.",
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPostalBusy(false);
+      });
+    return () => controller.abort();
+  }, [postalCode, postalLookupNonce]);
+  const selectedPostal = postalItems.find(
+    (item) => item.id === postalLocalityId,
+  );
   const fieldId = (path: string) => path.replaceAll(".", "-");
   const clearField = (path: string) => {
     if (!error?.fields?.[path]) return;
@@ -96,9 +143,8 @@ export default function Tenants() {
       address: {
         line1: f.get("line1"),
         line2: f.get("line2"),
-        city: f.get("city"),
-        region: f.get("region"),
         postalCode: f.get("postalCode"),
+        postalLocalityId: f.get("postalLocalityId"),
         country: f.get("country"),
       },
       timezone: f.get("timezone"),
@@ -139,7 +185,16 @@ export default function Tenants() {
       setShow(false);
       load();
     } catch (err) {
-      setError(err as ApiError);
+      const apiError = err as ApiError;
+      if (apiError.code === "POSTAL_REFERENCE_CHANGED") {
+        setPostalItems([]);
+        setPostalLocalityId("");
+        setPostalError(
+          "Postal reference data changed. Recheck the locality before submitting again.",
+        );
+        setPostalLookupNonce((value) => value + 1);
+      }
+      setError(apiError);
     } finally {
       setBusy(false);
     }
@@ -248,6 +303,111 @@ export default function Tenants() {
             <fieldset>
               <legend>Registered address</legend>
               <label>
+                PIN code
+                <input
+                  {...fieldProps("address.postalCode")}
+                  name="postalCode"
+                  required
+                  value={postalCode}
+                  onChange={(event) => {
+                    clearField("address.postalCode");
+                    setPostalCode(event.currentTarget.value);
+                    setPostalError("");
+                  }}
+                  onBlur={() => {
+                    if (postalCode && !/^[1-9][0-9]{5}$/.test(postalCode))
+                      setPostalError(
+                        "Enter exactly six digits; the first digit cannot be zero.",
+                      );
+                  }}
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  pattern="[1-9][0-9]{5}"
+                  maxLength={6}
+                  aria-describedby={`postal-help postal-status${
+                    error?.fields?.["address.postalCode"]
+                      ? ` ${fieldId("address.postalCode")}-error`
+                      : ""
+                  }`}
+                />
+                <small id="postal-help">
+                  Enter the six-digit Indian PIN. City and state are filled from
+                  the postal directory.
+                </small>
+                <FieldError path="address.postalCode" />
+              </label>
+              <input type="hidden" name="country" value="IN" />
+              <label>
+                Country
+                <input value="India (IN)" readOnly aria-readonly="true" />
+              </label>
+              <div id="postal-status" role="status" aria-live="polite">
+                {postalBusy
+                  ? "Looking up PIN code…"
+                  : postalError ||
+                    (selectedPostal
+                      ? `Derived ${selectedPostal.city}, ${selectedPostal.region} from ${selectedPostal.locality}, ${selectedPostal.district} district.`
+                      : "")}
+              </div>
+              {postalError && /^[1-9][0-9]{5}$/.test(postalCode) && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setPostalLookupNonce((value) => value + 1)}
+                  disabled={postalBusy}
+                >
+                  Retry PIN lookup
+                </button>
+              )}
+              {postalItems.length > 1 && (
+                <label>
+                  Locality
+                  <select
+                    {...fieldProps("address.postalLocalityId")}
+                    name="postalLocalityId"
+                    required
+                    value={postalLocalityId}
+                    onChange={(event) => {
+                      clearField("address.postalLocalityId");
+                      setPostalLocalityId(event.currentTarget.value);
+                    }}
+                  >
+                    <option value="">Select locality</option>
+                    {postalItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.locality} — {item.district} district
+                      </option>
+                    ))}
+                  </select>
+                  <FieldError path="address.postalLocalityId" />
+                </label>
+              )}
+              {postalItems.length === 1 && (
+                <input
+                  type="hidden"
+                  name="postalLocalityId"
+                  value={postalLocalityId}
+                />
+              )}
+              <label>
+                City
+                <input
+                  value={selectedPostal?.city ?? ""}
+                  readOnly
+                  aria-readonly="true"
+                  placeholder="Derived from PIN code"
+                />
+              </label>
+              <label>
+                State
+                <input
+                  value={selectedPostal?.region ?? ""}
+                  readOnly
+                  aria-readonly="true"
+                  placeholder="Derived from PIN code"
+                />
+              </label>
+              <label>
                 Address line 1
                 <input {...fieldProps("address.line1")} name="line1" required />
                 <FieldError path="address.line1" />
@@ -257,51 +417,25 @@ export default function Tenants() {
                 <input {...fieldProps("address.line2")} name="line2" />
                 <FieldError path="address.line2" />
               </label>
-              <label>
-                City
-                <input {...fieldProps("address.city")} name="city" required />
-                <FieldError path="address.city" />
-              </label>
-              <label>
-                State / region
-                <input
-                  {...fieldProps("address.region")}
-                  name="region"
-                  required
-                />
-                <FieldError path="address.region" />
-              </label>
-              <label>
-                Postal code
-                <input
-                  {...fieldProps("address.postalCode")}
-                  name="postalCode"
-                  required
-                />
-                <FieldError path="address.postalCode" />
-              </label>
-              <label>
-                Country code
-                <input
-                  {...fieldProps("address.country")}
-                  name="country"
-                  required
-                  defaultValue={defaults.country}
-                  maxLength={2}
-                />
-                <FieldError path="address.country" />
-              </label>
             </fieldset>
             <fieldset>
               <legend>Business settings</legend>
               <label>
                 Timezone
-                <input
+                <select
                   {...fieldProps("timezone")}
                   name="timezone"
                   required
                   defaultValue={defaults.timezone}
-                />
+                >
+                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                  <option value="Asia/Dhaka">Asia/Dhaka</option>
+                  <option value="Asia/Dubai">Asia/Dubai</option>
+                  <option value="Asia/Singapore">Asia/Singapore</option>
+                  <option value="Europe/London">Europe/London</option>
+                  <option value="America/New_York">America/New_York</option>
+                  <option value="UTC">UTC</option>
+                </select>
                 <FieldError path="timezone" />
               </label>
               <label>
@@ -316,13 +450,20 @@ export default function Tenants() {
               </label>
               <label>
                 Currency
-                <input
+                <select
                   {...fieldProps("currency")}
                   name="currency"
                   required
                   defaultValue={defaults.currency}
-                  maxLength={3}
-                />
+                >
+                  {["INR", "USD", "EUR", "GBP", "AED", "SGD", "BDT"].map(
+                    (currency) => (
+                      <option key={currency} value={currency}>
+                        {currency}
+                      </option>
+                    ),
+                  )}
+                </select>
                 <FieldError path="currency" />
               </label>
               <label>
@@ -407,6 +548,8 @@ export default function Tenants() {
                 <input
                   {...fieldProps("support.mobile")}
                   name="supportMobile"
+                  type="tel"
+                  autoComplete="tel"
                   placeholder="+919999999999"
                 />
                 <FieldError path="support.mobile" />
@@ -461,7 +604,11 @@ export default function Tenants() {
                 immediately
               </label>
             </fieldset>
-            <button className="primary span" disabled={busy}>
+            <button
+              className="primary span"
+              type="submit"
+              disabled={busy || !selectedPostal}
+            >
               {busy ? "Provisioning safely…" : "Provision tenant"}
             </button>
           </form>

@@ -4,11 +4,21 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+bootstrap_mode="${1:-local}"
+if [[ "$bootstrap_mode" != "local" && "$bootstrap_mode" != "production" ]]; then
+  echo "Usage: $0 [local|production]" >&2
+  exit 1
+fi
+
 # shellcheck source=scripts/tooling.sh
 source "$repo_dir/scripts/tooling.sh"
 
 missing_commands=()
-for command_name in git node docker; do
+required_commands=(git node)
+if [[ "$bootstrap_mode" == "local" ]]; then
+  required_commands+=(docker)
+fi
+for command_name in "${required_commands[@]}"; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     missing_commands+=("$command_name")
   fi
@@ -31,4 +41,8 @@ else
 fi
 
 bash scripts/policy-check.sh
-echo "Bootstrap checks passed."
+if [[ "$bootstrap_mode" == "production" ]]; then
+  echo "Production bootstrap checks passed."
+else
+  echo "Local bootstrap checks passed."
+fi

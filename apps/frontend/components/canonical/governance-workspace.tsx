@@ -2,9 +2,26 @@
 import { FormEvent, useState } from "react";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
+import { SmartField } from "../forms/smart-field";
+
+const governedResources: Record<string, string> = {
+  ORGANIZATION_NODE: "organization-nodes",
+  EMPLOYEE: "employees",
+  CLIENT: "clients",
+  VENDOR: "vendors",
+  VEHICLE: "vehicles",
+  DRIVER: "drivers",
+  INDENT: "indents",
+  ALLOCATION: "allocations",
+  TRIP: "trips",
+  POD: "pod-tasks",
+  INVOICE: "invoices",
+  RECEIPT: "receipts",
+  VENDOR_BILL: "vendor-bills",
+};
 
 export function GovernanceWorkspace() {
-  const [targetType, setTargetType] = useState("trip"),
+  const [targetType, setTargetType] = useState("TRIP"),
     [targetId, setTargetId] = useState(""),
     [comment, setComment] = useState(""),
     [visibility, setVisibility] = useState("INTERNAL"),
@@ -134,18 +151,32 @@ export function GovernanceWorkspace() {
         <div className="access-form">
           <label>
             Record type
-            <input
+            <select
               value={targetType}
-              onChange={(event) => setTargetType(event.target.value)}
-            />
+              onChange={(event) => {
+                setTargetType(event.target.value);
+                setTargetId("");
+              }}
+            >
+              {Object.keys(governedResources).map((type) => (
+                <option key={type} value={type}>
+                  {type.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
           </label>
-          <label>
-            Record ID
-            <input
-              value={targetId}
-              onChange={(event) => setTargetId(event.target.value)}
-            />
-          </label>
+          <SmartField
+            field={{
+              key: "governedRecord",
+              label: "Record",
+              kind: "reference",
+              referenceResource: governedResources[targetType],
+              required: true,
+              help: "Search and select the business record whose documents, comments and approvals you want to manage.",
+            }}
+            value={targetId}
+            onChange={setTargetId}
+          />
           <button type="button" onClick={() => void loadComments()}>
             Load governed tabs
           </button>

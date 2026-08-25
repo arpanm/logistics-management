@@ -2094,6 +2094,38 @@ export class CanonicalService {
     });
   }
 
+  async documents(actor: SessionActor, search = "") {
+    const tenantId = this.tenant(actor);
+    return withTenant(this.app.db, tenantId, async (tx) => {
+      await this.access(tx, actor, "governance.read", "READ");
+      const candidates = await tx.$queryRawUnsafe<Row[]>(
+        `SELECT d.id,d.category||' · '||v.file_name AS name,d.category,d.target_type AS "targetType",d.target_id AS "targetId",d.verification_state AS state
+         FROM app.governed_documents d JOIN app.governed_document_versions v ON v.tenant_id=d.tenant_id AND v.document_id=d.id AND v.version=d.current_version
+         WHERE d.tenant_id=$1::uuid AND ($2='' OR d.category ILIKE '%'||$2||'%' OR v.file_name ILIKE '%'||$2||'%') ORDER BY d.updated_at DESC LIMIT 100`,
+        tenantId,
+        search,
+      );
+      const items: Row[] = [];
+      for (const row of candidates) {
+        const target = this.governedTarget(String(row.targetType));
+        try {
+          await this.assertResourceScope(
+            tx,
+            actor,
+            "governance.read",
+            "READ",
+            target.resource,
+            String(row.targetId),
+          );
+          items.push(row);
+        } catch (error) {
+          if (!(error instanceof AppError && error.status === 404)) throw error;
+        }
+      }
+      return { items: toJsonSafe(items) };
+    });
+  }
+
   async issueDocumentAccess(
     actor: SessionActor,
     versionId: string,

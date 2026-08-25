@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { Shell } from "../../../components/shell";
 import { api, ApiError } from "../../../components/api";
@@ -24,6 +25,47 @@ type Context = {
   contextVersion: number;
 };
 type Probe = { id: string; label: string; note: string; version: number };
+
+const setupActions: Record<
+  string,
+  { href: string; label: string; pending: string }
+> = {
+  organization: {
+    href: "/app/masters/locations",
+    label: "Manage organization",
+    pending: "Create or review the legal entity and organization hierarchy.",
+  },
+  users: {
+    href: "/app/access/users",
+    label: "Manage users",
+    pending: "Invite employees and assign their roles and scopes.",
+  },
+  branches: {
+    href: "/app/masters/locations",
+    label: "Add branches",
+    pending: "Add branches and regions under the organization hierarchy.",
+  },
+  clients: {
+    href: "/app/masters/parties",
+    label: "Add clients",
+    pending: "Create the first client master.",
+  },
+  vendors: {
+    href: "/app/masters/vendors",
+    label: "Add vendors",
+    pending: "Create the first vendor and its operating scope.",
+  },
+  commercial: {
+    href: "/app/masters/contracts",
+    label: "Configure commercials",
+    pending: "Create and publish client contracts, lanes, rates, and SLAs.",
+  },
+  imports: {
+    href: "/app/data",
+    label: "Open imports",
+    pending: "Validate and commit a CSV or XLSX master-data import.",
+  },
+};
 
 function contrastInk(background: string) {
   const hex = background.trim().replace(/^#/, "");
@@ -67,15 +109,18 @@ export default function Setup() {
   async function add(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
-    const f = new FormData(e.currentTarget);
+    setNotice("");
+    const form = e.currentTarget;
+    const f = new FormData(form);
     try {
       await api("/tenant/probes", {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({ label: f.get("label"), note: f.get("note") }),
       });
-      e.currentTarget.reset();
+      form.reset();
       await load();
+      setNotice("Isolated record added.");
     } catch (e) {
       setError((e as ApiError).message);
     } finally {
@@ -121,11 +166,32 @@ export default function Setup() {
         <p role="status">Loading your workspace…</p>
       ) : (
         <>
+          {(() => {
+            const next = ctx.checklist.find(
+              (item) => item.state !== "COMPLETE" && setupActions[item.key],
+            );
+            return next ? (
+              <section className="panel setup-next">
+                <div>
+                  <p className="eyebrow">Recommended next step</p>
+                  <h2>{next.label}</h2>
+                  <p>{setupActions[next.key]!.pending}</p>
+                </div>
+                <Link
+                  className="button primary"
+                  href={setupActions[next.key]!.href}
+                >
+                  {setupActions[next.key]!.label}
+                </Link>
+              </section>
+            ) : null;
+          })()}
           <section
             className="tenant-hero"
             style={
               {
                 "--tenant": ctx.tenant.primaryColor,
+                "--tenant-ink": contrastInk(ctx.tenant.primaryColor),
                 "--accent": ctx.tenant.accentColor,
                 "--accent-ink": contrastInk(ctx.tenant.accentColor),
               } as React.CSSProperties
@@ -147,8 +213,8 @@ export default function Setup() {
             <section className="panel">
               <h2>Setup checklist</h2>
               <p className="muted">
-                The foundation is ready. Future modules unlock the remaining
-                areas.
+                Complete these areas in sequence. Each action opens the live
+                workspace for that setup area.
               </p>
               <ul className="checklist">
                 {ctx.checklist.map((i) => (
@@ -160,10 +226,11 @@ export default function Setup() {
                       <strong>{i.label}</strong>
                       <small>
                         {i.state === "COMPLETE"
-                          ? "Configured"
+                          ? "Configured — open to review or add more"
                           : i.key === "branding"
                             ? "Ready to complete"
-                            : "Available with a later feature"}
+                            : (setupActions[i.key]?.pending ??
+                              "Ready for configuration")}
                       </small>
                     </div>
                     <span
@@ -188,6 +255,11 @@ export default function Setup() {
                             ? "Reopen"
                             : "Mark complete"}
                       </button>
+                    )}
+                    {setupActions[i.key] && (
+                      <Link className="button" href={setupActions[i.key].href}>
+                        {setupActions[i.key].label}
+                      </Link>
                     )}
                   </li>
                 ))}
@@ -228,9 +300,19 @@ export default function Setup() {
                   ))
                 )}
               </div>
-              <a className="button" href="/api/v1/tenant/probes/export">
-                Export current tenant CSV
-              </a>
+              <p className="muted">
+                CSV columns: Label, Note, Created at. The sample contains one
+                example row; the export contains only this tenant's real
+                records.
+              </p>
+              <div className="actions">
+                <a className="button" href="/api/v1/tenant/probes/template">
+                  Download sample CSV
+                </a>
+                <a className="button" href="/api/v1/tenant/probes/export">
+                  Export current tenant CSV
+                </a>
+              </div>
             </section>
           </div>
         </>

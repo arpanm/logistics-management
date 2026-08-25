@@ -22,6 +22,8 @@ type Detail = {
     expiresAt: string;
     deliveryState: string;
     acceptedAt: string | null;
+    revokedAt: string | null;
+    version: number;
   }>;
 };
 export default function TenantDetail({
@@ -32,12 +34,43 @@ export default function TenantDetail({
   const { id } = use(params);
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState("");
+  const [activationUrl, setActivationUrl] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
   function load() {
     api<Detail>(`/platform/tenants/${id}`)
       .then(setData)
       .catch((e: ApiError) => setError(e.message));
   }
   useEffect(load, [id]);
+  async function reissueInvitation(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const invitation = data?.invitations[0];
+    if (!invitation) return;
+    setInviteBusy(true);
+    setError("");
+    const formElement = e.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      const result = await api<{
+        activationUrl: string | null;
+        invitation: Detail["invitations"][number];
+      }>(`/platform/tenants/${id}/owner-invitation/reissue`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          expectedVersion: invitation.version,
+          reason: form.get("reason"),
+        }),
+      });
+      setActivationUrl(result.activationUrl ?? "");
+      formElement.reset();
+      load();
+    } catch (error) {
+      setError((error as ApiError).message);
+    } finally {
+      setInviteBusy(false);
+    }
+  }
   async function lifecycle(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!data) return;
@@ -122,8 +155,75 @@ export default function TenantDetail({
                   </div>
                 </dl>
               ))}
+              {activationUrl && (
+                <div className="success" role="status">
+                  <strong>Replacement activation link created.</strong>
+                  <p>
+                    This bearer link is shown once. Copy it and send it to the
+                    named owner through a trusted channel.
+                  </p>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void navigator.clipboard.writeText(activationUrl)
+                      }
+                    >
+                      Copy activation link
+                    </button>
+                    <a
+                      className="button"
+                      href={activationUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open activation link
+                    </a>
+                  </div>
+                </div>
+              )}
+              {!data.invitations[0]?.acceptedAt && (
+                <form onSubmit={reissueInvitation}>
+                  <p className="muted">
+                    Email delivery is unavailable until a provider is
+                    configured. Generate a replacement link if the original link
+                    was missed; the previous link becomes invalid.
+                  </p>
+                  <label>
+                    Reason for replacement link
+                    <input
+                      name="reason"
+                      required
+                      minLength={10}
+                      maxLength={500}
+                      placeholder="Owner did not receive the original invitation"
+                    />
+                  </label>
+                  <button className="primary" disabled={inviteBusy}>
+                    {inviteBusy
+                      ? "Generating securely…"
+                      : "Generate replacement activation link"}
+                  </button>
+                </form>
+              )}
             </section>
           </div>
+          <section className="panel">
+            <h2>User administration</h2>
+            {data.invitations[0]?.acceptedAt ? (
+              <p>
+                The Tenant Owner can sign in and manage employees, vendors,
+                drivers, clients, roles, scopes, invitation resend, suspension,
+                and session resets from <code>/app/access/users</code>.
+              </p>
+            ) : (
+              <p>
+                Activate the first Tenant Owner before adding tenant users. This
+                preserves tenant isolation and prevents the Platform Admin from
+                impersonating a tenant administrator.
+              </p>
+            )}
+          </section>
           <section className="panel danger-zone">
             <h2>
               {data.tenant.status === "ACTIVE" ? "Deactivate" : "Reactivate"}{" "}

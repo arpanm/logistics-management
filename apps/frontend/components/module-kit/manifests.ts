@@ -9,9 +9,11 @@ export type UiField = {
     | "number"
     | "date"
     | "select"
-    | "json";
+    | "key-value"
+    | "timezone";
   required?: boolean;
   options?: readonly string[];
+  help?: string;
 };
 export type UiTransition = {
   from: readonly string[];
@@ -57,7 +59,7 @@ export const uiManifests = {
       },
       { key: "parentCode", label: "Parent code", kind: "text" },
       { key: "address", label: "Address", kind: "textarea" },
-      { key: "timezone", label: "Timezone", kind: "text" },
+      { key: "timezone", label: "Timezone", kind: "timezone", required: true },
     ],
     transitions: lifecycle,
   },
@@ -121,7 +123,13 @@ export const uiManifests = {
         options: ["APPROVAL", "DELEGATION", "CONTROL"],
       },
       { key: "appliesTo", label: "Applies to", kind: "text", required: true },
-      { key: "rule", label: "Rule JSON", kind: "json", required: true },
+      {
+        key: "rule",
+        label: "Rule values",
+        kind: "key-value",
+        required: true,
+        help: "Enter comma-separated key=value conditions.",
+      },
       { key: "owner", label: "Control owner", kind: "text" },
     ],
     transitions: [
@@ -153,8 +161,9 @@ export const uiManifests = {
       { key: "namespace", label: "Namespace", kind: "text", required: true },
       {
         key: "value",
-        label: "Configuration JSON",
-        kind: "json",
+        label: "Configuration values",
+        kind: "key-value",
+        help: "Enter comma-separated key=value settings.",
         required: true,
       },
       { key: "effectiveFrom", label: "Effective from", kind: "date" },

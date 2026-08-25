@@ -603,6 +603,53 @@ export class AdvancedDomainService {
     });
   }
 
+  async contractVersions(actor: SessionActor, search = "") {
+    const tenant = this.tenant(actor);
+    return this.safeTenant(tenant, async (tx) => {
+      await this.access(tx, actor, "masters.read", "READ");
+      const items = await tx.$queryRawUnsafe<Row[]>(
+        `SELECT v.id,c.code||' · version '||v.version::text AS name,c.code,v.version,v.state
+         FROM app.contract_versions v JOIN app.contracts c ON c.tenant_id=v.tenant_id AND c.id=v.contract_id
+         WHERE v.tenant_id=$1::uuid AND app.domain_resource_authorized($1::uuid,$3::uuid,$4::uuid,'masters.read','READ','contracts',c.id)
+         AND ($2='' OR c.code ILIKE '%'||$2||'%' OR c.name ILIKE '%'||$2||'%')
+         ORDER BY c.code,v.version DESC LIMIT 100`,
+        tenant,
+        search,
+        actor.membershipId,
+        actor.userId,
+      );
+      return { items };
+    });
+  }
+
+  async paymentBatches(actor: SessionActor, search = "") {
+    const tenant = this.tenant(actor);
+    return this.safeTenant(tenant, async (tx) => {
+      await this.access(tx, actor, "finance.read", "READ");
+      const candidates = await tx.$queryRawUnsafe<Row[]>(
+        `SELECT id,batch_no AS code,batch_no AS name,state,version FROM app.payment_batches
+         WHERE tenant_id=$1::uuid AND ($2='' OR batch_no ILIKE '%'||$2||'%') ORDER BY created_at DESC LIMIT 100`,
+        tenant,
+        search,
+      );
+      const items: Row[] = [];
+      for (const candidate of candidates) {
+        try {
+          await this.paymentBatchAccess(
+            tx,
+            actor,
+            String(candidate.id),
+            "READ",
+          );
+          items.push(candidate);
+        } catch (error) {
+          if (!(error instanceof AppError && error.status === 404)) throw error;
+        }
+      }
+      return { items };
+    });
+  }
+
   private encryptAccount(account: string) {
     const encoded = this.app.config.MFA_ENCRYPTION_KEY;
     const key = encoded ? Buffer.from(encoded, "base64") : Buffer.alloc(0);

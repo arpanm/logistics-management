@@ -23,6 +23,8 @@ if [[ ! -d apps/frontend || ! -d apps/backend ]]; then
 fi
 
 pnpm run db:migrate
+bash scripts/postgres-postal-handoff.sh "${POSTGRES_DB:-logistics}"
+pnpm --filter @logistics/db postal:verify-ownership
 pnpm run db:seed
 pnpm run build
 

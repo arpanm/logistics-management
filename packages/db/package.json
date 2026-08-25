@@ -10,6 +10,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx src/seed.ts",
     "db:reset:test": "tsx src/reset-test.ts",
+    "postal:import": "tsx src/import-postal-directory.ts",
+    "postal:verify-ownership": "tsx src/verify-postal-ownership.ts",
     "format:check": "prettier --check src && prisma validate",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",

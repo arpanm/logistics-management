@@ -8,7 +8,7 @@ import {
   withPlatform,
   withTenant,
 } from "@logistics/db";
-import { loadConfig } from "@logistics/config";
+import { isRequestOriginAllowed, loadConfig } from "@logistics/config";
 import type { SessionActor } from "@logistics/auth";
 import type { TenantCreateInput } from "@logistics/domain";
 
@@ -79,6 +79,13 @@ export class AppService implements OnModuleDestroy {
         "202608250007_all_feature_canonical",
         "202608250008_all_feature_gap_repairs",
         "202608250009_alert_tenant_root_fallback",
+        "202608250010_fnd01_postal_localities",
+        "202608250011_fnd01_postal_directory_hardening",
+        "202608250012_fnd01_postal_importer_identity",
+        "202608250013_fnd01_postal_importer_fk_privilege",
+        "202608250014_fnd01_postal_importer_table_privileges",
+        "202608250015_fnd01_postal_runtime_lock_privilege",
+        "202608250016_fnd01_postal_owner_handoff_contract",
       ];
       if (
         !required.every((name) =>
@@ -86,6 +93,42 @@ export class AppService implements OnModuleDestroy {
         )
       )
         throw new Error("Required migration is missing");
+      const postalVersions = await this.db.$queryRawUnsafe<Array<Row>>(
+        `SELECT v.version,v.source_name AS "sourceName",v.row_count AS "declaredRows",count(l.id)::int AS "actualRows"
+         FROM postal_reference.postal_directory_versions v
+         LEFT JOIN postal_reference.postal_localities l ON l.directory_version_id=v.id AND l.active
+         WHERE v.country='IN' AND v.status='ACTIVE' AND v.active
+         GROUP BY v.id`,
+      );
+      const postal = postalVersions[0];
+      if (
+        !postal ||
+        Number(postal.declaredRows) !== Number(postal.actualRows) ||
+        Number(postal.actualRows) < 1
+      )
+        throw new Error("Active postal directory is incomplete");
+      if (
+        this.config.APP_ENV === "production" &&
+        (Number(postal.actualRows) < 100000 ||
+          /fixture|sample|demo|bootstrap/i.test(
+            `${String(postal.version)} ${String(postal.sourceName)}`,
+          ))
+      )
+        throw new Error("Production postal directory is not ready");
+      const ownership = await this.db.$queryRawUnsafe<Array<Row>>(
+        `SELECT
+          (SELECT r.rolname FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE n.nspname='postal_reference') AS "schemaOwner",
+          (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='postal_reference' AND c.relname IN ('postal_directory_versions','postal_localities') AND r.rolname='logistics_postal_owner') AS "ownedTables",
+          (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_roles r ON r.oid=p.proowner WHERE n.nspname='postal_reference' AND p.proname='guard_postal_directory_mutation' AND r.rolname='logistics_postal_owner') AS "ownedGuard",
+          (SELECT count(*)::int FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='postal_reference' AND NOT t.tgisinternal AND t.tgname IN ('postal_directory_versions_import_only','postal_localities_import_only') AND t.tgenabled='O') AS "enabledGuards"`,
+      );
+      if (
+        ownership[0]?.schemaOwner !== "logistics_postal_owner" ||
+        Number(ownership[0]?.ownedTables) !== 2 ||
+        Number(ownership[0]?.ownedGuard) !== 1 ||
+        Number(ownership[0]?.enabledGuards) !== 2
+      )
+        throw new Error("Postal ownership handoff is incomplete");
       return {
         status: "ready",
         database: "connected",
@@ -191,7 +234,7 @@ export class AppService implements OnModuleDestroy {
   requireCsrf(actor: SessionActor, csrf?: string, origin?: string) {
     if (!csrf || hash(csrf) !== actor.csrfToken)
       throw new AppError(403, "CSRF_INVALID", "Request could not be verified");
-    if (origin && origin !== this.config.FRONTEND_URL)
+    if (origin && !isRequestOriginAllowed(origin, this.config))
       throw new AppError(
         403,
         "ORIGIN_INVALID",
@@ -530,6 +573,41 @@ export class AppService implements OnModuleDestroy {
             "TENANT_CODE_EXISTS",
             "Tenant code is already in use",
           );
+        const postalRows = await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT l.id,l.country,l.postal_code AS "postalCode",l.locality_name AS locality,l.district_name AS district,l.city_name AS city,l.region_name AS region,v.id AS "directoryVersionId",v.version AS "directoryVersion"
+           FROM postal_reference.postal_localities l
+           JOIN postal_reference.postal_directory_versions v ON v.id=l.directory_version_id AND v.active AND v.status='ACTIVE'
+           WHERE l.id=$1::uuid AND l.active AND l.country=$2 AND l.postal_code=$3`,
+          input.address.postalLocalityId,
+          input.address.country,
+          input.address.postalCode,
+        );
+        if (!postalRows[0])
+          throw new AppError(
+            409,
+            "POSTAL_REFERENCE_CHANGED",
+            "The selected locality is no longer valid for this PIN code. Look it up again.",
+            {
+              "address.postalLocalityId": [
+                "Select a current locality for this PIN code",
+              ],
+            },
+          );
+        const postal = postalRows[0];
+        const canonicalAddress = {
+          line1: input.address.line1,
+          line2: input.address.line2,
+          country: String(postal.country).trim(),
+          postalCode: postal.postalCode,
+          postalLocalityId: postal.id,
+          locality: postal.locality,
+          city: postal.city,
+          region: postal.region,
+          district: postal.district,
+          directoryVersionId: postal.directoryVersionId,
+          directoryVersion: postal.directoryVersion,
+          postalReferenceStatus: "DIRECTORY",
+        };
         let tenantRows: Array<Row>;
         try {
           tenantRows = await tx.$queryRawUnsafe<Array<Row>>(
@@ -538,7 +616,7 @@ export class AppService implements OnModuleDestroy {
             input.name,
             input.legalName,
             input.taxIdentifier,
-            JSON.stringify(input.address),
+            JSON.stringify(canonicalAddress),
             input.timezone,
             input.locale,
             input.currency,
@@ -726,7 +804,11 @@ export class AppService implements OnModuleDestroy {
           targetType: "tenant",
           targetId: tenantId,
           correlationId,
-          after: { code: input.code, status: tenant.status },
+          after: {
+            code: input.code,
+            status: tenant.status,
+            address: canonicalAddress,
+          },
         });
         const response = {
           tenant: {
@@ -802,6 +884,33 @@ export class AppService implements OnModuleDestroy {
     });
   }
 
+  async postalLocalities(
+    actor: SessionActor,
+    country: string,
+    postalCode: string,
+  ) {
+    this.requirePlatform(actor);
+    return withPlatform(this.db, async (tx) => {
+      const rows = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT l.id,l.country,l.postal_code AS "postalCode",l.locality_name AS locality,l.district_name AS district,l.city_name AS city,l.region_name AS region
+         FROM postal_reference.postal_localities l
+         JOIN postal_reference.postal_directory_versions v ON v.id=l.directory_version_id AND v.active AND v.status='ACTIVE'
+         WHERE l.active AND l.country=$1 AND l.postal_code=$2
+         ORDER BY l.locality_name,l.district_name,l.id`,
+        country,
+        postalCode,
+      );
+      if (!rows.length)
+        throw new AppError(
+          404,
+          "POSTAL_CODE_NOT_FOUND",
+          "This PIN code is not in the postal directory. Check it and try again.",
+          { "address.postalCode": ["No locality found for this PIN code"] },
+        );
+      return { country, postalCode, items: rows };
+    });
+  }
+
   async tenantDetail(actor: SessionActor, id: string) {
     this.requirePlatform(actor);
     return withPlatform(this.db, async (tx) => {
@@ -811,10 +920,149 @@ export class AppService implements OnModuleDestroy {
       );
       const tenant = one(rows);
       const invites = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT id,email,expires_at AS "expiresAt",delivery_state AS "deliveryState",accepted_at AS "acceptedAt" FROM app.owner_invitations WHERE tenant_id=$1::uuid`,
+        `SELECT id,email,expires_at AS "expiresAt",delivery_state AS "deliveryState",accepted_at AS "acceptedAt",revoked_at AS "revokedAt",version FROM app.owner_invitations WHERE tenant_id=$1::uuid`,
         id,
       );
       return { tenant, invitations: invites };
+    });
+  }
+
+  async reissueOwnerInvitation(
+    actor: SessionActor,
+    tenantId: string,
+    expectedVersion: number,
+    reason: string,
+    correlationId: string,
+    idempotencyKey: string,
+    frontendOrigin: string,
+  ) {
+    this.requirePlatform(actor);
+    if (
+      !idempotencyKey ||
+      idempotencyKey.length < 8 ||
+      idempotencyKey.length > 200
+    )
+      throw new AppError(
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "A valid Idempotency-Key is required",
+      );
+    if (!isRequestOriginAllowed(frontendOrigin, this.config))
+      throw new AppError(
+        403,
+        "ORIGIN_INVALID",
+        "Request origin is not allowed",
+      );
+    const operation = "tenant.owner-invitation.reissue";
+    const keyHash = hash(idempotencyKey);
+    const requestHash = hash(
+      JSON.stringify({ tenantId, expectedVersion, reason }),
+    );
+    const plainToken = token();
+    const expiresAt = new Date(
+      Date.now() + this.config.INVITATION_TTL_HOURS * 3600000,
+    );
+    return withPlatform(this.db, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${actor.userId}:${operation}:${keyHash}`,
+      );
+      const replay = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT request_hash AS "requestHash",response_json AS response FROM app.idempotency_records WHERE actor_id=$1::uuid AND operation=$2 AND key_hash=$3`,
+        actor.userId,
+        operation,
+        keyHash,
+      );
+      if (replay[0]) {
+        if (replay[0].requestHash !== requestHash)
+          throw new AppError(
+            409,
+            "IDEMPOTENCY_CONFLICT",
+            "This key was used for different input",
+          );
+        return replay[0].response as Row;
+      }
+      const invitations = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT i.id,i.membership_id AS "membershipId",i.email,i.accepted_at AS "acceptedAt",i.version,t.status AS "tenantStatus" FROM app.owner_invitations i JOIN app.tenants t ON t.id=i.tenant_id WHERE i.tenant_id=$1::uuid FOR UPDATE`,
+        tenantId,
+      );
+      const invitation = one(invitations);
+      if (invitation.tenantStatus !== "ACTIVE")
+        throw new AppError(
+          409,
+          "TENANT_INACTIVE",
+          "Reactivate the tenant before issuing an invitation",
+        );
+      if (invitation.acceptedAt)
+        throw new AppError(
+          409,
+          "OWNER_ALREADY_ACTIVE",
+          "The tenant owner has already activated this workspace",
+        );
+      if (Number(invitation.version) !== expectedVersion)
+        throw new AppError(
+          409,
+          "VERSION_CONFLICT",
+          "Invitation changed; reload and retry",
+        );
+      const updated = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `UPDATE app.owner_invitations SET token_hash=$1,expires_at=$2,revoked_at=null,delivery_state='PENDING_DELIVERY',updated_at=now(),version=version+1 WHERE tenant_id=$3::uuid AND id=$4::uuid AND version=$5 RETURNING id,email,expires_at AS "expiresAt",delivery_state AS "deliveryState",accepted_at AS "acceptedAt",revoked_at AS "revokedAt",version`,
+          hash(plainToken),
+          expiresAt,
+          tenantId,
+          invitation.id,
+          expectedVersion,
+        ),
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO app.invitation_delivery_attempts(tenant_id,invitation_id,channel,destination_hash) VALUES($1::uuid,$2::uuid,'EMAIL',$3) ON CONFLICT(tenant_id,invitation_id,channel) DO UPDATE SET state='PENDING',attempts=0,available_at=now(),leased_at=null,delivered_at=null,failure_code=null,updated_at=now()`,
+        tenantId,
+        invitation.id,
+        hash(String(invitation.email).toLowerCase()),
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key,state,processed_at) VALUES($1::uuid,'TENANT','owner_invitation',$2::uuid,'owner_invitation.requested.v1',$3::jsonb,$4,'PENDING',null)`,
+        tenantId,
+        invitation.id,
+        JSON.stringify({
+          invitationId: invitation.id,
+          maskedDestination: String(invitation.email).replace(
+            /^(.).+(@.*)$/,
+            "$1***$2",
+          ),
+        }),
+        `owner-invitation:${invitation.id}:v${updated.version}`,
+      );
+      await this.audit(tx, {
+        tenantId,
+        actorId: actor.userId,
+        action: "owner.invitation.reissued",
+        targetType: "owner_invitation",
+        targetId: String(invitation.id),
+        correlationId,
+        reason,
+        after: { expiresAt: updated.expiresAt, version: updated.version },
+      });
+      const response = {
+        invitation: updated,
+        activationUrl: `${new URL(frontendOrigin).origin}/accept-invitation?token=${plainToken}`,
+        shownOnce: true,
+      };
+      await tx.$executeRawUnsafe(
+        `INSERT INTO app.idempotency_records(scope,actor_id,operation,key_hash,request_hash,resource_id,response_json) VALUES('PLATFORM',$1::uuid,$2,$3,$4,$5::uuid,$6::jsonb)`,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        tenantId,
+        JSON.stringify({
+          invitation: updated,
+          activationUrl: null,
+          shownOnce: true,
+        }),
+      );
+      return response;
     });
   }
 
@@ -1553,9 +1801,8 @@ export class AppService implements OnModuleDestroy {
         address: {
           line1: "1 Fixture Road",
           line2: "",
-          city: "Kolkata",
-          region: "West Bengal",
           postalCode: "700001",
+          postalLocalityId: "70000100-0000-4000-8000-000000000001",
           country: "IN",
         },
         timezone: "Asia/Kolkata",

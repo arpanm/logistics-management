@@ -3,7 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module.js";
-import { loadConfig } from "@logistics/config";
+import { isRequestOriginAllowed, loadConfig } from "@logistics/config";
 
 const config = loadConfig();
 const app = await NestFactory.create(AppModule, { rawBody: false });
@@ -17,7 +17,10 @@ app.use(
   }),
 );
 app.enableCors({
-  origin: config.FRONTEND_URL,
+  origin: (
+    origin: string | undefined,
+    callback: (error: Error | null, allowed?: boolean) => void,
+  ) => callback(null, !origin || isRequestOriginAllowed(origin, config)),
   credentials: true,
   allowedHeaders: [
     "Content-Type",

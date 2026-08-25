@@ -83,7 +83,7 @@ test("E2E-FOUND-FND01-02 invalid UI provision creates no partial tenant", async 
   await page.goto("/platform/tenants");
   await openTenantForm(page);
   await fillTenantForm(page, tenant);
-  await page.getByLabel("Timezone").fill("Invalid/Timezone");
+  await page.getByLabel("Locale").fill("not_a_locale");
   const responsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -186,33 +186,47 @@ test("E2E-FOUND-FND01-05 platform report reconciles provisioned tenant list", as
   expect(report.totals.total).toBe(report.tenants.length);
 });
 
-test("E2E-FOUND-FND02-01 permitted owner creates proof through UI and API persists it", async ({
+test("E2E-FOUND-FND02-01 permitted owner previews a non-mutating permission decision", async ({
   browser,
   page,
 }, testInfo) => {
   const fixture = await seedFnd02(page, testInfo, "ACCESS_MATRIX");
   const owner = await actorPage(browser, fixture.actors.owner);
-  const label = `UI proof ${suffix()}`;
   await owner.page.goto("/app/access/probes");
-  await expect(owner.page.getByLabel("Scope")).not.toHaveValue("");
-  await owner.page.getByLabel("Label").fill(label);
+  await expect(
+    owner.page.getByRole("heading", { name: "Permission tester" }),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByText("This makes no business transaction", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByRole("heading", { name: "How to use this diagnostic" }),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByRole("button", { name: "Create proof" }),
+  ).toHaveCount(0);
   const responsePromise = owner.page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      response.url().endsWith("/api/v1/tenant/access/probes"),
+      response.url().endsWith("/api/v1/tenant/access/operations/preview"),
   );
-  await owner.page.getByRole("button", { name: "Create proof" }).click();
-  expect((await responsePromise).status()).toBe(201);
-  const list = await json<{ items: Array<{ label: string }> }>(
-    await accessApi(owner.page, `/probes?search=${encodeURIComponent(label)}`),
-  );
-  expect(list.items).toEqual(
-    expect.arrayContaining([expect.objectContaining({ label })]),
-  );
+  await owner.page
+    .getByRole("button", { name: "Test read permission" })
+    .first()
+    .click();
+  expect((await responsePromise).status()).toBe(200);
+  const decision = owner.page.getByRole("status").filter({
+    has: owner.page.getByRole("heading", { name: "Permission decision" }),
+  });
+  await expect(decision).toBeVisible();
+  await expect(decision.getByText("Allowed", { exact: true })).toBeVisible();
+  await expect(decision.getByText("Reason", { exact: true })).toBeVisible();
   await owner.context.close();
 });
 
-test("E2E-FOUND-FND02-02 required UI validation creates no proof", async ({
+test("E2E-FOUND-FND02-02 permission diagnostics do not change probe count", async ({
   browser,
   page,
 }, testInfo) => {
@@ -222,12 +236,27 @@ test("E2E-FOUND-FND02-02 required UI validation creates no proof", async ({
     await accessApi(owner.page, "/probes"),
   );
   await owner.page.goto("/app/access/probes");
-  await owner.page.getByRole("button", { name: "Create proof" }).click();
-  expect(
-    await owner.page
-      .getByLabel("Label")
-      .evaluate((element: HTMLInputElement) => element.checkValidity()),
-  ).toBe(false);
+  await expect(
+    owner.page.getByText("does not create or change operational data", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    owner.page.getByRole("button", { name: "Create proof" }),
+  ).toHaveCount(0);
+  const responsePromise = owner.page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/v1/tenant/access/operations/preview"),
+  );
+  await owner.page
+    .getByRole("button", { name: "Test read permission" })
+    .first()
+    .click();
+  expect((await responsePromise).status()).toBe(200);
+  await expect(
+    owner.page.getByRole("heading", { name: "Permission decision" }),
+  ).toBeVisible();
   const after = await json<{ total: number }>(
     await accessApi(owner.page, "/probes"),
   );
@@ -281,13 +310,26 @@ test("E2E-FOUND-FND02-05 report and alert counts reconcile seeded evidence", asy
   const fixture = await seedFnd02(page, testInfo, "REPORTS");
   const owner = await actorPage(browser, fixture.actors.owner);
   await owner.page.goto("/app/access/reports");
-  await owner.page.getByLabel("Report").selectOption("failed-logins");
   await expect(
-    owner.page.getByRole("heading", { name: "Reports and alerts" }),
+    owner.page.getByRole("heading", { name: "Activity & audit" }),
   ).toBeVisible();
-  const failures = await json<{ items: Array<{ count: number }> }>(
-    await accessApi(owner.page, "/reports/failed-logins"),
+  await owner.page.getByLabel("Evidence view").selectOption("failed-logins");
+  await expect(owner.page.getByText("Loading report…")).toHaveCount(0);
+  const failures = await json<{
+    total: number;
+    items: Array<{ count: number }>;
+  }>(await accessApi(owner.page, "/reports/failed-logins"));
+  const failuresTable = owner.page.locator(
+    '[aria-label="Failed Logins results"] table',
   );
+  await expect(failuresTable).toBeVisible();
+  await expect(
+    failuresTable.getByRole("columnheader", { name: "Attempts" }),
+  ).toBeVisible();
+  await expect(failuresTable.getByRole("row")).toHaveCount(failures.total + 1);
+  await owner.page.getByLabel("Search").fill("login");
+  await expect(owner.page.getByText("Loading report…")).toHaveCount(0);
+  await expect(owner.page.locator("main pre")).toHaveCount(0);
   const alerts = await json<{ total: number; items: Array<{ type: string }> }>(
     await accessApi(owner.page, "/alerts"),
   );
@@ -331,7 +373,7 @@ const masters: readonly MasterCase[] = [
     resource: "vehicles",
     route: "/app/masters/fleet",
     createButton: "Create vehicle",
-    invalidLabel: "Vendor ID",
+    invalidLabel: "Vendor",
   },
 ] as const;
 
@@ -409,23 +451,39 @@ async function fillCanonicalForm(
     await page.getByLabel("Code", { exact: true }).fill(String(payload.code));
     await page.getByLabel("Name").fill(String(payload.name));
     await page.getByLabel("Node type").selectOption(String(payload.nodeType));
-    await page.getByLabel("Timezone").fill(String(payload.timezone));
-    await page.getByLabel("Postal codes (JSON array)").fill('["700001"]');
-    await page.getByLabel("Geofence (JSON)").fill("{}");
+    await page.getByLabel("Timezone").selectOption(String(payload.timezone));
+    await page.getByLabel("Postal codes").fill("700001");
+    const geofence = page.getByRole("group", { name: "Geofence method" });
+    await geofence.getByRole("combobox").selectOption("DYNAMIC_RADIUS");
+    await geofence.getByLabel("Radius (km)").fill("5");
     await page.getByLabel("Active from").fill(String(payload.activeFrom));
     return;
   }
   if (entry.feature === "MST02") {
     await page.getByLabel("Client code").fill(String(payload.code));
     await page.getByLabel("Legal name").fill(String(payload.legalName));
-    await page
-      .getByLabel("Billing entity node ID")
-      .fill(String(payload.billingEntityId));
+    const billingSearch = page.getByLabel("Search Billing entity");
+    await billingSearch.fill(String(payload.code));
+    await billingSearch.clear();
+    const billingEntity = page.getByLabel("Billing entity", { exact: true });
+    await expect(
+      billingEntity.locator(
+        `option[value="${String(payload.billingEntityId)}"]`,
+      ),
+    ).toHaveCount(1);
+    await billingEntity.selectOption(String(payload.billingEntityId));
     await page.getByLabel("Credit days").fill(String(payload.creditDays));
     await page.getByLabel("POD mode").selectOption(String(payload.podMode));
     return;
   }
-  await page.getByLabel("Vendor ID").fill(String(payload.vendorId));
+  const vendorSearch = page.getByLabel("Search Vendor");
+  await vendorSearch.fill("Vendor");
+  await vendorSearch.clear();
+  const vendor = page.getByLabel("Vendor", { exact: true });
+  await expect(
+    vendor.locator(`option[value="${String(payload.vendorId)}"]`),
+  ).toHaveCount(1);
+  await vendor.selectOption(String(payload.vendorId));
   await page
     .getByLabel("Registration number")
     .fill(String(payload.registrationNumber));

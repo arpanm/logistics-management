@@ -1,10 +1,11 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap postgres-up postgres-provision postgres-status dev check policy-check deploy-local health e2e verify status
+.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status dev check policy-check deploy-local health e2e verify status
 
 help:
 	@echo "bootstrap           Validate tools, configure hooks, and install dependencies"
+	@echo "bootstrap-production Install dependencies on an EC2/RDS host without requiring Docker"
 	@echo "postgres-up         Create/start the central shared PostgreSQL and provision this project"
 	@echo "postgres-provision  Add this project's role, databases, and schemas to shared PostgreSQL"
 	@echo "postgres-status     Verify shared PostgreSQL and the project database"
@@ -18,6 +19,9 @@ help:
 
 bootstrap:
 	@bash scripts/bootstrap.sh
+
+bootstrap-production:
+	@bash scripts/bootstrap.sh production
 
 postgres-up:
 	@bash scripts/postgres-up.sh

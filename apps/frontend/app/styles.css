@@ -512,8 +512,9 @@ td {
 }
 .tenant-hero {
   --tenant: #16324f;
-  background: linear-gradient(125deg, var(--tenant), #102a43);
-  color: #fff;
+  --tenant-ink: #fff;
+  background: var(--tenant);
+  color: var(--tenant-ink);
   border-radius: 1rem;
   padding: 1.5rem;
   display: flex;
@@ -522,7 +523,7 @@ td {
   margin-bottom: 1.25rem;
 }
 .tenant-hero .eyebrow {
-  color: #d9e7ef;
+  color: inherit;
 }
 .tenant-mark {
   flex: 0 0 4rem;
@@ -535,6 +536,16 @@ td {
   font-weight: 900;
   font-size: 1.3rem;
 }
+.setup-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.setup-next h2,
+.setup-next p {
+  margin-bottom: 0.35rem;
+}
 .checklist {
   list-style: none;
   padding: 0;
@@ -542,6 +553,7 @@ td {
 }
 .checklist li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.7rem;
   padding: 0.8rem 0;
@@ -599,6 +611,10 @@ td {
     align-items: stretch;
     flex-direction: column;
   }
+  .setup-next {
+    align-items: stretch;
+    flex-direction: column;
+  }
   .tenant-form fieldset {
     padding: 0.8rem;
   }
@@ -617,5 +633,86 @@ td {
   .topbar .link-button {
     margin-left: 0;
     width: max-content;
+  }
+}
+.smart-field {
+  display: grid;
+  gap: 0.38rem;
+}
+.smart-field > label,
+.geofence-editor legend {
+  font-weight: 650;
+}
+.smart-field > small,
+.geofence-editor small,
+.record-editor p {
+  color: var(--muted);
+}
+.reference-picker {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 1.4fr);
+  gap: 0.5rem;
+}
+.geofence-editor {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+}
+.geofence-map {
+  position: relative;
+  min-height: 220px;
+  overflow: hidden;
+  cursor: crosshair;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 49.7%,
+      rgba(22, 50, 79, 0.18) 50%,
+      transparent 50.3%
+    ),
+    linear-gradient(
+      transparent 49.7%,
+      rgba(22, 50, 79, 0.18) 50%,
+      transparent 50.3%
+    ),
+    url("https://tile.openstreetmap.org/0/0/0.png") center / 100% 100% no-repeat,
+    repeating-linear-gradient(90deg, #eaf3f5 0 10%, #f6fafb 10% 20%);
+}
+.geofence-map > span {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.65rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: 0.3rem;
+  background: rgba(255, 255, 255, 0.9);
+  color: #16324f;
+}
+.geofence-map i {
+  position: absolute;
+  display: grid;
+  width: 1.6rem;
+  height: 1.6rem;
+  translate: -50% -50%;
+  place-items: center;
+  border-radius: 50%;
+  background: #16324f;
+  color: white;
+  font-style: normal;
+}
+.record-editor {
+  display: grid;
+  gap: 0.45rem;
+}
+.record-editor p {
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .reference-picker {
+    grid-template-columns: 1fr;
   }
 }

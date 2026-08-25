@@ -14,12 +14,13 @@ No other local infrastructure containers are required.
 
 Project defaults:
 
-| Resource             | Value                       |
-| -------------------- | --------------------------- |
-| Application database | `logistics`                 |
-| Test database        | `logistics_test`            |
-| Application role     | `logistics_app`             |
-| Schemas              | `app`, `audit`, `reporting` |
+| Resource                | Value                                                 |
+| ----------------------- | ----------------------------------------------------- |
+| Application database    | `logistics`                                           |
+| Test database           | `logistics_test`                                      |
+| Application role        | `logistics_app`                                       |
+| Postal owner/importer   | `logistics_postal_owner` / `logistics_postal_importer` |
+| Schemas                 | `app`, `audit`, `reporting`, `postal_reference`       |
 
 Configure different names in `.env` if they conflict with an existing project. Use lowercase PostgreSQL-safe identifiers.
 
@@ -31,7 +32,7 @@ Install Node.js 22 LTS and pnpm 11 first. On macOS:
 brew install node@22 pnpm
 ```
 
-The commit hook resolves either a standalone `pnpm` or `corepack pnpm`, and includes standard Homebrew paths when Git supplies a reduced environment.
+The commit hook resolves either a standalone `pnpm` or `corepack pnpm`, and includes standard Homebrew paths when Git supplies a reduced environment. Installing pnpm alone is not enough: `make bootstrap` installs the locked workspace dependencies and configures the repository hooks.
 
 ```bash
 cp .env.example .env
@@ -39,6 +40,8 @@ make bootstrap
 make postgres-up
 make postgres-status
 ```
+
+Run `make bootstrap` immediately after cloning and again after changes to `package.json` or `pnpm-lock.yaml`. Do not bypass the hook with `--no-verify`; it intentionally runs repository policy, formatting, lint, type checking, and non-browser tests. If a database test reports that `app.users` disappeared, ensure no other commit/test process is resetting `logistics_test`, then rerun once.
 
 `postgres-up` behaves safely:
 
@@ -63,7 +66,7 @@ make e2e
 
 ## First-use application flow
 
-1. Open `http://127.0.0.1:3000/login` and sign in with the Platform Admin credentials from `.env`.
+1. Open `http://127.0.0.1:3000/login` and sign in with the Platform Admin credentials from `.env` (defaults: `admin@local.test` / `LocalAdmin!234`). `make deploy-local` reseeds this account and resets it to the current environment password.
 2. Provision a tenant at `/platform/tenants` and activate the Tenant Owner through the local invitation URL.
 3. Complete `/app/setup`, then create scoped users/roles under `/app/access`.
 4. Create organization, commercial, and fleet masters before operational records.
@@ -71,6 +74,12 @@ make e2e
 6. Reconcile records in Control Tower, Alerts, Data Imports, Governance, and Integrations.
 
 Primary routes are documented in the implemented feature table in `README.md` and the delivery map in `FEATURES.md`.
+
+The Platform Admin credential is only for tenant provisioning and platform operations. Tenant Owners and other tenant users authenticate with credentials established from their own invitation links; there is no shared tenant-admin password.
+
+The local adapter does not deliver real email. A missed or expired first-owner link can be replaced from Platform Admin → Tenants → tenant details. The replacement link is shown once, the old token is invalidated, and the action requires a reason and is audited. Tenant-level users are then managed by the activated Tenant Owner at `/app/access/users`.
+
+Local/test origin validation accepts both `http://127.0.0.1:3000` and `http://localhost:3000` when port 3000 is configured. It still rejects other hosts, schemes, and ports. Production accepts only the exact `FRONTEND_URL` origin.
 
 ## Targeted feature tests
 
@@ -97,7 +106,9 @@ Do not point Playwright at production. `ENABLE_TEST_HOOKS` must remain `false` f
 make deploy-local
 ```
 
-The command verifies/provisions shared PostgreSQL, applies committed migrations, builds frontend/backend, starts both, and checks backend and frontend readiness.
+The command verifies/provisions shared PostgreSQL, applies committed migrations, performs the idempotent administrator ownership handoff for `postal_reference`, verifies runtime read-only privileges, builds frontend/backend, starts both, and checks backend and frontend readiness.
+
+Tenant provisioning is PIN-first. Local/E2E uses a small deterministic postal fixture; city and state are derived and read-only. The production India directory is never downloaded at runtime and must be imported from a checksum-pinned official CSV using the AWS runbook in `README.md`.
 
 The committed local example enables `ENABLE_TEST_HOOKS=true` so Playwright can exercise retry-safe provisioning failure and recovery. The hook still requires an authenticated Platform Admin and the exact supported failure selector. Runtime configuration refuses to start when test hooks are enabled with `APP_ENV=production`; set the value to `false` in every non-local environment.
 
