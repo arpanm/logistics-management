@@ -216,6 +216,17 @@ The default VPC is adequate for this first deployment. Create:
 - `logistics-rds-sg`: inbound TCP 5432 only from `logistics-ec2-sg`; never from `0.0.0.0/0`.
 - Keep RDS `Public access` set to `No`. EC2 and RDS must be in the same VPC; AWS can configure the EC2-to-RDS security-group relationship from the RDS console.
 
+The repository can create this exact footprint from an administrator workstation with AWS CLI v2 and `jq`. It reuses the default VPC, creates only the EC2/RDS security groups, DB subnet group, SSM instance role/profile, one EC2 instance, and one private RDS instance. The RDS password is prompted and is not saved by the script:
+
+```bash
+export AWS_REGION=eu-north-1
+export EC2_KEY_NAME=ControlTower       # existing AWS EC2 key-pair name
+export ADMIN_CIDR='203.0.113.10/32'    # optional SSH; omit when using SSM only
+./scripts/provision-aws-infrastructure.sh
+```
+
+Optional size/name overrides are `EC2_INSTANCE_TYPE`, `RDS_INSTANCE_CLASS`, `RDS_INSTANCE_ID`, `RDS_DATABASE_NAME`, and `APP_NAME`. The defaults are `t3.micro`, `db.t3.micro`, `logistics-postgres`, `logistics`, and `logistics-management`. Review current regional eligibility and pricing before running it.
+
 ### 4. Create PostgreSQL RDS
 
 1. RDS → Create database → Standard create → PostgreSQL.
@@ -283,7 +294,7 @@ GRANT CONNECT ON DATABASE logistics TO logistics_postal_importer;
 \password logistics_postal_importer
 ```
 
-Use two different generated passwords. Hexadecimal output from `openssl rand -hex 32` is already URL-safe; otherwise percent-encode special characters before placing a password in a PostgreSQL URL. A Prisma `P1000` error means the URL password does not match the role password (or the login role is absent), not that RDS networking or TLS failed.
+Use three different generated passwords for the RDS master, `logistics_app`, and `logistics_postal_importer`. Hexadecimal output from `openssl rand -hex 32` is already URL-safe; otherwise percent-encode special characters before placing a password in a PostgreSQL URL. A Prisma `P1000` error means the URL password does not match the role password (or the login role is absent), not that RDS networking or TLS failed. If credentials were temporarily reused during recovery, rotate the master and both application roles after readiness is restored.
 
 Run the SQL through the verified master connection from the EC2 Session Manager shell (the prompt should resemble `ubuntu@ip-172-31-...`), not from a local macOS/zsh terminal. The RDS endpoint is private to the VPC. Then clear the master password:
 
@@ -327,6 +338,18 @@ sudo -u logistics bash -lc 'cd /opt/logistics-management && make bootstrap-produ
 
 `make bootstrap-production` installs the locked workspace dependencies and performs repository policy checks without requiring the local Docker/PostgreSQL stack. The recurring GitHub deployment also installs the exact lockfile before migration and build.
 
+For a new Ubuntu instance, the preferred automated path installs the runtime, creates the deployment user and swap, clones the requested revision, creates the database roles, generates runtime secrets, installs the pinned postal directory, migrates/builds/seeds, configures systemd and Nginx, and verifies readiness. Run it from the repository checkout or copy the script to the host first:
+
+```bash
+sudo REPOSITORY_URL='git@github.com:GITHUB_OWNER/GITHUB_REPOSITORY.git' \
+  RDS_HOST='database-1.REPLACE_REGION.rds.amazonaws.com' \
+  PUBLIC_ORIGIN='http://EC2_PUBLIC_IP' \
+  PLATFORM_ADMIN_EMAIL='admin@example.com' \
+  ./scripts/setup-aws-instance.sh
+```
+
+It prompts for the Platform Admin password and RDS master password without echoing either. A private Git repository requires the `logistics` account to have a read-only GitHub deploy key. Re-running against an existing checkout fetches the selected `REPOSITORY_REF` (default `main`) and performs the complete setup idempotently.
+
 ### 6. Configure application secrets and services
 
 ```bash
@@ -337,7 +360,7 @@ sudo chmod 640 /etc/logistics-management.env
 
 # Generate values before editing the file:
 openssl rand -hex 32
-openssl rand -base64 32
+openssl rand -base64 32  # MFA_ENCRYPTION_KEY: 44 base64 characters ending in =
 sudoedit /etc/logistics-management.env
 
 sudo cp deploy/aws/logistics-backend.service /etc/systemd/system/
@@ -358,7 +381,7 @@ SSL_CERT_FILE=/etc/ssl/certs/aws-rds-global-bundle.pem
 
 Prisma uses `sslcert` for the server CA file, whereas `psql`/libpq uses `sslrootcert`. `SSL_CERT_FILE` also supplies the CA to Prisma's migration/runtime OpenSSL process. Keep `sslaccept=strict`; do not use `sslmode=no-verify` in production.
 
-The file is sourced by Bash. Every comment must start with `#`; `:#` is treated as a command and causes `:#: command not found`. Keep URLs/secrets inside single quotes, do not add spaces around `=`, and do not paste Markdown formatting into the file. Validate the file before any install/migration/build command:
+The file is sourced by Bash. Every comment must start with `#`; `:#` is treated as a command and causes `:#: command not found`. Keep URLs/secrets inside single quotes, do not add spaces around `=`, and do not paste Markdown formatting into the file. `MFA_ENCRYPTION_KEY` must come from `openssl rand -base64 32`; do not use the hexadecimal generator intended for `AUTH_SECRET`. Validate the file before any install/migration/build command:
 
 ```bash
 sudo -u logistics /opt/logistics-management/scripts/validate-production-env.sh \
@@ -367,16 +390,24 @@ sudo -u logistics /opt/logistics-management/scripts/validate-production-env.sh \
 
 The validator reports the malformed line without printing secrets and rejects `localhost`, `127.0.0.1`, placeholder endpoints, incorrect database users, missing TLS verification, and an incorrect database name.
 
-Download the current authorized **All India Pincode Directory** CSV from the Department of Posts/Open Government Data catalog on an administrator workstation, review its license/source metadata, compute SHA-256, and copy the exact file to the protected path configured by `POSTAL_DIRECTORY_FILE` (the example uses `/opt/logistics-secrets/india-post-pincode-directory.csv`). Do not commit it and do not let the application download it at runtime.
+The reviewed **All India Pincode Directory till last month** CSV from the Department of Posts [official OGD resource page](https://www.data.gov.in/resource/all-india-pincode-directory-till-last-month) is pinned at `data/postal/india-post-pincode-directory-ogd-2025-10-03.csv`. It contains 165,627 source records, imports as 165,619 canonical rows after deterministic duplicate removal, and has SHA-256 `701ee84ba125a914e7ffc979c0308b3a041b8adffa85ec9d5f4e0579ecf062e5`. The application never downloads data at runtime. The first-setup script verifies and installs this file automatically. For an existing instance, copy and protect it as follows:
 
 ```bash
-sha256sum india-post-pincode-directory.csv
-sudo install -o logistics -g logistics -m 0400 \
-  india-post-pincode-directory.csv \
+# Administrator workstation (macOS):
+openssl dgst -sha256 data/postal/india-post-pincode-directory-ogd-2025-10-03.csv
+scp -i aws/ControlTower.pem data/postal/india-post-pincode-directory-ogd-2025-10-03.csv \
+  ubuntu@YOUR_EC2_PUBLIC_DNS:/tmp/india-post-pincode-directory.csv
+
+# EC2 Session Manager or SSH shell:
+sudo install -d -o root -g logistics -m 0750 /opt/logistics-secrets
+sudo install -o root -g logistics -m 0640 \
+  /tmp/india-post-pincode-directory.csv \
+  /opt/logistics-secrets/india-post-pincode-directory.csv
+sudo -u logistics sha256sum \
   /opt/logistics-secrets/india-post-pincode-directory.csv
 ```
 
-Set the resulting digest and source release metadata in `/etc/logistics-management.env`: `POSTAL_DIRECTORY_SHA256`, `POSTAL_DIRECTORY_VERSION`, `POSTAL_DIRECTORY_SOURCE_NAME`, `POSTAL_DIRECTORY_SOURCE_URI`, and `POSTAL_DIRECTORY_IMPORTED_BY`. The importer validates the checksum, expected `logistics` database, separate PostgreSQL identity, minimum production row count, and source metadata before atomically activating a version. The official catalog is <https://www.data.gov.in/catalog/all-india-pincode-directory-through-webservice>.
+Set the resulting digest and source release metadata in `/etc/logistics-management.env`: `POSTAL_DIRECTORY_SHA256`, `POSTAL_DIRECTORY_VERSION`, `POSTAL_DIRECTORY_SOURCE_NAME`, `POSTAL_DIRECTORY_SOURCE_URI`, and `POSTAL_DIRECTORY_IMPORTED_BY`. Use a stable version such as `ogd-YYYY-MM-DD` from the resource metadata, not `latest`. The importer validates the checksum, expected `logistics` database, separate PostgreSQL identity, minimum production row count, and source metadata before atomically activating a version.
 
 Allow only the deployment account to restart these two services:
 
@@ -391,6 +422,14 @@ logistics ALL=(root) NOPASSWD: /usr/bin/systemctl restart logistics-backend.serv
 ```
 
 Before the first seed, replace `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` in `/etc/logistics-management.env`. Use a real operations mailbox and a unique password of at least 12 characters; production startup rejects the committed local password. Then apply migrations as the application role. Using a temporary RDS-master connection that is never written to the application environment, perform the one-time idempotent ownership handoff; this moves the reference tables and guard into `postal_reference`, owned by the NOLOGIN role, so the runtime cannot disable the immutability controls.
+
+The preferred first-deployment command performs the ownership handoff, verifies it, imports and activates the checksum-pinned CSV, restarts both services, and waits for readiness. It prompts once for the RDS master password without echoing or storing it:
+
+```bash
+sudo /opt/logistics-management/scripts/bootstrap-aws-postal.sh
+```
+
+The default RDS master username is `postgres`. If a different username was selected, run `sudo RDS_MASTER_USER=YOUR_USER /opt/logistics-management/scripts/bootstrap-aws-postal.sh`. The equivalent manual commands are retained below for recovery and auditability.
 
 ```bash
 sudo -u logistics /opt/logistics-management/scripts/validate-production-env.sh /etc/logistics-management.env
@@ -414,27 +453,119 @@ sudo -u logistics bash -lc 'set -euo pipefail; cd /opt/logistics-management; set
 
 The handoff is required once for a blank RDS database and is safe to repeat. Recurring GitHub deployments verify ownership and stop before import/restart if it is missing; they do not require or store the RDS master password.
 
+AWS RDS master users have `rds_superuser`, not PostgreSQL's unrestricted superuser. The handoff script therefore grants the master temporary membership in the existing `logistics_app` owner and target `logistics_postal_owner`, performs the transfer inside one transaction, resets the role, and revokes both memberships before commit. Do not replace the script with bare `ALTER ... OWNER` commands; those fail with `must be owner` or `must be able to SET ROLE` on RDS.
+
 After Nginx and TLS are configured, sign in at `https://YOUR_DOMAIN/login` using the exact production `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` that were present for this seed. There is no universal production password and the local `admin@local.test` account is not created unless you explicitly configure it—which you must not do.
 
 The seed upserts the Platform Admin by email and rewrites its password hash. To rotate that bootstrap password, update `PLATFORM_ADMIN_PASSWORD` in the protected environment file and run `pnpm run db:seed` once from a Session Manager shell. Do not run the seed on every deployment. Tenant users continue to authenticate with their invitation-created credentials and MFA policy, independently of this Platform Admin.
 
-### 7. Configure Nginx, DNS, and TLS
+### 7. Verify services before Nginx or DNS
 
-1. Point the desired DNS `A` record at the EC2 public address. A static Elastic IP prevents address changes but may consume credits/incur charges.
-2. Replace `example.com` in `deploy/aws/nginx.conf`, copy it to `/etc/nginx/sites-available/logistics-management`, enable it, test with `nginx -t`, and reload Nginx.
-3. Install Certbot's Nginx integration and issue a certificate for the domain. Keep ports 3000 and 4000 bound to loopback; expose only Nginx 80/443.
+Both applications intentionally listen only on EC2 loopback until Nginx is configured. Run these checks only after the production build completes. From the EC2 Session Manager shell, verify the build artifacts, units, listeners, and complete frontend-to-database path:
+
+```bash
+test -f /opt/logistics-management/apps/backend/dist/main.js && echo 'backend build present'
+test -f /opt/logistics-management/apps/frontend/.next/BUILD_ID && echo 'frontend build present'
+
+sudo systemctl is-active logistics-backend.service logistics-frontend.service
+sudo systemctl status --no-pager --full logistics-backend.service logistics-frontend.service
+sudo ss -lntp | grep -E '127\.0\.0\.1:(3000|4000)'
+
+# Process-only backend liveness.
+curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
+  http://127.0.0.1:4000/api/v1/health/live | jq
+
+# Backend + RDS + migrations + production postal data/ownership readiness.
+curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
+  http://127.0.0.1:4000/api/v1/health/ready | jq
+
+# Frontend rendering.
+curl --fail --silent --show-error --output /dev/null \
+  --write-out 'frontend /login HTTP %{http_code}\n' \
+  http://127.0.0.1:3000/login
+
+# Full frontend rewrite -> backend -> RDS readiness path.
+curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
+  http://127.0.0.1:3000/api/v1/health/ready | jq
+```
+
+Expected results are both units `active`, listeners only on `127.0.0.1:3000` and `127.0.0.1:4000`, liveness `{ "status": "ok", "service": "backend" }`, readiness with `status: "ready"` and `database: "connected"`, and `/login` HTTP `200`. A working backend liveness probe with a failing readiness probe means the process is up but a database migration, production postal import, or ownership handoff is incomplete. Inspect without exposing secrets:
+
+```bash
+sudo journalctl -u logistics-backend.service -n 100 --no-pager
+sudo journalctl -u logistics-frontend.service -n 100 --no-pager
+```
+
+Diagnose a backend `503 NOT_READY` in prerequisite order:
+
+```bash
+sudo -u logistics bash -lc 'set -euo pipefail; cd /opt/logistics-management; set -a; source /etc/logistics-management.env; set +a; corepack pnpm --filter @logistics/db exec prisma migrate status'
+sudo -u logistics bash -lc 'set -euo pipefail; cd /opt/logistics-management; set -a; source /etc/logistics-management.env; set +a; corepack pnpm --filter @logistics/db run postal:verify-ownership'
+sudo -u logistics bash -lc 'set -euo pipefail; set -a; source /etc/logistics-management.env; set +a; test -r "$POSTAL_DIRECTORY_FILE"; printf "%s  %s\n" "$POSTAL_DIRECTORY_SHA256" "$POSTAL_DIRECTORY_FILE" | sha256sum --check --status; echo "postal source and checksum present"'
+```
+
+All three must pass, and the configured postal directory must already have been imported and activated with the production import command in the preceding section.
+
+An old checkout may fail the full production import with Prisma `P2028` after exactly five seconds. The current importer keeps the entire activation atomic but gives this one bounded transaction up to five minutes for the 100,000+ row RDS load. Pull the current code; do not split the import into partially committed batches or raise application-wide transaction timeouts.
+
+Ports 3000 and 4000 should not be opened in the EC2 security group. External browser access begins only after Nginx proxies ports 80/443.
+
+If either build check prints nothing, stop the restart loop, build with the protected production environment, and then start both units:
+
+```bash
+sudo systemctl stop logistics-backend.service logistics-frontend.service
+sudo systemctl reset-failed logistics-backend.service logistics-frontend.service
+sudo -u logistics bash -lc 'set -euo pipefail; cd /opt/logistics-management; set -a; source /etc/logistics-management.env; set +a; corepack pnpm run build'
+test -f /opt/logistics-management/apps/backend/dist/main.js && echo 'backend build present'
+test -f /opt/logistics-management/apps/frontend/.next/BUILD_ID && echo 'frontend build present'
+sudo systemctl start logistics-backend.service logistics-frontend.service
+```
+
+### 8. Configure Nginx and verify public access
+
+The committed Nginx server is a port-80 default server (`server_name _`) so it works immediately with either the EC2 public IP or public DNS. Ensure the EC2 security group permits inbound TCP 80, then install it. Keep ports 3000 and 4000 bound to loopback and closed in the security group.
 
 ```bash
 sudo cp deploy/aws/nginx.conf /etc/nginx/sites-available/logistics-management
-sudo ln -s /etc/nginx/sites-available/logistics-management /etc/nginx/sites-enabled/logistics-management
+sudo ln -sfn /etc/nginx/sites-available/logistics-management /etc/nginx/sites-enabled/logistics-management
+sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
+sudo systemctl enable --now nginx
 sudo systemctl reload nginx
 
-sudo apt-get install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d logistics.example.com
+curl -fsS -o /dev/null -w 'public IP login HTTP %{http_code}\n' \
+  http://YOUR_EC2_PUBLIC_IP/login
+curl -fsS http://YOUR_EC2_PUBLIC_DNS/api/v1/health/ready | jq
 ```
 
-### 8. Configure GitHub OIDC and deployment permissions
+Run the same two URLs from a workstation outside AWS and open `http://YOUR_EC2_PUBLIC_IP/login` in a browser. HTTP 200 on `/login` proves public Nginx → frontend connectivity; `status: ready` proves public Nginx → backend → RDS connectivity. A 503 readiness response is not an Nginx failure—run the three prerequisite diagnostics in section 7. Production authentication uses secure cookies, so plain HTTP is only a smoke test; complete login requires HTTPS.
+
+To add a domain later:
+
+1. Prefer a stable Elastic IP if its cost is acceptable, and point the domain's DNS `A` record at it.
+2. Change `server_name _;` in `/etc/nginx/sites-available/logistics-management` to `server_name logistics.example.com;`, then run `sudo nginx -t && sudo systemctl reload nginx`.
+3. Install Certbot and issue the certificate.
+4. Change `FRONTEND_URL` in `/etc/logistics-management.env` to the exact `https://` origin and restart both application services.
+
+```bash
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d logistics.example.com
+sudoedit /etc/logistics-management.env
+sudo systemctl restart logistics-backend.service logistics-frontend.service
+curl -fsS https://logistics.example.com/api/v1/health/ready | jq
+```
+
+### 9. Pull and deploy the latest verified `main`
+
+On the EC2 instance, the update wrapper fetches `origin/main`, resolves the exact SHA, and delegates to the locked deployment script. That script refuses dirty tracked changes, validates the protected environment and postal checksum, applies migrations, verifies ownership, imports idempotently, builds once, restarts once, and checks readiness:
+
+```bash
+sudo /opt/logistics-management/scripts/update-aws-deployment.sh
+```
+
+Use this for a manual deployment. GitHub Actions invokes the underlying SHA-pinned deployment automatically.
+
+### 10. Configure GitHub OIDC and deployment permissions
 
 The committed `Quality` workflow runs `make check`. After a successful `main` run, `.github/workflows/deploy-aws.yml` deploys that exact verified commit through SSM. The deployment validates the protected pinned CSV configuration, applies migrations, performs the idempotent postal activation, builds, restarts, and checks readiness. It uses GitHub OIDC, so no long-lived AWS access key is stored in GitHub.
 
@@ -445,7 +576,7 @@ The committed `Quality` workflow runs `make check`. After a successful `main` ru
 5. Add these GitHub environment variables (not secrets): `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, and `AWS_EC2_INSTANCE_ID`.
 6. Push to `main`. After `Quality` succeeds, `Deploy AWS` starts automatically for that verified SHA. Inspect its SSM output and then verify `/api/v1/health/ready` and `/login`.
 
-### 9. Production operations checklist
+### 11. Production operations checklist
 
 - Keep RDS private, require TLS, rotate the bootstrap admin password, `AUTH_SECRET`, MFA key, database password, API credentials, and GitHub deploy key under an approved rotation procedure.
 - Review automated RDS backups and perform a restore drill. Deletion protection is not a backup.

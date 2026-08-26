@@ -217,110 +217,127 @@ if (rows.length < minimumRows)
 const db = createDatabase(importDatabaseUrl);
 const versionId = randomUUID();
 try {
-  const result = await db.$transaction(async (tx) => {
-    const identities = await tx.$queryRawUnsafe<
-      Array<{ sessionUser: string; currentUser: string; database: string }>
-    >(
-      `SELECT session_user AS "sessionUser",current_user AS "currentUser",current_database() AS database`,
-    );
-    if (
-      identities[0]?.sessionUser !== "logistics_postal_importer" ||
-      identities[0]?.currentUser !== "logistics_postal_importer"
-    )
-      throw new Error(
-        "Postal import connection must authenticate as logistics_postal_importer",
+  const result = await db.$transaction(
+    async (tx) => {
+      const identities = await tx.$queryRawUnsafe<
+        Array<{ sessionUser: string; currentUser: string; database: string }>
+      >(
+        `SELECT session_user AS "sessionUser",current_user AS "currentUser",current_database() AS database`,
       );
-    if (identities[0]?.database !== expectedDatabase)
-      throw new Error(
-        `Postal import connected to ${identities[0]?.database ?? "an unknown database"}; expected ${expectedDatabase}`,
-      );
-    await tx.$executeRawUnsafe(
-      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-      `postal-directory:${country}`,
-    );
-    const existing = await tx.$queryRawUnsafe<
-      Array<{ id: string; checksum: string; status: string; rowCount: number }>
-    >(
-      `SELECT id,checksum_sha256 AS checksum,status,row_count AS "rowCount"
-       FROM postal_reference.postal_directory_versions WHERE country=$1 AND version=$2`,
-      country,
-      version,
-    );
-    if (existing[0]) {
       if (
-        existing[0].checksum !== actualChecksum ||
-        Number(existing[0].rowCount) !== rows.length
+        identities[0]?.sessionUser !== "logistics_postal_importer" ||
+        identities[0]?.currentUser !== "logistics_postal_importer"
       )
         throw new Error(
-          `Postal version conflict for ${country}/${version}; use a new version for changed content`,
+          "Postal import connection must authenticate as logistics_postal_importer",
         );
-      if (activate && existing[0].status === "STAGED") {
+      if (identities[0]?.database !== expectedDatabase)
+        throw new Error(
+          `Postal import connected to ${identities[0]?.database ?? "an unknown database"}; expected ${expectedDatabase}`,
+        );
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        `postal-directory:${country}`,
+      );
+      const existing = await tx.$queryRawUnsafe<
+        Array<{
+          id: string;
+          checksum: string;
+          status: string;
+          rowCount: number;
+        }>
+      >(
+        `SELECT id,checksum_sha256 AS checksum,status,row_count AS "rowCount"
+       FROM postal_reference.postal_directory_versions WHERE country=$1 AND version=$2`,
+        country,
+        version,
+      );
+      if (existing[0]) {
+        if (
+          existing[0].checksum !== actualChecksum ||
+          Number(existing[0].rowCount) !== rows.length
+        )
+          throw new Error(
+            `Postal version conflict for ${country}/${version}; use a new version for changed content`,
+          );
+        if (activate && existing[0].status === "STAGED") {
+          await tx.$executeRawUnsafe(
+            `UPDATE postal_reference.postal_directory_versions SET active=false,status='RETIRED'
+           WHERE country=$1 AND status='ACTIVE'`,
+            country,
+          );
+          await tx.$executeRawUnsafe(
+            `UPDATE postal_reference.postal_directory_versions
+           SET active=true,status='ACTIVE',activated_at=now(),activated_by=$2
+           WHERE id=$1::uuid AND status='STAGED'`,
+            existing[0].id,
+            importedBy,
+          );
+          return {
+            versionId: existing[0].id,
+            status: "ACTIVE",
+            replayed: true,
+          };
+        }
+        return {
+          versionId: existing[0].id,
+          status: existing[0].status,
+          replayed: true,
+        };
+      }
+      await tx.$executeRawUnsafe(
+        `INSERT INTO postal_reference.postal_directory_versions
+       (id,country,version,source_name,source_uri,source_filename,checksum_sha256,active,status,row_count,imported_by,imported_at)
+       VALUES($1::uuid,$2,$3,$4,$5,$6,$7,false,'STAGED',$8,$9,now())`,
+        versionId,
+        country,
+        version,
+        sourceName,
+        sourceUri,
+        basename(file),
+        actualChecksum,
+        rows.length,
+        importedBy,
+      );
+      for (let index = 0; index < rows.length; index += 1000) {
+        const chunk = rows.slice(index, index + 1000);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO postal_reference.postal_localities
+         (id,directory_version_id,country,postal_code,locality_code,locality_name,district_name,city_name,region_name,active)
+         SELECT x.id::uuid,$1::uuid,$2,x."postalCode",x."localityCode",x."localityName",x."districtName",x."cityName",x."regionName",true
+         FROM jsonb_to_recordset($3::jsonb) AS x(id text,"postalCode" text,"localityCode" text,"localityName" text,"districtName" text,"cityName" text,"regionName" text)`,
+          versionId,
+          country,
+          JSON.stringify(chunk),
+        );
+      }
+      if (activate) {
         await tx.$executeRawUnsafe(
           `UPDATE postal_reference.postal_directory_versions SET active=false,status='RETIRED'
-           WHERE country=$1 AND status='ACTIVE'`,
+         WHERE country=$1 AND status='ACTIVE'`,
           country,
         );
         await tx.$executeRawUnsafe(
           `UPDATE postal_reference.postal_directory_versions
-           SET active=true,status='ACTIVE',activated_at=now(),activated_by=$2
-           WHERE id=$1::uuid AND status='STAGED'`,
-          existing[0].id,
-          importedBy,
-        );
-        return { versionId: existing[0].id, status: "ACTIVE", replayed: true };
-      }
-      return {
-        versionId: existing[0].id,
-        status: existing[0].status,
-        replayed: true,
-      };
-    }
-    await tx.$executeRawUnsafe(
-      `INSERT INTO postal_reference.postal_directory_versions
-       (id,country,version,source_name,source_uri,source_filename,checksum_sha256,active,status,row_count,imported_by,imported_at)
-       VALUES($1::uuid,$2,$3,$4,$5,$6,$7,false,'STAGED',$8,$9,now())`,
-      versionId,
-      country,
-      version,
-      sourceName,
-      sourceUri,
-      basename(file),
-      actualChecksum,
-      rows.length,
-      importedBy,
-    );
-    for (let index = 0; index < rows.length; index += 1000) {
-      const chunk = rows.slice(index, index + 1000);
-      await tx.$executeRawUnsafe(
-        `INSERT INTO postal_reference.postal_localities
-         (id,directory_version_id,country,postal_code,locality_code,locality_name,district_name,city_name,region_name,active)
-         SELECT x.id::uuid,$1::uuid,$2,x."postalCode",x."localityCode",x."localityName",x."districtName",x."cityName",x."regionName",true
-         FROM jsonb_to_recordset($3::jsonb) AS x(id text,"postalCode" text,"localityCode" text,"localityName" text,"districtName" text,"cityName" text,"regionName" text)`,
-        versionId,
-        country,
-        JSON.stringify(chunk),
-      );
-    }
-    if (activate) {
-      await tx.$executeRawUnsafe(
-        `UPDATE postal_reference.postal_directory_versions SET active=false,status='RETIRED'
-         WHERE country=$1 AND status='ACTIVE'`,
-        country,
-      );
-      await tx.$executeRawUnsafe(
-        `UPDATE postal_reference.postal_directory_versions
          SET active=true,status='ACTIVE',activated_at=now(),activated_by=$2
          WHERE id=$1::uuid AND status='STAGED'`,
+          versionId,
+          importedBy,
+        );
+      }
+      return {
         versionId,
-        importedBy,
-      );
-    }
-    return {
-      versionId,
-      status: activate ? "ACTIVE" : "STAGED",
-      replayed: false,
-    };
-  });
+        status: activate ? "ACTIVE" : "STAGED",
+        replayed: false,
+      };
+    },
+    {
+      // The production directory is intentionally activated atomically. RDS can
+      // take longer than Prisma's five-second default to insert 100k+ rows.
+      maxWait: 10_000,
+      timeout: 300_000,
+    },
+  );
   process.stdout.write(
     JSON.stringify({
       versionId: result.versionId,

@@ -1,5 +1,7 @@
 \set ON_ERROR_STOP on
 
+BEGIN;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='logistics_postal_owner') THEN
@@ -8,7 +10,24 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='logistics_postal_importer') THEN
     RAISE EXCEPTION 'Create LOGIN role logistics_postal_importer before postal ownership handoff';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='logistics_app') THEN
+    RAISE EXCEPTION 'Create LOGIN role logistics_app before postal ownership handoff';
+  END IF;
 END $$;
+
+-- RDS master users have rds_superuser rather than PostgreSQL superuser.
+-- The migrated objects are owned by logistics_app, so the master must
+-- temporarily assume that role; the existing owner must also be allowed to
+-- transfer objects to logistics_postal_owner. Remove both memberships before
+-- commit so neither the runtime nor master retains owner access.
+DO $$
+BEGIN
+  EXECUTE format('GRANT logistics_app TO %I', session_user);
+  EXECUTE format('GRANT logistics_postal_owner TO %I', session_user);
+  GRANT logistics_postal_owner TO logistics_app;
+END $$;
+
+SET ROLE logistics_app;
 
 CREATE SCHEMA IF NOT EXISTS postal_reference AUTHORIZATION logistics_postal_owner;
 ALTER SCHEMA postal_reference OWNER TO logistics_postal_owner;
@@ -38,7 +57,17 @@ DECLARE
   target_table text;
   prefix text;
 BEGIN
-  IF to_regclass('app.organization_addresses') IS NOT NULL THEN
+  IF to_regclass('app.organization_addresses') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema='app' AND table_name='organization_addresses'
+         AND column_name='postal_locality_id'
+     )
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema='app' AND table_name='organization_addresses'
+         AND column_name='postal_directory_version_id'
+     ) THEN
     IF NOT EXISTS (
       SELECT 1 FROM pg_constraint
       WHERE conrelid='app.organization_addresses'::regclass
@@ -65,6 +94,17 @@ BEGIN
       CONTINUE;
     END IF;
     prefix := split_part(target_table,'.',2);
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema='app' AND table_name=prefix
+        AND column_name='postal_locality_id'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema='app' AND table_name=prefix
+        AND column_name='postal_directory_version_id'
+    ) THEN
+      CONTINUE;
+    END IF;
     IF NOT EXISTS (
       SELECT 1 FROM pg_constraint
       WHERE conrelid=target_table::regclass
@@ -97,3 +137,14 @@ GRANT SELECT,REFERENCES ON postal_reference.postal_directory_versions,postal_ref
 GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER ON postal_reference.postal_directory_versions,postal_reference.postal_localities TO logistics_postal_importer;
 REVOKE ALL ON FUNCTION postal_reference.guard_postal_directory_mutation() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION postal_reference.guard_postal_directory_mutation() TO logistics_app,logistics_postal_importer;
+
+RESET ROLE;
+
+DO $$
+BEGIN
+  REVOKE logistics_postal_owner FROM logistics_app;
+  EXECUTE format('REVOKE logistics_postal_owner FROM %I', session_user);
+  EXECUTE format('REVOKE logistics_app FROM %I', session_user);
+END $$;
+
+COMMIT;

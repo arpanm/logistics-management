@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import argon2 from "argon2";
 import {
   randomBytes,
@@ -59,6 +59,7 @@ export class AppError extends Error {
 
 @Injectable()
 export class AppService implements OnModuleDestroy {
+  private readonly logger = new Logger(AppService.name);
   readonly config = loadConfig();
   readonly db: PrismaClient = createDatabase();
   async onModuleDestroy() {
@@ -150,7 +151,11 @@ export class AppService implements OnModuleDestroy {
         migrationCount: migrations.length,
         latestMigration: migrations.at(-1)?.migration_name,
       };
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        "Readiness dependency check failed",
+        error instanceof Error ? error.stack : undefined,
+      );
       throw new AppError(
         503,
         "NOT_READY",

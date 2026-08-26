@@ -162,15 +162,15 @@ All rows below are live, tenant-authorized, PostgreSQL-backed, and covered by th
 
 These items do not reopen the completed PostgreSQL-only feature scope. They are required before or during production adoption:
 
-| Area               | Pending work                                                                                                                                                                 | Status                         |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| AWS operations     | Provision EC2/RDS, DNS/TLS, OIDC/SSM deployment, budgets, alarms, backups, and restore drills using the README runbook                                                       | Planned                        |
-| Messaging          | Select and connect production email, SMS, and WhatsApp providers; local adapters correctly remain unavailable/failed rather than reporting false delivery                    | Provider decision pending      |
-| Document security  | Select a production malware-scanning provider; benign local uploads remain pending until a real scanner attests them                                                         | Provider decision pending      |
-| GPS/accounting     | Confirm production GPS and accounting vendors, credentials, mappings, retry policy, and reconciliation ownership                                                             | Provider decision pending      |
-| Commercial policy  | Confirm cancellation/fill-rate treatment, placement/POD ageing boundaries, deductions/credit notes, over-receipts, approval thresholds, GST/TDS, and bank-verification rules | Product-owner decision pending |
-| Privacy/compliance | Confirm retention, consent, location-collection, document, audit-export, and data-residency requirements for each operating geography                                        | Legal/product decision pending |
-| Capacity           | Replace the single small EC2 instance with an artifact-based or multi-instance topology when measured load requires it; add infrastructure only through an approved ADR      | Capacity-triggered             |
+| Area               | Pending work                                                                                                                                                                           | Status                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| AWS operations     | EC2/RDS, systemd, public-IP Nginx, pinned postal bootstrap, and provision/setup/update scripts are implemented; DNS/TLS, OIDC/SSM, budgets, alarms, backups, and restore drills remain | In progress                    |
+| Messaging          | Select and connect production email, SMS, and WhatsApp providers; local adapters correctly remain unavailable/failed rather than reporting false delivery                              | Provider decision pending      |
+| Document security  | Select a production malware-scanning provider; benign local uploads remain pending until a real scanner attests them                                                                   | Provider decision pending      |
+| GPS/accounting     | Confirm production GPS and accounting vendors, credentials, mappings, retry policy, and reconciliation ownership                                                                       | Provider decision pending      |
+| Commercial policy  | Confirm cancellation/fill-rate treatment, placement/POD ageing boundaries, deductions/credit notes, over-receipts, approval thresholds, GST/TDS, and bank-verification rules           | Product-owner decision pending |
+| Privacy/compliance | Confirm retention, consent, location-collection, document, audit-export, and data-residency requirements for each operating geography                                                  | Legal/product decision pending |
+| Capacity           | Replace the single small EC2 instance with an artifact-based or multi-instance topology when measured load requires it; add infrastructure only through an approved ADR                | Capacity-triggered             |
 
 ## 6. Common Codex build contract
 

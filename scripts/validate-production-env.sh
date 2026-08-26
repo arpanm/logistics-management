@@ -51,6 +51,12 @@ done
   exit 1
 }
 
+if [[ ! "$MFA_ENCRYPTION_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  echo "MFA_ENCRYPTION_KEY must be standard base64 for exactly 32 bytes." >&2
+  echo "Generate it with: openssl rand -base64 32" >&2
+  exit 1
+fi
+
 validate_rds_url() {
   local variable_name="$1"
   local expected_user="$2"
