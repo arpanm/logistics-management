@@ -57,6 +57,29 @@ if [[ ! "$MFA_ENCRYPTION_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
   exit 1
 fi
 
+case "${EMAIL_DELIVERY_PROVIDER:-disabled}" in
+  disabled) ;;
+  ses)
+    [[ "${AWS_REGION:-}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || {
+      echo "AWS_REGION must be a valid AWS region identifier when EMAIL_DELIVERY_PROVIDER=ses." >&2
+      exit 1
+    }
+    [[ "${SES_FROM_EMAIL:-}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$ ]] || {
+      echo "SES_FROM_EMAIL must be an email address when EMAIL_DELIVERY_PROVIDER=ses." >&2
+      exit 1
+    }
+    if [[ ! "${EMAIL_TOKEN_ENCRYPTION_KEY:-}" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+      echo "EMAIL_TOKEN_ENCRYPTION_KEY must be standard base64 for exactly 32 bytes when SES delivery is enabled." >&2
+      echo "Generate it with: openssl rand -base64 32" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "EMAIL_DELIVERY_PROVIDER must be disabled or ses." >&2
+    exit 1
+    ;;
+esac
+
 validate_rds_url() {
   local variable_name="$1"
   local expected_user="$2"

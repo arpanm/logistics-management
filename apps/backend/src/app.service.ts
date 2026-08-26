@@ -16,6 +16,7 @@ import {
 import { isRequestOriginAllowed, loadConfig } from "@logistics/config";
 import type { SessionActor } from "@logistics/auth";
 import type { TenantCreateInput } from "@logistics/domain";
+import { sealOwnerInvitationToken } from "./invitation-token-envelope.js";
 
 type Row = Record<string, unknown>;
 type Tx = Prisma.TransactionClient;
@@ -101,6 +102,7 @@ export class AppService implements OnModuleDestroy {
         "202608250023_operations_workbench",
         "202608250024_finance_workbenches",
         "202608250025_password_recovery",
+        "202608250026_owner_invitation_email_delivery",
       ];
       if (
         !required.every((name) =>
@@ -1145,6 +1147,15 @@ export class AppService implements OnModuleDestroy {
         if (injectFailure && this.config.ENABLE_TEST_HOOKS === "true")
           throw new Error("Injected provisioning failure");
         const inviteId = String(inviteRows[0]!.id);
+        const secretEnvelope = sealOwnerInvitationToken(
+          {
+            tenantId,
+            invitationId: inviteId,
+            token: inviteToken,
+            expiresAt: expiresAt.toISOString(),
+          },
+          this.config.EMAIL_TOKEN_ENCRYPTION_KEY,
+        );
         await tx.$executeRawUnsafe(
           `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key,state,processed_at) VALUES($1::uuid,'TENANT','owner_invitation',$2::uuid,'owner_invitation.requested.v1',$3::jsonb,$4,'PENDING',null)`,
           tenantId,
@@ -1159,10 +1170,11 @@ export class AppService implements OnModuleDestroy {
           `owner-invitation:${inviteId}:v1`,
         );
         await tx.$executeRawUnsafe(
-          `INSERT INTO app.invitation_delivery_attempts(tenant_id,invitation_id,channel,destination_hash) VALUES($1::uuid,$2::uuid,'EMAIL',$3)`,
+          `INSERT INTO app.invitation_delivery_attempts(tenant_id,invitation_id,channel,destination_hash,secret_envelope) VALUES($1::uuid,$2::uuid,'EMAIL',$3,$4)`,
           tenantId,
           inviteId,
           hash(input.owner.email.toLowerCase()),
+          secretEnvelope,
         );
         await tx.$executeRawUnsafe(
           `INSERT INTO reporting.tenant_activity_projection(tenant_id,config_count,last_activity_at) VALUES($1::uuid,5,now())`,
@@ -1385,11 +1397,21 @@ export class AppService implements OnModuleDestroy {
           expectedVersion,
         ),
       );
+      const secretEnvelope = sealOwnerInvitationToken(
+        {
+          tenantId,
+          invitationId: String(invitation.id),
+          token: plainToken,
+          expiresAt: expiresAt.toISOString(),
+        },
+        this.config.EMAIL_TOKEN_ENCRYPTION_KEY,
+      );
       await tx.$executeRawUnsafe(
-        `INSERT INTO app.invitation_delivery_attempts(tenant_id,invitation_id,channel,destination_hash) VALUES($1::uuid,$2::uuid,'EMAIL',$3) ON CONFLICT(tenant_id,invitation_id,channel) DO UPDATE SET state='PENDING',attempts=0,available_at=now(),leased_at=null,delivered_at=null,failure_code=null,updated_at=now()`,
+        `INSERT INTO app.invitation_delivery_attempts(tenant_id,invitation_id,channel,destination_hash,secret_envelope) VALUES($1::uuid,$2::uuid,'EMAIL',$3,$4) ON CONFLICT(tenant_id,invitation_id,channel) DO UPDATE SET state='PENDING',attempts=0,available_at=now(),leased_at=null,delivered_at=null,failure_code=null,provider_message_id=null,secret_envelope=EXCLUDED.secret_envelope,updated_at=now()`,
         tenantId,
         invitation.id,
         hash(String(invitation.email).toLowerCase()),
+        secretEnvelope,
       );
       await tx.$executeRawUnsafe(
         `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key,state,processed_at) VALUES($1::uuid,'TENANT','owner_invitation',$2::uuid,'owner_invitation.requested.v1',$3::jsonb,$4,'PENDING',null)`,
@@ -1515,16 +1537,6 @@ export class AppService implements OnModuleDestroy {
           `UPDATE app.sessions SET revoked_at=now(),revoked_reason='TENANT_DEACTIVATED',updated_at=now(),version=version+1 WHERE active_tenant_id=$1::uuid AND revoked_at IS NULL`,
           id,
         );
-      else {
-        await tx.$executeRawUnsafe(
-          `UPDATE app.owner_invitations SET delivery_state='DELIVERED',updated_at=now(),version=version+1 WHERE tenant_id=$1::uuid AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now() AND delivery_state='PENDING_DELIVERY'`,
-          id,
-        );
-        await tx.$executeRawUnsafe(
-          `UPDATE app.outbox_events SET state='PROCESSED',processed_at=now(),updated_at=now(),version=version+1 WHERE tenant_id=$1::uuid AND event_type='owner_invitation.requested.v1' AND state='PENDING'`,
-          id,
-        );
-      }
       await this.audit(tx, {
         actorId: actor.userId,
         action:

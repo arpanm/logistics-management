@@ -11,3 +11,6 @@ allowBuilds:
   prisma: true
   sharp: true
   unrs-resolver: true
+
+minimumReleaseAgeExclude:
+  - '@aws-sdk/client-sesv2@3.1119.0'

@@ -14,6 +14,22 @@ const schema = z.object({
   INVITATION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(72),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(24),
   ENABLE_TEST_HOOKS: z.enum(["true", "false"]).default("false"),
+  EMAIL_DELIVERY_PROVIDER: z.enum(["disabled", "ses"]).default("disabled"),
+  AWS_REGION: z.string().min(1).default("eu-north-1"),
+  SES_FROM_EMAIL: z.string().email().or(z.literal("")).default(""),
+  EMAIL_TOKEN_ENCRYPTION_KEY: z.string().default(""),
+  INVITATION_DELIVERY_POLL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(5)
+    .max(300)
+    .default(15),
+  INVITATION_DELIVERY_MAX_ATTEMPTS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .default(3),
   MFA_ENCRYPTION_KEY: z.string().default(""),
   MFA_KEY_VERSION: z.coerce.number().int().positive().default(1),
   SUPPORTED_COUNTRIES: z.string().default("AE,GB,IN,SG,US"),
@@ -55,6 +71,30 @@ export function loadConfig(
     throw new Error("Production secrets must be explicitly configured");
   if (cfg.APP_ENV === "production" && cfg.ENABLE_TEST_HOOKS === "true")
     throw new Error("Test hooks cannot be enabled in production");
+  if (cfg.EMAIL_DELIVERY_PROVIDER === "ses") {
+    if (!cfg.SES_FROM_EMAIL)
+      throw new Error(
+        "SES_FROM_EMAIL is required when EMAIL_DELIVERY_PROVIDER=ses",
+      );
+    if (!cfg.EMAIL_TOKEN_ENCRYPTION_KEY)
+      throw new Error(
+        "EMAIL_TOKEN_ENCRYPTION_KEY is required when EMAIL_DELIVERY_PROVIDER=ses",
+      );
+    if (
+      cfg.APP_ENV === "production" &&
+      new URL(cfg.FRONTEND_URL).protocol !== "https:"
+    )
+      throw new Error(
+        "FRONTEND_URL must use HTTPS when SES delivery is enabled in production",
+      );
+    if (cfg.APP_ENV === "production") {
+      const hostname = new URL(cfg.FRONTEND_URL).hostname;
+      if (["localhost", "127.0.0.1", "[::1]"].includes(hostname))
+        throw new Error(
+          "FRONTEND_URL must use a public non-loopback host when SES delivery is enabled in production",
+        );
+    }
+  }
   if (cfg.APP_ENV === "production" && !cfg.MFA_ENCRYPTION_KEY)
     throw new Error("MFA_ENCRYPTION_KEY is required in production");
   if (cfg.MFA_ENCRYPTION_KEY) {
@@ -62,6 +102,13 @@ export function loadConfig(
     if (key.length !== 32)
       throw new Error(
         "MFA_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+      );
+  }
+  if (cfg.EMAIL_TOKEN_ENCRYPTION_KEY) {
+    const key = Buffer.from(cfg.EMAIL_TOKEN_ENCRYPTION_KEY, "base64");
+    if (key.length !== 32)
+      throw new Error(
+        "EMAIL_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
       );
   }
   return cfg;

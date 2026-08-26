@@ -1,13 +1,19 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { SessionActor } from "@logistics/auth";
 import { withPlatform, type Prisma } from "@logistics/db";
 import { AppError, AppService } from "../../app.service.js";
+import { InvitationEmailDeliveryService } from "../../invitation-email.service.js";
 
 type Tx = Prisma.TransactionClient;
 type Row = Record<string, unknown>;
 @Injectable()
 export class OperationalWorkerService {
-  constructor(@Inject(AppService) private readonly app: AppService) {}
+  constructor(
+    @Inject(AppService) private readonly app: AppService,
+    @Optional()
+    @Inject(InvitationEmailDeliveryService)
+    private readonly invitationEmail?: InvitationEmailDeliveryService,
+  ) {}
   private platform(actor: SessionActor) {
     if (!actor.platformAdmin)
       throw new AppError(
@@ -19,8 +25,11 @@ export class OperationalWorkerService {
 
   async run(actor: SessionActor, limit = 50) {
     this.platform(actor);
+    const invitations = this.invitationEmail
+      ? await this.invitationEmail.processPending(limit)
+      : 0;
     return withPlatform(this.app.db, async (tx) => ({
-      invitations: await this.invitationDeliveries(tx, limit),
+      invitations,
       documents: await this.documentScans(tx, limit),
       approvals: await this.expireApprovals(tx),
       offers: await this.expireOffers(tx),
@@ -29,25 +38,6 @@ export class OperationalWorkerService {
       integrations: await this.integrationDeliveries(tx, limit),
       accounting: await this.accountingProjection(tx, limit),
     }));
-  }
-
-  private async invitationDeliveries(tx: Tx, limit: number) {
-    const rows = await tx.$queryRawUnsafe<Array<Row>>(
-      `SELECT a.id,a.tenant_id AS "tenantId",a.invitation_id AS "invitationId",a.attempts FROM app.invitation_delivery_attempts a WHERE a.state IN ('PENDING','FAILED') AND a.available_at<=now() ORDER BY a.available_at,a.id FOR UPDATE SKIP LOCKED LIMIT $1`,
-      limit,
-    );
-    for (const row of rows) {
-      await tx.$executeRawUnsafe(
-        `UPDATE app.invitation_delivery_attempts SET state='FAILED',attempts=attempts+1,leased_at=now(),delivered_at=null,failure_code='LOCAL_ADAPTER_UNAVAILABLE',available_at=now()+interval '1 hour',updated_at=now() WHERE id=$1::uuid`,
-        row.id,
-      );
-      await tx.$executeRawUnsafe(
-        `UPDATE app.owner_invitations SET delivery_state='FAILED',updated_at=now(),version=version+1 WHERE tenant_id=$1::uuid AND id=$2::uuid`,
-        row.tenantId,
-        row.invitationId,
-      );
-    }
-    return rows.length;
   }
 
   private async documentScans(tx: Tx, limit: number) {

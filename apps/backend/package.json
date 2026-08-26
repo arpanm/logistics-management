@@ -13,6 +13,7 @@
     "test": "bash ../../scripts/test-backend.sh"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "3.1119.0",
     "@logistics/auth": "workspace:*",
     "@logistics/config": "workspace:*",
     "@logistics/db": "workspace:*",

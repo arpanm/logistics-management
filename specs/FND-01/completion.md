@@ -72,7 +72,7 @@ Expanded acceptance case `E2E-FOUND-FND01-05` exposed and verified the platform-
 - MST-01, MST-02, and MST-03 own reuse of the completed PIN resolver in organization, client-location, vendor, and driver forms.
 - Any future unknown-PIN manual exception requires an approved audited policy; FND-01 blocks inconsistent free-text addresses.
 - WebSockets remain absent in FND-01; the closed upgrade path is tested. Any future transport must reuse server-derived tenant context and add explicit isolation coverage.
-- Invitation delivery remains a PostgreSQL-backed local adapter/outbox boundary; external providers belong to INT-01.
+- Invitation delivery remains a PostgreSQL-backed outbox boundary. INT-01 adds optional AWS SES owner-activation delivery; local/provider-disabled deployments retain the audited copy-once fallback.
 
 ## Final checklist
 

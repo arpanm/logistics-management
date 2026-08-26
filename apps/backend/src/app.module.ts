@@ -36,6 +36,10 @@ import {
   GovernanceWorkbenchController,
   GovernanceWorkbenchService,
 } from "./modules/governance/index.js";
+import {
+  InvitationEmailDeliveryService,
+  InvitationEmailScheduler,
+} from "./invitation-email.service.js";
 
 @Module({
   controllers: [
@@ -54,6 +58,8 @@ import {
   ],
   providers: [
     AppService,
+    InvitationEmailDeliveryService,
+    InvitationEmailScheduler,
     AccessService,
     AccessMastersService,
     OperationsWorkbenchService,

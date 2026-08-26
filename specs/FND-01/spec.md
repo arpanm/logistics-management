@@ -41,7 +41,7 @@ FND-01 is not the general identity/authorization feature. FND-02 will add the fu
 - Organization hierarchy, employee masters, and user-created legal entities beyond the single bootstrap legal entity (MST-01).
 - Clients, vendors, vehicles, drivers, contracts, operations, documents, billing, or other logistics transaction models.
 - Customer-configurable role editing or no-code branding/configuration screens (CFG-01). FND-01 only reads bootstrap configuration and renders its branding.
-- A real email/SMS provider. Invitation delivery is a durable PostgreSQL event processed by an in-process adapter. Local mode exposes the one-time invitation URL to the Platform Admin after creation without logging it.
+- General user email, password-reset email, SMS, and WhatsApp providers. INT-01 now supplies an optional AWS SES adapter for new-tenant owner activation; local/provider-disabled mode retains the audited one-time replacement-link flow.
 - WebSockets. Because the feature introduces no websocket endpoint, the isolation criterion is satisfied by proving there is no websocket transport and by applying the same tenant-context contract to the event-delivery abstraction.
 - Redis, message brokers, external queues, object storage, Mailpit, a separate worker, or a project-specific PostgreSQL container.
 - Precise per-table disk attribution. The report exposes current project database size and tenant-owned row counts; a tenant storage estimate is explicitly labelled as an estimate if implemented.
@@ -373,7 +373,7 @@ No unresolved blocking product decision remains. The following decisions are int
 
 | Decision                            | Safe default                                                                                       | Owner/impact                                                                      |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| External invitation provider        | Durable PostgreSQL outbox plus local one-time copy link; no external send adapter                  | INT-01 may add email/SMS providers without changing invitation idempotency        |
+| External invitation provider        | Durable PostgreSQL outbox plus local one-time copy link; AWS may enable the INT-01 SES owner adapter | `specs/INT-01/spec.md`; other email/SMS providers remain outside FND-01            |
 | Full role and authentication policy | Fixed centralized Platform Admin/Tenant Owner capabilities, 12-character password, opaque sessions | FND-02 adds roles, scopes, MFA, access review, and user administration            |
 | Uploaded tenant logo                | Accessible initials mark and validated colours                                                     | CFG-01/GOV-01 add governed logo/document storage UI                               |
 | Per-tenant storage accounting       | Project DB size plus exact tenant row counts; omit or clearly label any estimate                   | Control-tower/configuration work may add a reviewed allocation method             |

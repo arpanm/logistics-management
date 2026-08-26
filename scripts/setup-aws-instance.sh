@@ -3,10 +3,11 @@ set -euo pipefail
 
 # Run on a fresh Ubuntu EC2 host. Required inputs:
 #   REPOSITORY_URL, RDS_HOST, PUBLIC_ORIGIN
-# Optional: REPOSITORY_REF, RDS_MASTER_USER, PLATFORM_ADMIN_EMAIL.
+# Optional: REPOSITORY_REF, RDS_MASTER_USER, PLATFORM_ADMIN_EMAIL,
+# SES_FROM_EMAIL, AWS_REGION.
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  exec sudo --preserve-env=REPOSITORY_URL,REPOSITORY_REF,RDS_HOST,PUBLIC_ORIGIN,RDS_MASTER_USER,PLATFORM_ADMIN_EMAIL "$0" "$@"
+  exec sudo --preserve-env=REPOSITORY_URL,REPOSITORY_REF,RDS_HOST,PUBLIC_ORIGIN,RDS_MASTER_USER,PLATFORM_ADMIN_EMAIL,SES_FROM_EMAIL,AWS_REGION "$0" "$@"
 fi
 
 repository_url="${REPOSITORY_URL:?Set REPOSITORY_URL (SSH or HTTPS Git URL).}"
@@ -15,6 +16,8 @@ rds_host="${RDS_HOST:?Set RDS_HOST to the private RDS endpoint.}"
 public_origin="${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN, for example http://EC2_PUBLIC_IP or https://logistics.example.com.}"
 rds_master_user="${RDS_MASTER_USER:-postgres}"
 admin_email="${PLATFORM_ADMIN_EMAIL:-}"
+ses_from_email="${SES_FROM_EMAIL:-}"
+aws_region="${AWS_REGION:-eu-north-1}"
 repo_dir="/opt/logistics-management"
 env_file="/etc/logistics-management.env"
 postal_source_rel="data/postal/india-post-pincode-directory-ogd-2025-10-03.csv"
@@ -40,6 +43,14 @@ printf '\n'
 }
 [[ "$admin_email" == *@* && "$public_origin" != *"'"* && "$admin_email" != *"'"* && "$admin_email" != *$'\n'* && "$admin_password" != *"'"* && "$admin_password" != *$'\n'* ]] || {
   echo "PUBLIC_ORIGIN and admin credentials must be valid single-line values without single quotes; the email must contain @." >&2
+  exit 1
+}
+if [[ -n "$ses_from_email" && ! "$ses_from_email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$ ]]; then
+  echo "SES_FROM_EMAIL must be a syntactically valid email using shell-safe characters." >&2
+  exit 1
+fi
+[[ "$aws_region" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || {
+  echo "AWS_REGION is not a valid AWS region identifier." >&2
   exit 1
 }
 read -rsp "RDS master password for $rds_master_user@$rds_host: " rds_master_password
@@ -96,9 +107,15 @@ runtime_password="$(openssl rand -hex 32)"
 importer_password="$(openssl rand -hex 32)"
 auth_secret="$(openssl rand -hex 32)"
 mfa_key="$(openssl rand -base64 32)"
+email_token_key=""
+email_delivery_provider="disabled"
+if [[ -n "$ses_from_email" ]]; then
+  email_token_key="$(openssl rand -base64 32)"
+  email_delivery_provider="ses"
+fi
 PGPASSWORD="$rds_master_password"
 export PGPASSWORD
-trap 'unset PGPASSWORD rds_master_password admin_password runtime_password importer_password' EXIT
+trap 'unset PGPASSWORD rds_master_password admin_password runtime_password importer_password email_token_key' EXIT
 
 if ! psql "host=$rds_host port=5432 dbname=postgres user=$rds_master_user sslmode=verify-full sslrootcert=/etc/ssl/certs/aws-rds-global-bundle.pem" \
   -tAc "SELECT 1 FROM pg_database WHERE datname='logistics'" | grep -q 1; then
@@ -151,6 +168,12 @@ PLATFORM_ADMIN_PASSWORD='$admin_password'
 INVITATION_TTL_HOURS=72
 SESSION_TTL_HOURS=24
 ENABLE_TEST_HOOKS=false
+EMAIL_DELIVERY_PROVIDER=$email_delivery_provider
+AWS_REGION=$aws_region
+SES_FROM_EMAIL=$ses_from_email
+EMAIL_TOKEN_ENCRYPTION_KEY='$email_token_key'
+INVITATION_DELIVERY_POLL_SECONDS=15
+INVITATION_DELIVERY_MAX_ATTEMPTS=3
 MFA_ENCRYPTION_KEY='$mfa_key'
 MFA_KEY_VERSION=1
 SUPPORTED_COUNTRIES=AE,GB,IN,SG,US

@@ -4,13 +4,13 @@
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+        "Federated": "arn:aws:iam::997979359169:oidc-provider/token.actions.githubusercontent.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:GITHUB_OWNER/GITHUB_REPOSITORY:environment:production"
+          "token.actions.githubusercontent.com:sub": "repo:arpanm@6629949/logistics-management@1345404460:environment:production"
         }
       }
     }

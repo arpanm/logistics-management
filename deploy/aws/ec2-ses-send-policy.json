@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SendOwnerInvitationFromVerifiedIdentity",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": "arn:aws:ses:REPLACE_REGION:REPLACE_ACCOUNT_ID:identity/REPLACE_VERIFIED_IDENTITY",
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "REPLACE_VERIFIED_IDENTITY"
+        }
+      }
+    }
+  ]
+}

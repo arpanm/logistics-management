@@ -117,7 +117,7 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 | ALT-01 | Alerts, escalation, and work queues                            | Traffic lights and operating need              | Complete              | Passing               | Transaction modules, FND-02 |
 | DAT-01 | Bulk import, validation, correction, and export                | Workbook/read-me/forms queue                   | Complete              | Passing               | Masters and transactions    |
 | GOV-01 | Documents, comments, audit, and approvals                      | Audit trail notes and regulated data           | Complete              | Implemented / Not Run | FND-02                      |
-| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Passing               | FND-01, GOV-01              |
+| INT-01 | APIs, notifications, GPS, accounting, and migration connectors | Current WhatsApp/Excel; GPS note               | Complete              | Implemented / Not Run | FND-01, GOV-01              |
 | CFG-01 | No-code tenant configuration and white-labeling                | Resale objective                               | Complete              | Implemented / Not Run | FND-01                      |
 
 ### 5.0.1 Product UX remediation status
@@ -165,7 +165,7 @@ These items do not reopen the completed PostgreSQL-only feature scope. They are 
 | Area               | Pending work                                                                                                                                                                           | Status                         |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | AWS operations     | EC2/RDS, systemd, public-IP Nginx, pinned postal bootstrap, and provision/setup/update scripts are implemented; DNS/TLS, OIDC/SSM, budgets, alarms, backups, and restore drills remain | In progress                    |
-| Messaging          | Select and connect production email, SMS, and WhatsApp providers; local adapters correctly remain unavailable/failed rather than reporting false delivery                              | Provider decision pending      |
+| Messaging          | AWS SES owner-activation delivery is implemented with encrypted retry material and an in-process PostgreSQL dispatcher; verify the selected identity and obtain SES production access. General user/password-reset email, SMS, and WhatsApp remain pending | Implemented / AWS activation pending |
 | Document security  | Select a production malware-scanning provider; benign local uploads remain pending until a real scanner attests them                                                                   | Provider decision pending      |
 | GPS/accounting     | Confirm production GPS and accounting vendors, credentials, mappings, retry policy, and reconciliation ownership                                                                       | Provider decision pending      |
 | Commercial policy  | Confirm cancellation/fill-rate treatment, placement/POD ageing boundaries, deductions/credit notes, over-receipts, approval thresholds, GST/TDS, and bank-verification rules           | Product-owner decision pending |
@@ -796,7 +796,9 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
+
+The pre-existing connector suite last passed; the newly authored SES owner-invitation cases have not been run and therefore set the current aggregate status.
 
 **Outcome:** The platform integrates with existing systems and communication habits without making WhatsApp or spreadsheets the system of record.
 
@@ -809,6 +811,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 5. GPS adapters normalize provider pings into trip events and report provider/device freshness.
 6. Accounting adapters export/import posted invoices, receipts, vendor bills, payments, tax/TDS data, and reconciliation results.
 7. WhatsApp/Excel migration can ingest approved structured exports or assisted uploads; it must not scrape private chats or silently post messages.
+8. In AWS production, new-tenant owner invitations can use SES from the configured verified identity. A stable activation token is authenticated-encrypted only while queued, provider acceptance reconciles invitation/attempt/outbox state, and the backend polls PostgreSQL without another container or service.
 
 ### Reports and alerts
 
@@ -822,6 +825,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 - Failed deliveries retry with backoff and move to observable replayable dead-letter state.
 - Mapping changes are versioned; historical payloads remain auditable.
 - Notification recipients and action links enforce tenant and record scope.
+- Owner activation mail is sent only for an active, unaccepted, unrevoked, unexpired invitation; retries reuse the same encrypted token, and production responses/logs/outbox/audit never expose it.
 
 ### Master prompt for Codex
 

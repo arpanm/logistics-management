@@ -12,7 +12,7 @@ The product requirements and per-feature implementation/test status are maintain
 | Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                      |
 | Automated feature tests           | Implemented / Not Run for the rapid remediation tree; execution is deferred to an explicitly requested batch/release test phase |
 | Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                            |
-| Feature implementation            | Canonical backend and product-UX remediation complete; external adoption decisions remain in `TODO.md`                          |
+| Feature implementation            | Canonical/product UX complete; SES owner-invitation adapter implemented, with AWS identity/production-access activation pending |
 
 Agents synchronize this summary, `FEATURES.md`, `TODO.md`, affected specs, and executable test-case status once per implementation batch. New or changed tests remain `Implemented / Not Run` until an explicitly requested batch/release test phase executes them.
 
@@ -38,14 +38,14 @@ The implementation includes normalized canonical stores and actionable workbench
 | ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts                                                          |
 | DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation                                                             |
 | GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Structured policy administration plus documents, visibility-aware comments, role-sequenced approvals, immutable audit, and segregation                                              |
-| INT-01  | `/app/integrations`                                                                                     | API clients, credential rotation, signed webhooks, mapping versions, delivery attempts, dead letters, and replay                                                                    |
+| INT-01  | `/app/integrations` and owner activation email                                                           | API clients, signed webhooks, delivery/replay, plus encrypted PostgreSQL-leased Amazon SES owner invitations without a separate worker                                                |
 | CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds                                                                        |
 
 The detailed fields, calculations, reports, alerts, acceptance criteria, and cross-feature journeys remain in [FEATURES.md](FEATURES.md).
 
 ### Pending production-adoption TODOs
 
-No local product implementation TODO remains from the audited remediation list. [TODO.md](TODO.md) now contains only the unknown-PIN policy choice, production AWS execution/capacity work, and provider/legal/commercial decisions. Production adoption also requires a pinned official India postal dataset, DNS/TLS, monitoring/backups/restore drills, secret rotation, and selection of real messaging, malware-scanning, GPS, and accounting providers.
+No local product implementation TODO remains from the audited remediation list. [TODO.md](TODO.md) now contains the unknown-PIN policy choice, production AWS execution/capacity work, activation of the implemented SES sender, and remaining provider/legal/commercial decisions. Production adoption also requires monitoring/backups/restore drills, secret rotation, and selection of SMS/WhatsApp, malware-scanning, GPS, and accounting providers.
 
 ## Engineering baseline
 
@@ -138,7 +138,7 @@ Local `make deploy-local` applies migrations and runs the deterministic seed. Un
 
 This is the **Platform Admin** account used to provision and manage tenants. It is not a Tenant Owner account. Each tenant's first Tenant Owner sets their own password through the invitation created during tenant provisioning; Vendor, Driver, Client, and employee users do the same. The password is never emailed or displayed later: after logout, the user signs in with the invitation email/mobile and the password they created.
 
-Local and default self-hosted adapters do not send real email. If the initial owner link is missed, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link. After activation, the Tenant Owner manages users, roles, scopes, invitation resend/revoke, suspension, MFA, sessions, and password recovery at `/app/access/users`; Platform Admin does not impersonate tenant administrators.
+Local and provider-disabled deployments do not send real email. The AWS deployment can deliver new-tenant owner activation mail through SES when the sender identity, sandbox/production access, EC2 permission, and environment settings below are complete. If the initial owner email is unavailable, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link and queues the replacement for SES when enabled. After activation, the Tenant Owner manages users, roles, scopes, invitation resend/revoke, suspension, MFA, sessions, and password recovery at `/app/access/users`; Platform Admin does not impersonate tenant administrators.
 
 An activated user who forgets their password selects **Forgot your password?** at `/login`. The public request always returns the same non-enumerating response and records a rate-limited delivery request; the current provider-free deployment does not claim that email or SMS was sent. A tenant-root identity administrator can instead open the active user in `/app/access/users`, enter an audit reason, select **Generate password reset link**, and copy the one-time link through a trusted channel. Administrator-copy recovery is intentionally blocked for identities active in multiple tenants because changing their shared platform password would affect every workspace; those users require a configured verified delivery provider. Completing any reset invalidates the link, changes the password, and signs the identity out of every active session.
 
@@ -345,6 +345,8 @@ sudo REPOSITORY_URL='git@github.com:GITHUB_OWNER/GITHUB_REPOSITORY.git' \
   RDS_HOST='database-1.REPLACE_REGION.rds.amazonaws.com' \
   PUBLIC_ORIGIN='http://EC2_PUBLIC_IP' \
   PLATFORM_ADMIN_EMAIL='admin@example.com' \
+  SES_FROM_EMAIL='mukh.bad@gmail.com' \
+  AWS_REGION='eu-north-1' \
   ./scripts/setup-aws-instance.sh
 ```
 
@@ -459,6 +461,45 @@ After Nginx and TLS are configured, sign in at `https://YOUR_DOMAIN/login` using
 
 The seed upserts the Platform Admin by email and rewrites its password hash. To rotate that bootstrap password, update `PLATFORM_ADMIN_PASSWORD` in the protected environment file and run `pnpm run db:seed` once from a Session Manager shell. Do not run the seed on every deployment. Tenant users continue to authenticate with their invitation-created credentials and MFA policy, independently of this Platform Admin.
 
+#### Configure Amazon SES owner-invitation email
+
+This deployment uses Amazon SES in the same region as the application (`eu-north-1`) and the EC2 instance profile—never a committed AWS access key. The temporary sender selected for this account is `mukh.bad@gmail.com`. A verified domain should replace it later for stronger branding and mail authentication.
+
+1. Open AWS Console → Amazon SES → **Identities** in Europe (Stockholm) → **Create identity** → Email address. Enter `mukh.bad@gmail.com`, create it, then open the AWS verification message in that Gmail inbox and select the verification link. SES identities are regional; verification in another region does not satisfy `eu-north-1`.
+2. Open SES → **Account dashboard**. A new account is in the sandbox (this account currently shows 200 messages/day and 1 message/second). Sandbox sending works only to verified recipients or the SES mailbox simulator. From **Get set up**, request production access for transactional mail before inviting arbitrary tenant-owner addresses. Describe the mail as requested account-activation messages, state that recipients are supplied by a Platform Admin during tenant onboarding, and confirm that bounces/complaints will be monitored. Do not claim production sending until AWS approves it.
+3. Attach a least-privilege inline policy to the EC2 instance role (currently `LogisticsEc2SsmRole`). Copy `deploy/aws/ec2-ses-send-policy.json`, replacing the region, account ID, and verified identity placeholders. Name the inline policy `LogisticsSesOwnerInvitationSend`. It grants only `ses:SendEmail` from that identity; the GitHub deployment role does not need SES sending permission.
+4. Generate a dedicated envelope key once and add the following protected settings to `/etc/logistics-management.env`. Do not rotate this key while invitations are queued; reissue any pending invitations before an approved rotation.
+
+```bash
+openssl rand -base64 32
+sudoedit /etc/logistics-management.env
+```
+
+```dotenv
+EMAIL_DELIVERY_PROVIDER=ses
+AWS_REGION=eu-north-1
+SES_FROM_EMAIL=mukh.bad@gmail.com
+EMAIL_TOKEN_ENCRYPTION_KEY='REPLACE_WITH_THE_GENERATED_44_CHARACTER_BASE64_VALUE'
+INVITATION_DELIVERY_POLL_SECONDS=15
+INVITATION_DELIVERY_MAX_ATTEMPTS=3
+```
+
+For a brand-new host, pass `SES_FROM_EMAIL='mukh.bad@gmail.com'` and `AWS_REGION='eu-north-1'` to `scripts/setup-aws-instance.sh`; it generates and protects the envelope key automatically. Omitting `SES_FROM_EMAIL` leaves delivery disabled and retains the audited manual replacement-link flow.
+
+5. Pull/deploy the migration and backend code, validate configuration, restart, and inspect only sanitized service output:
+
+```bash
+sudo -u logistics /opt/logistics-management/scripts/validate-production-env.sh \
+  /etc/logistics-management.env
+sudo /opt/logistics-management/scripts/update-aws-deployment.sh
+sudo systemctl is-active logistics-backend.service
+sudo journalctl -u logistics-backend.service -n 100 --no-pager
+```
+
+6. In the SES sandbox, first use a separately verified recipient and create a disposable tenant. Tenant detail should move from queued to delivered after SES accepts the message. `DELIVERED` means accepted by SES, not proven inbox placement. Existing invitations created before this migration have no recoverable delivery token; use **Generate replacement activation link** once to rotate and queue them safely. After production access is approved, repeat with a real tenant-owner mailbox.
+
+The invitation token is AES-GCM encrypted only while pending and is cleared after terminal completion. It is never stored in plaintext, added to the outbox/audit/logs, or returned by production tenant creation. SES owner-invitation delivery does not yet send general user invitations or password-reset mail; those continue to use the audited copy-once administrator flow described above.
+
 ### 7. Verify services before Nginx or DNS
 
 Both applications intentionally listen only on EC2 loopback until Nginx is configured. Run these checks only after the production build completes. From the EC2 Session Manager shell, verify the build artifacts, units, listeners, and complete frontend-to-database path:
@@ -540,6 +581,49 @@ curl -fsS http://YOUR_EC2_PUBLIC_DNS/api/v1/health/ready | jq
 
 Run the same two URLs from a workstation outside AWS and open `http://YOUR_EC2_PUBLIC_IP/login` in a browser. HTTP 200 on `/login` proves public Nginx → frontend connectivity; `status: ready` proves public Nginx → backend → RDS connectivity. A 503 readiness response is not an Nginx failure—run the three prerequisite diagnostics in section 7. Production authentication uses secure cookies, so plain HTTP is only a smoke test; complete login requires HTTPS.
 
+If no domain is available yet, Certbot 5.4 or newer can request a publicly trusted, short-lived Let's Encrypt certificate for the EC2 public IP. These certificates last about six days, so automatic renewal is mandatory. Keep inbound TCP 80 open for ACME HTTP validation and TCP 443 open for the application. The committed `nginx-self-signed.conf` provides the validation webroot during issuance; after issuance, install `nginx-ip-certificate.conf`, replacing its example IP path when the EC2 address differs.
+
+```bash
+sudo install -d -o root -g root -m 0700 /etc/nginx/tls
+sudo openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 30 \
+  -keyout /etc/nginx/tls/logistics-self-signed.key \
+  -out /etc/nginx/tls/logistics-self-signed.crt \
+  -subj '/CN=YOUR_EC2_PUBLIC_IP' \
+  -addext 'subjectAltName=IP:YOUR_EC2_PUBLIC_IP'
+sudo chmod 0600 /etc/nginx/tls/logistics-self-signed.key
+sudo chmod 0644 /etc/nginx/tls/logistics-self-signed.crt
+sudo cp deploy/aws/nginx-self-signed.conf /etc/nginx/sites-available/logistics-management
+sudo nginx -t
+sudo systemctl reload nginx
+
+sudo snap install certbot --classic
+sudo install -d -o www-data -g www-data -m 0755 \
+  /var/www/certbot/.well-known/acme-challenge
+sudo certbot certonly \
+  --non-interactive \
+  --agree-tos \
+  --register-unsafely-without-email \
+  --preferred-profile shortlived \
+  --webroot \
+  --webroot-path /var/www/certbot \
+  --ip-address YOUR_EC2_PUBLIC_IP
+
+# Replace 13.61.27.202 in this file if the instance uses another address.
+sudo cp deploy/aws/nginx-ip-certificate.conf \
+  /etc/nginx/sites-available/logistics-management
+sudo install -d -o root -g root -m 0755 \
+  /etc/letsencrypt/renewal-hooks/deploy
+sudo install -o root -g root -m 0755 \
+  deploy/aws/certbot-reload-nginx.sh \
+  /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo nginx -t
+sudo systemctl reload nginx
+sudo certbot renew --dry-run --run-deploy-hooks
+curl -fsS https://YOUR_EC2_PUBLIC_IP/api/v1/health/ready | jq
+```
+
+Certbot's snap installs `snap.certbot.renew.timer`. Verify it with `systemctl list-timers --all | grep snap.certbot.renew`. The self-signed certificate is only a temporary bootstrap dependency and is no longer served after the trusted certificate configuration is installed.
+
 To add a domain later:
 
 1. Prefer a stable Elastic IP if its cost is acceptable, and point the domain's DNS `A` record at it.
@@ -580,7 +664,7 @@ The deployment account's sudoers entry must include `systemctl daemon-reload` as
 The committed `Quality` workflow runs `make check`. After a successful `main` run, `.github/workflows/deploy-aws.yml` deploys that exact verified commit through SSM. The deployment validates the protected pinned CSV configuration, applies migrations, performs the idempotent postal activation, builds, restarts, and checks readiness. It uses GitHub OIDC, so no long-lived AWS access key is stored in GitHub.
 
 1. IAM → Identity providers → Add provider: OpenID Connect, URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
-2. Replace placeholders in `deploy/aws/github-oidc-trust-policy.json`. Create an IAM role (for example `LogisticsGitHubDeploy`) with that trust policy.
+2. Replace placeholders in `deploy/aws/github-oidc-trust-policy.json`. Create an IAM role (for example `LogisticsGitHubDeploy`) with that trust policy. If your GitHub organization enables immutable repository identities, use the exact OIDC subject recorded by CloudTrail (for example `repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID:environment:production`) rather than the legacy `repo:OWNER/REPOSITORY:environment:production` form.
 3. Replace placeholders in `deploy/aws/github-ssm-policy.json` and attach it to the role. It limits deployment to `AWS-RunShellScript` and the one EC2 instance.
 4. GitHub → Settings → Environments → create `production`, allow only `main`, and optionally require approval.
 5. Add these GitHub environment variables (not secrets): `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, and `AWS_EC2_INSTANCE_ID`.
@@ -589,13 +673,14 @@ The committed `Quality` workflow runs `make check`. After a successful `main` ru
 ### 11. Production operations checklist
 
 - Keep RDS private, require TLS, rotate the bootstrap admin password, `AUTH_SECRET`, MFA key, database password, API credentials, and GitHub deploy key under an approved rotation procedure.
+- Verify the SES identity in the deployment region, obtain production access before arbitrary-recipient onboarding, scope EC2 to the one sender identity, and monitor SES bounce/complaint reputation. Do not rotate `EMAIL_TOKEN_ENCRYPTION_KEY` with queued invitations.
 - Review automated RDS backups and perform a restore drill. Deletion protection is not a backup.
 - Configure CloudWatch alarms for EC2 CPU/status, RDS CPU/connections/storage, disk usage, service restarts, and application readiness.
 - Patch Ubuntu, Node.js, PostgreSQL minor versions, SSM Agent, and dependencies regularly.
 - For rollback, redeploy a known-good Git SHA only after checking migration compatibility. Forward-only database migrations are not automatically reversed.
 - Before meaningful traffic, move builds off the smallest EC2 size or build an artifact in CI; the swap-backed `t3.micro` path prioritizes cost over deployment speed.
 
-AWS references: [RDS PostgreSQL setup](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html), [EC2/RDS private connectivity](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/ec2-rds-connect.html), [Session Manager](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-with-systems-manager-session-manager.html), [GitHub OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), and [Run Command permissions](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html).
+AWS references: [RDS PostgreSQL setup](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_GettingStarted.CreatingConnecting.PostgreSQL.html), [EC2/RDS private connectivity](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/ec2-rds-connect.html), [Session Manager](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-with-systems-manager-session-manager.html), [SES identity verification](https://docs.aws.amazon.com/ses/latest/dg/verify-addresses-and-domains.html), [SES production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html), [GitHub OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), and [Run Command permissions](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-setting-up.html).
 
 ## Run a feature
 
