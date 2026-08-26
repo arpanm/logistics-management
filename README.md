@@ -418,7 +418,7 @@ sudo visudo -f /etc/sudoers.d/logistics-deploy
 Add this single line:
 
 ```text
-logistics ALL=(root) NOPASSWD: /usr/bin/systemctl restart logistics-backend.service logistics-frontend.service, /usr/bin/systemctl is-active --quiet logistics-backend.service, /usr/bin/systemctl is-active --quiet logistics-frontend.service
+logistics ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload, /usr/bin/systemctl restart logistics-backend.service logistics-frontend.service, /usr/bin/systemctl is-active --quiet logistics-backend.service, /usr/bin/systemctl is-active --quiet logistics-frontend.service
 ```
 
 Before the first seed, replace `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` in `/etc/logistics-management.env`. Use a real operations mailbox and a unique password of at least 12 characters; production startup rejects the committed local password. Then apply migrations as the application role. Using a temporary RDS-master connection that is never written to the application environment, perform the one-time idempotent ownership handoff; this moves the reference tables and guard into `postal_reference`, owned by the NOLOGIN role, so the runtime cannot disable the immutability controls.
@@ -564,6 +564,16 @@ sudo /opt/logistics-management/scripts/update-aws-deployment.sh
 ```
 
 Use this for a manual deployment. GitHub Actions invokes the underlying SHA-pinned deployment automatically.
+
+For the one update from a checkout that predates `update-aws-deployment.sh`, bootstrap it with the older SHA-based deployer that is already on EC2. This fetches `main`, deploys that exact commit, and makes the updater available; use the normal command above thereafter:
+
+```bash
+sudo -u logistics git -C /opt/logistics-management fetch --no-tags origin main
+LATEST_SHA="$(sudo -u logistics git -C /opt/logistics-management rev-parse origin/main)"
+sudo -u logistics /opt/logistics-management/scripts/deploy-aws.sh "$LATEST_SHA"
+```
+
+The deployment account's sudoers entry must include `systemctl daemon-reload` as shown in section 6. This prevents a stale systemd unit cache after service-file updates. The deployer waits up to two minutes for connection-refused and HTTP readiness failures while the applications start.
 
 ### 10. Configure GitHub OIDC and deployment permissions
 

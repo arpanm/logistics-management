@@ -174,7 +174,7 @@ install -o root -g root -m 0644 "$repo_dir/deploy/aws/nginx.conf" /etc/nginx/sit
 ln -sfn /etc/nginx/sites-available/logistics-management /etc/nginx/sites-enabled/logistics-management
 rm -f /etc/nginx/sites-enabled/default
 cat >/etc/sudoers.d/logistics-deploy <<'EOF'
-logistics ALL=(root) NOPASSWD: /usr/bin/systemctl restart logistics-backend.service logistics-frontend.service, /usr/bin/systemctl is-active --quiet logistics-backend.service, /usr/bin/systemctl is-active --quiet logistics-frontend.service
+logistics ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload, /usr/bin/systemctl restart logistics-backend.service logistics-frontend.service, /usr/bin/systemctl is-active --quiet logistics-backend.service, /usr/bin/systemctl is-active --quiet logistics-frontend.service
 EOF
 chmod 0440 /etc/sudoers.d/logistics-deploy
 visudo -cf /etc/sudoers.d/logistics-deploy

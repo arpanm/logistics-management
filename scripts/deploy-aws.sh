@@ -88,13 +88,14 @@ run_pnpm --filter @logistics/db postal:import -- \
   --activate true
 run_pnpm run build
 
+sudo systemctl daemon-reload
 sudo systemctl restart logistics-backend.service logistics-frontend.service
 sudo systemctl is-active --quiet logistics-backend.service
 sudo systemctl is-active --quiet logistics-frontend.service
 
-curl --fail --silent --show-error --retry 20 --retry-delay 2 --retry-connrefused \
+curl --fail --silent --show-error --retry 60 --retry-delay 2 --retry-connrefused --retry-all-errors \
   "http://127.0.0.1:${BACKEND_PORT:-4000}/api/v1/health/ready" >/dev/null
-curl --fail --silent --show-error --retry 20 --retry-delay 2 --retry-connrefused \
+curl --fail --silent --show-error --retry 60 --retry-delay 2 --retry-connrefused --retry-all-errors \
   "http://127.0.0.1:${FRONTEND_PORT:-3000}/login" >/dev/null
 
 echo "Deployed $commit_sha successfully."
