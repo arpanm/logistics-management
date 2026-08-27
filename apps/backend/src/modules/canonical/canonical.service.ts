@@ -1784,6 +1784,23 @@ export class CanonicalService {
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.access(tx, actor, "finance.admin", "APPROVE");
+      await this.assertResourceScope(
+        tx,
+        actor,
+        "finance.admin",
+        "APPROVE",
+        "receipts",
+        receiptId,
+      );
+      if (input.invoiceId)
+        await this.assertResourceScope(
+          tx,
+          actor,
+          "finance.admin",
+          "APPROVE",
+          "invoices",
+          input.invoiceId,
+        );
       return this.idempotent(
         tx,
         actor,
@@ -1802,6 +1819,56 @@ export class CanonicalService {
           )[0];
           if (!receipt)
             throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          let invoiceBalance: bigint | null = null;
+          if (input.invoiceId) {
+            await this.assertResourceScope(
+              tx,
+              actor,
+              "finance.admin",
+              "APPROVE",
+              "invoices",
+              input.invoiceId,
+            );
+            const invoice = (
+              await tx.$queryRawUnsafe<Array<Row>>(
+                `SELECT i.client_id,i.state,
+                    i.total_minor-coalesce((SELECT sum(e.amount_minor) FROM app.receipt_ledger_entries e WHERE e.tenant_id=i.tenant_id AND e.invoice_id=i.id),0) balance
+                 FROM app.client_invoices i
+                 WHERE i.tenant_id=$1::uuid AND i.id=$2::uuid
+                   AND app.domain_resource_authorized($1::uuid,$3::uuid,$4::uuid,'finance.admin','APPROVE','invoices',i.id)
+                 FOR UPDATE`,
+                tenantId,
+                input.invoiceId,
+                actor.membershipId,
+                actor.userId,
+              )
+            )[0];
+            if (!invoice)
+              throw new AppError(
+                404,
+                "RESOURCE_NOT_FOUND",
+                "Resource not found",
+              );
+            if (String(invoice.client_id) !== String(receipt.client_id))
+              throw new AppError(
+                409,
+                "RECEIPT_CLIENT_MISMATCH",
+                "Receipt and invoice must belong to the same client",
+              );
+            if (!["POSTED", "SUBMITTED"].includes(String(invoice.state)))
+              throw new AppError(
+                409,
+                "INVOICE_NOT_ALLOCATABLE",
+                "Only posted client invoices can receive allocations",
+              );
+            invoiceBalance = BigInt(String(invoice.balance));
+            if (invoiceBalance <= 0n)
+              throw new AppError(
+                409,
+                "INVOICE_NOT_ALLOCATABLE",
+                "Invoice has no open balance",
+              );
+          }
           const used = BigInt(
             String(
               (
@@ -1820,21 +1887,8 @@ export class CanonicalService {
               "OVER_ALLOCATION",
               "Allocation exceeds unallocated receipt balance",
             );
-          if (input.invoiceId) {
-            const balance = (
-              await tx.$queryRawUnsafe<Array<Row>>(
-                `SELECT i.total_minor-coalesce((SELECT sum(e.amount_minor) FROM app.receipt_ledger_entries e WHERE e.tenant_id=i.tenant_id AND e.invoice_id=i.id),0) balance FROM app.client_invoices i WHERE i.tenant_id=$1::uuid AND i.id=$2::uuid`,
-                tenantId,
-                input.invoiceId,
-              )
-            )[0];
-            if (!balance)
-              throw new AppError(
-                404,
-                "RESOURCE_NOT_FOUND",
-                "Resource not found",
-              );
-            if (allocationAmount > BigInt(String(balance.balance)))
+          if (invoiceBalance !== null) {
+            if (allocationAmount > invoiceBalance)
               throw new AppError(
                 409,
                 "OVER_ALLOCATION",
@@ -1880,6 +1934,7 @@ export class CanonicalService {
       .object({
         vehicleId: z.string().uuid(),
         driverId: z.string().uuid(),
+        expectedVersion: z.number().int().positive(),
         reason: z.string().trim().min(5).max(500).optional(),
       })
       .strict()
@@ -1887,6 +1942,30 @@ export class CanonicalService {
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.access(tx, actor, "operations.admin", "UPDATE");
+      await this.assertResourceScope(
+        tx,
+        actor,
+        "operations.admin",
+        "UPDATE",
+        "allocations",
+        allocationId,
+      );
+      await this.assertResourceScope(
+        tx,
+        actor,
+        "operations.admin",
+        "UPDATE",
+        "vehicles",
+        input.vehicleId,
+      );
+      await this.assertResourceScope(
+        tx,
+        actor,
+        "operations.admin",
+        "UPDATE",
+        "drivers",
+        input.driverId,
+      );
       return this.idempotent(
         tx,
         actor,
@@ -1909,16 +1988,57 @@ export class CanonicalService {
               "ALLOCATION_STATE_CONFLICT",
               "Accepted allocation is required",
             );
+          if (Number(allocation.version) !== input.expectedVersion)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Allocation changed; reload and retry",
+            );
+          const currentAssignment = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT id FROM app.allocation_assignments
+               WHERE tenant_id=$1::uuid AND allocation_id=$2::uuid AND assigned_to IS NULL FOR UPDATE`,
+              tenantId,
+              allocationId,
+            )
+          )[0];
+          if (currentAssignment && !input.reason)
+            throw new AppError(
+              400,
+              "REPLACEMENT_REASON_REQUIRED",
+              "Explain why the current vehicle or driver is being replaced",
+            );
+          await this.assertResourceScope(
+            tx,
+            actor,
+            "operations.admin",
+            "UPDATE",
+            "vehicles",
+            input.vehicleId,
+          );
+          await this.assertResourceScope(
+            tx,
+            actor,
+            "operations.admin",
+            "UPDATE",
+            "drivers",
+            input.driverId,
+          );
           const eligible = (
             await tx.$queryRawUnsafe<Array<Row>>(
               `SELECT v.vendor_id=d.vendor_id AND v.vendor_id=$4::uuid AND v.state='ACTIVE' AND d.state='ACTIVE' AND d.licence_valid_to>=current_date
        AND NOT EXISTS(SELECT 1 FROM app.compliance_records c WHERE c.tenant_id=$1::uuid AND ((c.subject_type='VEHICLE' AND c.subject_id=v.id) OR (c.subject_type='DRIVER' AND c.subject_id=d.id) OR (c.subject_type='VENDOR' AND c.subject_id=v.vendor_id)) AND (c.verification_state<>'VERIFIED' OR (c.valid_to IS NOT NULL AND c.valid_to<current_date)))
-       AND NOT EXISTS(SELECT 1 FROM app.allocation_assignments aa JOIN app.allocations a ON a.tenant_id=aa.tenant_id AND a.id=aa.allocation_id WHERE aa.tenant_id=$1::uuid AND aa.assigned_to IS NULL AND (aa.vehicle_id=$2::uuid OR aa.driver_id=$3::uuid) AND a.state NOT IN ('CANCELLED','REJECTED','EXPIRED')) eligible
-       FROM app.vehicles v JOIN app.drivers d ON d.tenant_id=v.tenant_id WHERE v.tenant_id=$1::uuid AND v.id=$2::uuid AND d.id=$3::uuid`,
+       AND NOT EXISTS(SELECT 1 FROM app.allocation_assignments aa JOIN app.allocations a ON a.tenant_id=aa.tenant_id AND a.id=aa.allocation_id WHERE aa.tenant_id=$1::uuid AND aa.assigned_to IS NULL AND aa.allocation_id<>$5::uuid AND (aa.vehicle_id=$2::uuid OR aa.driver_id=$3::uuid) AND a.state NOT IN ('CANCELLED','REJECTED','EXPIRED'))
+       AND app.domain_resource_authorized($1::uuid,$6::uuid,$7::uuid,'operations.admin','UPDATE','vehicles',v.id)
+       AND app.domain_resource_authorized($1::uuid,$6::uuid,$7::uuid,'operations.admin','UPDATE','drivers',d.id) eligible
+       FROM app.vehicles v JOIN app.drivers d ON d.tenant_id=v.tenant_id WHERE v.tenant_id=$1::uuid AND v.id=$2::uuid AND d.id=$3::uuid FOR UPDATE OF v,d`,
               tenantId,
               input.vehicleId,
               input.driverId,
               allocation.vendor_id,
+              allocationId,
+              actor.membershipId,
+              actor.userId,
             )
           )[0];
           if (!rowsBoolean(eligible?.eligible))

@@ -7,4 +7,5 @@ Before editing, read available acceptance notes, inspect existing patterns, and 
 Implement migrations, domain rules, repositories, service/API, server-side authorization, UI and states, events/jobs, audit/observability, reports/alerts, and non-browser tests required by the feature.
 Use exact decimal/timezone-safe calculations and tenant-safe queries. Keep external effects idempotent. Preserve unrelated changes.
 Author or update focused automated tests alongside the implementation, but do not run them unless the parent explicitly starts a batch/release test phase. Report changed test IDs as Implemented / Not Run. Do not edit Playwright tests unless the parent assigns them. Do not change feature status or create Git commits.
+Tell the parent whether repository-owned local services were already running. The primary agent, not this worker, performs the single required `make refresh-local` handoff step so shared package builds, migrations, and runtime processes cannot remain stale. This refresh is not authorization to run tests.
 """

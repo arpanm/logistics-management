@@ -57,6 +57,16 @@ Run `make bootstrap` immediately after cloning and again after changes to `packa
 make dev
 ```
 
+`make dev` runs Next.js and NestJS watchers and hot reloads source changes. Do not leave a production-style `make deploy-local` instance on the same ports when starting it.
+
+If the local application is already running through `make deploy-local`, source edits do not hot reload. Refresh that runtime after an implementation batch with:
+
+```bash
+make refresh-local
+```
+
+This command applies forward migrations, builds all shared packages before both apps, restarts only listeners owned by this repository, and verifies readiness. It does not run tests, reseed the Platform Admin, or delete/reset tenant data.
+
 Run checks only when explicitly starting a batch/release test phase:
 
 ```bash
@@ -110,6 +120,8 @@ make deploy-local
 ```
 
 The command verifies/provisions shared PostgreSQL, applies committed migrations, performs the idempotent administrator ownership handoff for `postal_reference`, verifies runtime read-only privileges, builds frontend/backend, starts both, and checks backend and frontend readiness.
+
+Use `make deploy-local` for first setup or when deterministic reseeding is explicitly wanted. Use `make refresh-local` for normal code updates so existing tenant/user data and the Platform Admin password are preserved.
 
 Tenant provisioning is PIN-first. Local/E2E uses a small deterministic postal fixture; city and state are derived and read-only. The production India directory is never downloaded at runtime and must be imported from a checksum-pinned official CSV using the AWS runbook in `README.md`.
 

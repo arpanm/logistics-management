@@ -4,6 +4,7 @@ import Link from "next/link";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
 import { SmartField } from "../forms/smart-field";
+import { FormSubmitResult } from "../forms/form-submit-result";
 
 type Postal = {
   id: string;
@@ -233,6 +234,7 @@ export function OrganizationWorkspace() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice("");
     try {
       if (editing && selected)
         await api(`/domain/masters/organization/${selected.id}`, {
@@ -253,11 +255,36 @@ export function OrganizationWorkspace() {
       setNotice(
         editing ? "Organization node updated." : "Organization node created.",
       );
-      setSelected(null);
-      setEditing(false);
-      setForm(empty());
-      setPostal([]);
+      const wasEditing = editing;
+      const editedId = selected?.id;
+      if (!wasEditing) {
+        setSelected(null);
+        setEditing(false);
+        setForm(empty());
+        setPostal([]);
+      }
       await load();
+      if (wasEditing && editedId) {
+        const refreshed = await api<Node>(
+          `/domain/masters/organization/${editedId}`,
+        );
+        setSelected(refreshed);
+        const address = refreshed.address;
+        setForm({
+          ...empty(),
+          code: refreshed.code,
+          name: refreshed.name,
+          nodeType: refreshed.nodeType,
+          parentId: refreshed.parentId ?? "",
+          timezone: refreshed.timezone,
+          activeFrom: refreshed.activeFrom,
+          activeTo: refreshed.activeTo ?? "",
+          line1: address?.line1 ?? "",
+          line2: address?.line2 ?? "",
+          postalCode: address?.postalCode ?? "",
+          postalLocalityId: address?.postalLocalityId ?? "",
+        });
+      }
     } catch (e) {
       setError(e as ApiError);
     }
@@ -672,7 +699,7 @@ export function OrganizationWorkspace() {
                 />
               </label>
             )}
-            <div className="actions">
+            <FormSubmitResult error={error} success={notice}>
               <button className="primary">
                 {editing ? "Save changes" : "Create node"}
               </button>
@@ -687,7 +714,7 @@ export function OrganizationWorkspace() {
                   Cancel
                 </button>
               )}
-            </div>
+            </FormSubmitResult>
           </form>
         </section>
       )}

@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, type ApiError } from "./api";
 import { Shell } from "./shell";
+import { FormSubmitResult } from "./forms/form-submit-result";
 
 type Role = {
   id: string;
@@ -686,9 +687,11 @@ export function UsersPage() {
                 ),
               )}
             </fieldset>
-            <button className="primary" type="submit">
-              Review and send invitation
-            </button>
+            <FormSubmitResult error={error} success={success}>
+              <button className="primary" type="submit">
+                Review and send invitation
+              </button>
+            </FormSubmitResult>
           </form>
         </section>
       )}
@@ -1002,7 +1005,9 @@ export function UsersPage() {
                     }
                   />
                 </label>
-                <button className="primary">Save profile</button>
+                <FormSubmitResult error={error} success={success}>
+                  <button className="primary">Save profile</button>
+                </FormSubmitResult>
               </form>
             </details>
           )}
@@ -1424,17 +1429,24 @@ export function UsersPage() {
                   }
                 />
               </label>
-              <button
-                type="button"
-                disabled={
-                  passwordResetPending || passwordResetReason.trim().length < 10
-                }
-                onClick={() => void issuePasswordReset()}
+              <FormSubmitResult
+                error={error}
+                success={passwordResetStatus || success}
+                busy={passwordResetPending}
               >
-                {passwordResetPending
-                  ? "Generating…"
-                  : "Generate password reset link"}
-              </button>
+                <button
+                  type="button"
+                  disabled={
+                    passwordResetPending ||
+                    passwordResetReason.trim().length < 10
+                  }
+                  onClick={() => void issuePasswordReset()}
+                >
+                  {passwordResetPending
+                    ? "Generating…"
+                    : "Generate password reset link"}
+                </button>
+              </FormSubmitResult>
               {passwordResetLink && (
                 <div>
                   <label htmlFor="password-reset-link">

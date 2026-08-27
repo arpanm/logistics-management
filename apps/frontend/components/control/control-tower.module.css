@@ -33,6 +33,35 @@
   border-radius: 0.85rem;
   padding: 1rem;
 }
+.lensIntro,
+.freshness,
+.sectionHead,
+.cardHead,
+.cardStats,
+.saveForm {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.lensIntro {
+  padding: 0.25rem 0;
+}
+.lensIntro h2,
+.lensIntro p,
+.sectionHead h2,
+.sectionHead p,
+.cardHead h3,
+.cardHead p {
+  margin: 0;
+}
+.guidance {
+  max-width: 48rem;
+  color: var(--muted);
+  border-left: 3px solid var(--primary);
+  padding-left: 0.75rem;
+}
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
@@ -43,11 +72,56 @@
   font-size: 1.65rem;
   margin-top: 0.3rem;
 }
+.metric {
+  text-align: left;
+  cursor: pointer;
+}
+.metric:hover,
+.metric:focus-visible,
+.client:hover,
+.client:focus-visible,
+.ageing button:hover,
+.ageing button:focus-visible {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+.metric small {
+  display: block;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
 .toolbar label {
   display: grid;
   gap: 0.25rem;
   min-width: 10rem;
   flex: 1;
+}
+.toolbar .clear {
+  align-self: end;
+}
+.saveForm {
+  justify-content: flex-start;
+}
+.saveForm input {
+  min-width: min(22rem, 100%);
+}
+.freshness {
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.freshDot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+}
+.live {
+  background: #12b76a;
+  box-shadow: 0 0 0 4px #d1fadf;
+}
+.delayed {
+  background: #fdb022;
+  box-shadow: 0 0 0 4px #fef0c7;
 }
 .status {
   display: inline-flex;
@@ -75,6 +149,20 @@
 }
 .client {
   text-align: left;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+.cardHead {
+  align-items: flex-start;
+}
+.cardStats {
+  justify-content: flex-start;
+  margin-top: 0.65rem;
+  color: var(--muted);
+}
+.cardStats span:last-child {
+  margin-left: auto;
 }
 .strip {
   height: 0.45rem;
@@ -106,13 +194,78 @@
   color: var(--muted);
   font-size: 0.8rem;
 }
+.table td {
+  font-variant-numeric: tabular-nums;
+}
+.actionLink {
+  white-space: nowrap;
+  font-weight: 700;
+}
 .vendors {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
   gap: 0.6rem;
 }
+.vendor dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+}
+.vendor dl div {
+  background: var(--bg);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+.vendor dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.vendor dd {
+  margin: 0.2rem 0 0;
+  font-weight: 800;
+  font-size: 1.15rem;
+}
+.ageing {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+.ageing button {
+  display: grid;
+  gap: 0.3rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+}
+.ageing strong {
+  font-size: 1.15rem;
+}
+.ageing small {
+  color: var(--muted);
+}
 .money {
   font-variant-numeric: tabular-nums;
+}
+.loading {
+  display: grid;
+  gap: 0.65rem;
+}
+.loading span {
+  display: block;
+  height: 2.8rem;
+  border-radius: 0.6rem;
+  background: linear-gradient(90deg, var(--bg), var(--surface), var(--bg));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite linear;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 .empty {
   text-align: center;
@@ -123,5 +276,23 @@
   .actions button,
   .actions a {
     width: 100%;
+  }
+  .toolbar label,
+  .saveForm input,
+  .saveForm button {
+    width: 100%;
+  }
+  .freshness span {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metric,
+  .client,
+  .ageing button,
+  .loading span {
+    transition: none;
+    animation: none;
   }
 }

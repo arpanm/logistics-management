@@ -14,7 +14,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import {
   checklistSchema,
   csvCell,
@@ -36,6 +36,114 @@ import { AppError, AppService } from "./app.service.js";
 import { trustedConnectionSource } from "./network-trust.js";
 
 const sessionCookie = "logistics_session";
+const uuidParamSchema = z.string().uuid();
+const platformUserQuerySchema = z.object({
+  search: z.string().trim().max(120).default(""),
+  membershipStatus: z.enum(["INVITED", "ACTIVE", "SUSPENDED"]).optional(),
+  activationStatus: z
+    .enum(["PENDING", "ACCEPTED", "EXPIRED", "REVOKED"])
+    .optional(),
+  audience: z.enum(["INTERNAL", "VENDOR", "DRIVER", "CLIENT"]).optional(),
+  role: z.string().trim().max(80).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+});
+const platformUserProfileSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    displayName: z.string().trim().min(2).max(160),
+    employeeCode: z.string().trim().min(2).max(40),
+    portalAudience: z.enum(["INTERNAL", "VENDOR", "DRIVER", "CLIENT"]),
+    reason: z.string().trim().min(10).max(500),
+  })
+  .strict();
+const platformMembershipStatusSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(10).max(500),
+});
+const platformRevealSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().trim().min(10).max(500),
+    currentPassword: z.string().min(1).max(256),
+  })
+  .strict();
+const platformPasswordResetSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().trim().min(10).max(500),
+    currentPassword: z.string().min(1).max(256),
+    expiresInHours: z.number().int().min(1).max(24).default(1),
+  })
+  .strict();
+const platformInviteUserSchema = z
+  .object({
+    displayName: z.string().trim().min(2).max(100),
+    employeeCode: z.string().trim().min(2).max(40),
+    email: z.string().trim().toLowerCase().email().max(254).optional(),
+    mobile: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9][0-9]{7,14}$/)
+      .optional(),
+    portalAudience: z.enum(["INTERNAL", "VENDOR", "DRIVER", "CLIENT"]),
+    roleIds: z.array(z.string().uuid()).min(1),
+    expiresInHours: z.number().int().min(1).max(720).default(72),
+    reason: z.string().trim().min(10).max(500),
+    tenantWideAccessConfirmed: z.literal(true),
+  })
+  .strict()
+  .refine((value) => value.email || value.mobile, {
+    path: ["email"],
+    message: "Email or mobile is required",
+  })
+  .refine((value) => new Set(value.roleIds).size === value.roleIds.length, {
+    path: ["roleIds"],
+    message: "Roles must be unique",
+  });
+const platformTenantConfigurationSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    legalName: z.string().trim().min(2).max(160),
+    timezone: z
+      .string()
+      .trim()
+      .refine((value) => {
+        try {
+          Intl.DateTimeFormat("en", { timeZone: value });
+          return true;
+        } catch {
+          return false;
+        }
+      }, "Invalid IANA timezone"),
+    locale: z
+      .string()
+      .trim()
+      .refine((value) => {
+        try {
+          return Intl.getCanonicalLocales(value).length === 1;
+        } catch {
+          return false;
+        }
+      }, "Invalid locale"),
+    currency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{3}$/),
+    shortName: z.string().trim().min(2).max(32),
+    primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    reason: z.string().trim().min(10).max(500),
+  })
+  .strict();
+const platformMasterTypeSchema = z.enum(["organization", "client", "vendor"]);
+const platformMasterRecordSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    name: z.string().trim().min(2).max(160),
+    reason: z.string().trim().min(10).max(500),
+  })
+  .strict();
 const requestId = (req: Request) => {
   const cached = (req as Request & { correlationId?: string }).correlationId;
   if (cached) return cached;
@@ -327,8 +435,200 @@ export class ApiController {
     @Res() res: Response,
   ) {
     return this.run(res, req, async () =>
-      this.service.tenantDetail(await this.actor(req), id),
+      this.service.tenantDetail(
+        await this.actor(req),
+        uuidParamSchema.parse(id),
+      ),
     );
+  }
+  @Patch("platform/tenants/:tenantId/configuration")
+  updatePlatformTenantConfiguration(
+    @Param("tenantId") tenantId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      return this.service.updatePlatformTenantConfiguration(
+        actor,
+        uuidParamSchema.parse(tenantId),
+        platformTenantConfigurationSchema.parse(body),
+        requestId(req),
+        key,
+      );
+    });
+  }
+  @Patch("platform/tenants/:tenantId/master-data/:resourceType/:resourceId")
+  updatePlatformMasterRecord(
+    @Param("tenantId") tenantId: string,
+    @Param("resourceType") resourceType: string,
+    @Param("resourceId") resourceId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      return this.service.updatePlatformMasterRecord(
+        actor,
+        uuidParamSchema.parse(tenantId),
+        platformMasterTypeSchema.parse(resourceType),
+        uuidParamSchema.parse(resourceId),
+        platformMasterRecordSchema.parse(body),
+        requestId(req),
+        key,
+      );
+    });
+  }
+  @Get("platform/tenants/:tenantId/users") platformTenantUsers(
+    @Param("tenantId") tenantId: string,
+    @Query() query: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () =>
+      this.service.platformTenantUsers(
+        await this.actor(req),
+        uuidParamSchema.parse(tenantId),
+        platformUserQuerySchema.parse(query),
+      ),
+    );
+  }
+  @Get("platform/tenants/:tenantId/users/:membershipId") platformTenantUser(
+    @Param("tenantId") tenantId: string,
+    @Param("membershipId") membershipId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () =>
+      this.service.platformTenantUser(
+        await this.actor(req),
+        uuidParamSchema.parse(tenantId),
+        uuidParamSchema.parse(membershipId),
+      ),
+    );
+  }
+  @Post("platform/tenants/:tenantId/users") invitePlatformTenantUser(
+    @Param("tenantId") tenantId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(
+      res,
+      req,
+      async () => {
+        const actor = await this.actor(req);
+        this.csrf(req, actor);
+        return this.service.invitePlatformTenantUser(
+          actor,
+          uuidParamSchema.parse(tenantId),
+          platformInviteUserSchema.parse(body),
+          requestId(req),
+          key,
+        );
+      },
+      201,
+    );
+  }
+  @Post("platform/tenants/:tenantId/users/:membershipId/reveal-destination")
+  revealPlatformTenantUserDestination(
+    @Param("tenantId") tenantId: string,
+    @Param("membershipId") membershipId: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      return this.service.revealPlatformTenantUserDestination(
+        actor,
+        uuidParamSchema.parse(tenantId),
+        uuidParamSchema.parse(membershipId),
+        platformRevealSchema.parse(body),
+        requestId(req),
+      );
+    });
+  }
+  @Post("platform/tenants/:tenantId/users/:membershipId/password-reset")
+  platformTenantUserPasswordReset(
+    @Param("tenantId") tenantId: string,
+    @Param("membershipId") membershipId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      return this.service.issuePlatformTenantUserPasswordReset(
+        actor,
+        uuidParamSchema.parse(tenantId),
+        uuidParamSchema.parse(membershipId),
+        platformPasswordResetSchema.parse(body),
+        requestId(req),
+        key,
+      );
+    });
+  }
+  @Patch("platform/tenants/:tenantId/users/:membershipId/profile")
+  updatePlatformTenantUser(
+    @Param("tenantId") tenantId: string,
+    @Param("membershipId") membershipId: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      return this.service.updatePlatformTenantUser(
+        actor,
+        uuidParamSchema.parse(tenantId),
+        uuidParamSchema.parse(membershipId),
+        platformUserProfileSchema.parse(body),
+        requestId(req),
+        key,
+      );
+    });
+  }
+  @Post("platform/tenants/:tenantId/users/:membershipId/:action")
+  setPlatformTenantUserStatus(
+    @Param("tenantId") tenantId: string,
+    @Param("membershipId") membershipId: string,
+    @Param("action") action: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") key: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, req, async () => {
+      const actor = await this.actor(req);
+      this.csrf(req, actor);
+      if (action !== "suspend" && action !== "reactivate")
+        throw new AppError(404, "NOT_FOUND", "Resource not found");
+      return this.service.setPlatformTenantUserStatus(
+        actor,
+        uuidParamSchema.parse(tenantId),
+        uuidParamSchema.parse(membershipId),
+        action === "suspend" ? "SUSPENDED" : "ACTIVE",
+        platformMembershipStatusSchema.parse(body),
+        requestId(req),
+        key,
+      );
+    });
   }
   @Post("platform/tenants/:id/owner-invitation/reissue")
   reissueOwnerInvitation(

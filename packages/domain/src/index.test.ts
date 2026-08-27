@@ -3,6 +3,7 @@ import {
   accessAcceptSchema,
   accessInviteSchema,
   csvCell,
+  employeeMasterCreateSchema,
   inviteAcceptSchema,
   loginSchema,
   passwordResetCompleteSchema,
@@ -14,6 +15,53 @@ import {
   tenantCreateSchema,
   tenantCreateSchemaFor,
 } from "./index.js";
+
+const employeeAccessFixture = {
+  employeeCode: "EMP-100",
+  displayName: "Internal Employee",
+  designation: "Coordinator",
+  homeNodeId: "00000000-0000-4000-8000-000000000001",
+  regionIds: [],
+  activeFrom: "2026-08-27",
+};
+
+describe("internal employee access invitation", () => {
+  it("requires explicit destination and role/scope assignments", () => {
+    expect(() =>
+      employeeMasterCreateSchema.parse({
+        ...employeeAccessFixture,
+        accessInvitation: {
+          reason: "Approved employee access",
+          assignments: [],
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("accepts explicit least-privilege invitation details", () => {
+    expect(
+      employeeMasterCreateSchema.parse({
+        ...employeeAccessFixture,
+        email: "employee@example.test",
+        accessInvitation: {
+          email: "employee@example.test",
+          reason: "Approved employee access",
+          assignments: [
+            {
+              roleId: "00000000-0000-4000-8000-000000000002",
+              grants: [
+                {
+                  scopeNodeId: "00000000-0000-4000-8000-000000000003",
+                  actions: ["READ"],
+                },
+              ],
+            },
+          ],
+        },
+      }).accessInvitation,
+    ).toMatchObject({ email: "employee@example.test" });
+  });
+});
 
 const validTenant = {
   name: "Acme Logistics",

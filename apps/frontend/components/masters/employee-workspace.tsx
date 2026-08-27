@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { api, type ApiError } from "../api";
+import { FormSubmitResult } from "../forms/form-submit-result";
 import { SmartField } from "../forms/smart-field";
 import { Shell } from "../shell";
 
@@ -186,6 +187,8 @@ export function EmployeeWorkspace() {
   });
   async function submit(event: FormEvent) {
     event.preventDefault();
+    setError(null);
+    setNotice("");
     try {
       if (editing && selected)
         await api(`/domain/masters/employees/${selected.id}`, {
@@ -203,11 +206,34 @@ export function EmployeeWorkspace() {
           headers: { "Idempotency-Key": crypto.randomUUID() },
           body: JSON.stringify(body()),
         });
-      setNotice(editing ? "Employee updated." : "Employee created.");
-      setForm(fresh());
-      setEditing(false);
-      setSelected(null);
+      const wasEditing = editing;
+      setNotice(wasEditing ? "Employee updated." : "Employee created.");
+      if (!wasEditing) {
+        setForm(fresh());
+        setEditing(false);
+        setSelected(null);
+      }
       await load();
+      if (wasEditing && selected) {
+        const refreshed = await api<Employee>(
+          `/domain/masters/employees/${selected.id}`,
+        );
+        setSelected(refreshed);
+        setForm({
+          employeeCode: refreshed.employeeCode,
+          displayName: refreshed.displayName,
+          designation: refreshed.designation ?? "",
+          email: refreshed.email === "••••" ? "" : (refreshed.email ?? ""),
+          mobile: refreshed.mobile === "••••" ? "" : (refreshed.mobile ?? ""),
+          managerId: refreshed.managerId ?? "",
+          homeNodeId: refreshed.homeNodeId,
+          regionIds: refreshed.regions.map((region) => region.id),
+          linkedMembershipId: refreshed.linkedMembershipId ?? "",
+          activeFrom: refreshed.activeFrom,
+          activeTo: refreshed.activeTo ?? "",
+          reason: "",
+        });
+      }
     } catch (value) {
       setError(value as ApiError);
     }
@@ -526,19 +552,36 @@ export function EmployeeWorkspace() {
               </select>
               <small>Hold Ctrl/Command to select multiple.</small>
             </label>
-            <SmartField
-              field={{
-                key: "linkedMembershipId",
-                label: "Linked user membership",
-                kind: "reference",
-                referenceResource: "access-users",
-                help: "Optional. Links an existing activated user; invitations are managed from Users.",
-              }}
-              value={form.linkedMembershipId}
-              onChange={(linkedMembershipId) =>
-                setForm({ ...form, linkedMembershipId })
-              }
-            />
+            {editing && selected?.linkedMembershipId ? (
+              <label>
+                Linked user membership
+                <input
+                  readOnly
+                  value={
+                    selected.linkedUserEmail ?? selected.linkedMembershipId
+                  }
+                />
+                <small>
+                  This employee is linked to an internal user. Reassignment or
+                  unlinking requires a governed identity-transfer workflow and
+                  cannot be performed from profile editing.
+                </small>
+              </label>
+            ) : (
+              <SmartField
+                field={{
+                  key: "linkedMembershipId",
+                  label: "Linked user membership",
+                  kind: "reference",
+                  referenceResource: "access-users",
+                  help: "Optional. Links an existing activated user; invitations are managed from Users.",
+                }}
+                value={form.linkedMembershipId}
+                onChange={(linkedMembershipId) =>
+                  setForm({ ...form, linkedMembershipId })
+                }
+              />
+            )}
             <label>
               Active from
               <input
@@ -569,7 +612,7 @@ export function EmployeeWorkspace() {
                 />
               </label>
             )}
-            <div className="actions">
+            <FormSubmitResult error={error} success={notice}>
               <button className="primary">
                 {editing ? "Save changes" : "Create employee"}
               </button>
@@ -584,7 +627,7 @@ export function EmployeeWorkspace() {
                   Cancel
                 </button>
               )}
-            </div>
+            </FormSubmitResult>
           </form>
         </section>
       )}

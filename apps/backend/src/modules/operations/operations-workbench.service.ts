@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type { SessionActor } from "@logistics/auth";
-import { toJsonSafe } from "@logistics/domain";
+import { allocationCommandSchema, toJsonSafe } from "@logistics/domain";
 import { withTenant, type Prisma } from "@logistics/db";
 import { z } from "zod";
 import { AppError, AppService } from "../../app.service.js";
@@ -18,8 +18,31 @@ const filterSchema = z.object({
   state: z.string().trim().max(40).default(""),
   clientId: uuid.optional(),
   owner: z.enum(["ALL", "MINE", "UNASSIGNED"]).default("ALL"),
+  risk: z.enum(["", "GREEN", "YELLOW", "RED"]).default(""),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
+const indentUpdateSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    requestedVehicles: z.number().int().positive(),
+    quantityMilli: z.number().int().safe().positive(),
+    pickupWindowStart: z.string().datetime({ offset: true }),
+    pickupWindowEnd: z.string().datetime({ offset: true }),
+    committedPlacementAt: z.string().datetime({ offset: true }),
+    commitmentOverrideReason: z.string().trim().min(10).max(500).nullish(),
+    ownerMembershipId: uuid.nullish(),
+    cargoType: z.string().trim().max(80).nullish(),
+    bodyType: z.string().trim().max(80).nullish(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      new Date(value.pickupWindowEnd) > new Date(value.pickupWindowStart),
+    {
+      path: ["pickupWindowEnd"],
+      message: "Pickup window end must be after start",
+    },
+  );
 const ruleSchema = z
   .object({
     name: z.string().trim().min(2).max(120),
@@ -198,39 +221,76 @@ export class OperationsWorkbenchService {
       throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
   }
 
-  async dashboard(actor: SessionActor) {
+  async dashboard(actor: SessionActor, raw: unknown) {
+    const input = filterSchema.parse(raw);
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.permit(tx, actor, "operations.read", "READ");
-      const [summary, urgent] = await Promise.all([
+      const [summary, openIndents] = await Promise.all([
         tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT
-           count(*) FILTER (WHERE i.state IN ('OPEN','PARTIALLY_ALLOCATED'))::int AS "openIndents",
-           count(*) FILTER (WHERE i.state IN ('OPEN','PARTIALLY_ALLOCATED') AND i.committed_placement_at<now())::int AS "placementBreaches",
+          `WITH queue AS (
+             SELECT i.id,i.requested_vehicles,
+               greatest(i.requested_vehicles-coalesce((SELECT sum(a.allotted_vehicles) FROM app.allocations a WHERE a.tenant_id=i.tenant_id AND a.indent_id=i.id AND a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0),0)::int remaining,
+               CASE WHEN now()>=i.committed_placement_at THEN 'RED' WHEN now()>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END risk
+             FROM app.indents i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id
+             JOIN app.client_locations cl ON cl.tenant_id=i.tenant_id AND cl.id=i.client_location_id
+             JOIN app.contract_lanes l ON l.tenant_id=i.tenant_id AND l.id=i.lane_id
+             WHERE i.tenant_id=$1::uuid AND i.state IN ('OPEN','PARTIALLY_ALLOCATED')
+             AND ($4='' OR i.state=$4) AND ($5='ALL' OR ($5='MINE' AND i.owner_membership_id=$2::uuid) OR ($5='UNASSIGNED' AND i.owner_membership_id IS NULL))
+             AND ($6='' OR i.indent_no ILIKE $7 OR c.legal_name ILIKE $7 OR cl.name ILIKE $7 OR l.code ILIKE $7)
+             AND ($8='' OR CASE WHEN now()>=i.committed_placement_at THEN 'RED' WHEN now()>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END=$8)
+             AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','indents',i.id)
+           ) SELECT count(*)::int AS "openIndents",
+           count(*) FILTER (WHERE risk='RED')::int AS "placementBreaches",
+           count(*) FILTER (WHERE risk='GREEN')::int green,
+           count(*) FILTER (WHERE risk='YELLOW')::int yellow,
+           count(*) FILTER (WHERE risk='RED')::int red,
+           coalesce(sum(requested_vehicles),0)::int AS "requestedVehicles",
+           coalesce(sum(remaining),0)::int AS "awaitingVehicles",
            (SELECT count(*)::int FROM app.allocations a WHERE a.tenant_id=$1::uuid AND a.state IN ('OFFERED','ACCEPTED','VEHICLE_ASSIGNED','NTP_RELEASED') AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','allocations',a.id)) AS "activeAllocations",
            (SELECT count(*)::int FROM app.trips t WHERE t.tenant_id=$1::uuid AND t.state NOT IN ('DELIVERED','CANCELLED') AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','trips',t.id)) AS "liveTrips"
-           FROM app.indents i WHERE i.tenant_id=$1::uuid AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','indents',i.id)`,
+           FROM queue`,
           tenantId,
           actor.membershipId,
           actor.userId,
+          input.state,
+          input.owner,
+          input.search,
+          `%${input.search}%`,
+          input.risk,
         ),
         tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT i.id,i.indent_no AS "indentNo",c.legal_name AS client,cl.name AS location,i.state,i.requested_vehicles AS "requestedVehicles",
+          `SELECT i.id,i.indent_no AS "indentNo",c.legal_name AS client,cl.name AS location,l.code AS lane,i.state,i.requested_vehicles AS "requestedVehicles",
            greatest(i.requested_vehicles-coalesce(sum(a.allotted_vehicles) FILTER (WHERE a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0),0)::int AS remaining,
-           i.committed_placement_at AS "committedPlacementAt",
+           i.quantity_milli::text AS "quantityMilli",i.pickup_window_start AS "pickupWindowStart",i.pickup_window_end AS "pickupWindowEnd",
+           i.committed_placement_at AS "committedPlacementAt",i.commitment_override_reason AS "commitmentOverrideReason",
+           i.owner_membership_id AS "ownerMembershipId",m.invited_name AS "ownerName",i.cargo_type AS "cargoType",i.body_type AS "bodyType",
+           CASE WHEN now()>=i.committed_placement_at THEN 'RED' WHEN now()>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END risk,
            floor(extract(epoch FROM (now()-i.committed_placement_at))/3600)::int AS "varianceHours",i.version
            FROM app.indents i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id
            JOIN app.client_locations cl ON cl.tenant_id=i.tenant_id AND cl.id=i.client_location_id
+           JOIN app.contract_lanes l ON l.tenant_id=i.tenant_id AND l.id=i.lane_id
+           LEFT JOIN app.tenant_memberships m ON m.tenant_id=i.tenant_id AND m.id=i.owner_membership_id
            LEFT JOIN app.allocations a ON a.tenant_id=i.tenant_id AND a.indent_id=i.id
            WHERE i.tenant_id=$1::uuid AND i.state IN ('OPEN','PARTIALLY_ALLOCATED')
+           AND ($4='' OR i.state=$4) AND ($5='ALL' OR ($5='MINE' AND i.owner_membership_id=$2::uuid) OR ($5='UNASSIGNED' AND i.owner_membership_id IS NULL))
+           AND ($6='' OR i.indent_no ILIKE $7 OR c.legal_name ILIKE $7 OR cl.name ILIKE $7 OR l.code ILIKE $7)
+           AND ($8='' OR CASE WHEN now()>=i.committed_placement_at THEN 'RED' WHEN now()>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END=$8)
            AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','indents',i.id)
-           GROUP BY i.id,c.legal_name,cl.name ORDER BY i.committed_placement_at LIMIT 12`,
+           GROUP BY i.id,c.legal_name,cl.name,l.code,m.invited_name
+           ORDER BY CASE WHEN now()>=i.committed_placement_at THEN 1 WHEN now()>=i.committed_placement_at-interval '24 hours' THEN 2 ELSE 3 END,i.committed_placement_at LIMIT $9`,
           tenantId,
           actor.membershipId,
           actor.userId,
+          input.state,
+          input.owner,
+          input.search,
+          `%${input.search}%`,
+          input.risk,
+          input.limit,
         ),
       ]);
-      return toJsonSafe({ summary: summary[0] ?? {}, urgent });
+      return toJsonSafe({ summary: summary[0] ?? {}, openIndents });
     });
   }
 
@@ -242,14 +302,17 @@ export class OperationsWorkbenchService {
       const items = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT i.id,i.indent_no AS "indentNo",c.legal_name AS client,cl.name AS location,l.code AS lane,i.state,
          i.requested_vehicles AS "requestedVehicles",greatest(i.requested_vehicles-coalesce(sum(a.allotted_vehicles) FILTER (WHERE a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0),0)::int remaining,
-         i.pickup_window_start AS "pickupWindowStart",i.committed_placement_at AS "committedPlacementAt",i.owner_membership_id AS "ownerMembershipId",i.version
+         i.quantity_milli::text AS "quantityMilli",i.pickup_window_start AS "pickupWindowStart",i.pickup_window_end AS "pickupWindowEnd",
+         i.committed_placement_at AS "committedPlacementAt",i.commitment_override_reason AS "commitmentOverrideReason",i.owner_membership_id AS "ownerMembershipId",m.invited_name AS "ownerName",
+         i.cargo_type AS "cargoType",i.body_type AS "bodyType",CASE WHEN now()>=i.committed_placement_at THEN 'RED' WHEN now()>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END risk,i.version
          FROM app.indents i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id JOIN app.client_locations cl ON cl.tenant_id=i.tenant_id AND cl.id=i.client_location_id
          JOIN app.contract_lanes l ON l.tenant_id=i.tenant_id AND l.id=i.lane_id LEFT JOIN app.allocations a ON a.tenant_id=i.tenant_id AND a.indent_id=i.id
+         LEFT JOIN app.tenant_memberships m ON m.tenant_id=i.tenant_id AND m.id=i.owner_membership_id
          WHERE i.tenant_id=$1::uuid AND ($4='' OR i.state=$4) AND ($5::uuid IS NULL OR i.client_id=$5::uuid)
          AND ($6='ALL' OR ($6='MINE' AND i.owner_membership_id=$2::uuid) OR ($6='UNASSIGNED' AND i.owner_membership_id IS NULL))
          AND ($7='' OR i.indent_no ILIKE $8 OR c.legal_name ILIKE $8 OR cl.name ILIKE $8 OR l.code ILIKE $8)
          AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','indents',i.id)
-         GROUP BY i.id,c.legal_name,cl.name,l.code ORDER BY i.committed_placement_at LIMIT $9`,
+         GROUP BY i.id,c.legal_name,cl.name,l.code,m.invited_name ORDER BY i.committed_placement_at LIMIT $9`,
         tenantId,
         actor.membershipId,
         actor.userId,
@@ -270,8 +333,9 @@ export class OperationsWorkbenchService {
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.permit(tx, actor, "operations.read", "READ");
       const items = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT a.id,a.indent_id AS "indentId",i.indent_no AS "indentNo",v.legal_name AS vendor,a.state,a.allotted_vehicles AS "allottedVehicles",a.expires_at AS "expiresAt",a.version,
+        `SELECT a.id,a.indent_id AS "indentId",i.indent_no AS "indentNo",v.legal_name AS vendor,a.state,a.allotted_vehicles AS "allottedVehicles",a.offered_at AS "offeredAt",a.expires_at AS "expiresAt",a.response_at AS "responseAt",a.rejection_reason AS "rejectionReason",a.version,
          aa.vehicle_id AS "vehicleId",vh.registration_number AS vehicle,aa.driver_id AS "driverId",d.display_name AS driver,
+         aa.assigned_from AS "assignedFrom",aa.replacement_reason AS "replacementReason",
          EXISTS(SELECT 1 FROM app.trips t WHERE t.tenant_id=a.tenant_id AND t.allocation_id=a.id) AS "hasTrip"
          FROM app.allocations a JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id
          LEFT JOIN app.allocation_assignments aa ON aa.tenant_id=a.tenant_id AND aa.allocation_id=a.id AND aa.assigned_to IS NULL
@@ -297,7 +361,9 @@ export class OperationsWorkbenchService {
     return withTenant(this.app.db, tenantId, async (tx) => {
       await this.permit(tx, actor, "operations.read", "READ");
       const items = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT t.id,t.trip_no AS "tripNo",t.lr_no AS "lrNo",i.indent_no AS "indentNo",v.legal_name AS vendor,vh.registration_number AS vehicle,d.display_name AS driver,t.state,t.planned_pickup_at AS "plannedPickupAt",t.planned_delivery_at AS "plannedDeliveryAt",t.version
+        `SELECT t.id,t.trip_no AS "tripNo",t.lr_no AS "lrNo",i.indent_no AS "indentNo",v.legal_name AS vendor,vh.registration_number AS vehicle,d.display_name AS driver,t.state,t.planned_pickup_at AS "plannedPickupAt",t.planned_delivery_at AS "plannedDeliveryAt",t.version,
+         EXISTS(SELECT 1 FROM app.trip_events e WHERE e.tenant_id=t.tenant_id AND e.trip_id=t.id AND e.event_type='CHECKPOINT' AND e.evidence->>'action'='ACCEPT') accepted,
+         (SELECT max(e.device_at) FROM app.trip_events e WHERE e.tenant_id=t.tenant_id AND e.trip_id=t.id) AS "lastEventAt"
          FROM app.trips t JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id
          JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id JOIN app.vehicles vh ON vh.tenant_id=t.tenant_id AND vh.id=t.assigned_vehicle_id JOIN app.drivers d ON d.tenant_id=t.tenant_id AND d.id=t.assigned_driver_id
          WHERE t.tenant_id=$1::uuid AND ($4='' OR t.state=$4) AND ($5='' OR t.trip_no ILIKE $6 OR t.lr_no ILIKE $6 OR i.indent_no ILIKE $6 OR vh.registration_number ILIKE $6)
@@ -394,12 +460,148 @@ export class OperationsWorkbenchService {
       correlationId,
     );
   }
-  manualAllocation(
+  async editIndent(
     actor: SessionActor,
-    input: unknown,
+    id: string,
+    raw: unknown,
     key: string,
     correlationId: string,
   ) {
+    const input = indentUpdateSchema.parse(raw);
+    const tenantId = this.tenant(actor);
+    return withTenant(this.app.db, tenantId, async (tx) => {
+      await this.permit(tx, actor, "operations.admin", "UPDATE");
+      await this.resource(tx, actor, "indents", id, "UPDATE");
+      return this.idempotent(
+        tx,
+        actor,
+        `operations.indents.edit:${id}`,
+        key,
+        { route: id, body: input },
+        async () => {
+          const before = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT i.*,coalesce((SELECT sum(a.allotted_vehicles) FROM app.allocations a WHERE a.tenant_id=i.tenant_id AND a.indent_id=i.id AND a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0)::int allotted
+               FROM app.indents i WHERE i.tenant_id=$1::uuid AND i.id=$2::uuid FOR UPDATE`,
+              tenantId,
+              id,
+            )
+          )[0];
+          if (!before)
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Indent not found");
+          if (
+            !["DRAFT", "OPEN", "PARTIALLY_ALLOCATED"].includes(
+              String(before.state),
+            )
+          )
+            throw new AppError(
+              409,
+              "INDENT_IMMUTABLE",
+              "Only active, unclosed indents can be edited",
+            );
+          if (Number(before.version) !== input.expectedVersion)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Indent changed; reload and retry",
+            );
+          if (Number(before.allotted) > input.requestedVehicles)
+            throw new AppError(
+              409,
+              "REQUEST_BELOW_ALLOCATION",
+              "Requested vehicles cannot be lower than active allocations",
+            );
+          if (
+            new Date(String(before.committed_placement_at)).toISOString() !==
+              input.committedPlacementAt &&
+            !input.commitmentOverrideReason
+          )
+            throw new AppError(
+              400,
+              "OVERRIDE_REASON_REQUIRED",
+              "Explain why the SLA commitment is being changed",
+              { commitmentOverrideReason: ["Enter at least 10 characters"] },
+            );
+          if (input.ownerMembershipId) {
+            const owner = await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT 1 FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND id=$2::uuid AND status='ACTIVE'`,
+              tenantId,
+              input.ownerMembershipId,
+            );
+            if (!owner.length)
+              throw new AppError(
+                400,
+                "OWNER_INVALID",
+                "Select an active tenant user",
+              );
+          }
+          const updated = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `UPDATE app.indents SET requested_vehicles=$3,quantity_milli=$4::bigint,pickup_window_start=$5::timestamptz,pickup_window_end=$6::timestamptz,
+               committed_placement_at=$7::timestamptz,commitment_override_reason=$8,owner_membership_id=$9::uuid,cargo_type=$10,body_type=$11,updated_at=now(),version=version+1
+               WHERE tenant_id=$1::uuid AND id=$2::uuid AND version=$12 RETURNING *`,
+              tenantId,
+              id,
+              input.requestedVehicles,
+              input.quantityMilli,
+              input.pickupWindowStart,
+              input.pickupWindowEnd,
+              input.committedPlacementAt,
+              input.commitmentOverrideReason ?? null,
+              input.ownerMembershipId ?? null,
+              input.cargoType ?? null,
+              input.bodyType ?? null,
+              input.expectedVersion,
+            )
+          )[0]!;
+          await tx.$executeRawUnsafe(
+            `INSERT INTO audit.audit_events(tenant_id,actor_id,action,target_type,target_id,correlation_id,before_json,after_json,reason)
+             VALUES($1::uuid,$2::uuid,'indent.updated','indent',$3::uuid,$4,$5::jsonb,$6::jsonb,$7)`,
+            tenantId,
+            actor.userId,
+            id,
+            correlationId,
+            JSON.stringify(toJsonSafe(before)),
+            JSON.stringify(toJsonSafe(updated)),
+            input.commitmentOverrideReason ?? null,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,event_version,payload,deduplication_key)
+             VALUES($1::uuid,'TENANT','indent',$2::uuid,'indent.updated.v1',$3,$4::jsonb,$5) ON CONFLICT(deduplication_key) DO NOTHING`,
+            tenantId,
+            id,
+            Number(updated.version),
+            JSON.stringify(toJsonSafe(updated)),
+            `${tenantId}:indent:${id}:v${Number(updated.version)}`,
+          );
+          return toJsonSafe(updated);
+        },
+      );
+    });
+  }
+  async manualAllocation(
+    actor: SessionActor,
+    raw: unknown,
+    key: string,
+    correlationId: string,
+  ) {
+    const input = allocationCommandSchema.parse(raw);
+    const eligibility = (await this.eligibleVendors(actor, input.indentId)) as {
+      items: Array<Row>;
+    };
+    const vendor = eligibility.items.find((item) => item.id === input.vendorId);
+    if (!vendor?.eligible)
+      throw new AppError(
+        409,
+        "VENDOR_INELIGIBLE",
+        "Vendor is unavailable or has a compliance, scope, or capacity exception",
+      );
+    if (Number(vendor.availableVehicles) < input.allottedVehicles)
+      throw new AppError(
+        409,
+        "VENDOR_CAPACITY_EXCEEDED",
+        "The allocation exceeds the vendor's available compliant vehicles",
+      );
     return this.canonical.create(
       actor,
       "allocations",
@@ -439,6 +641,51 @@ export class OperationsWorkbenchService {
       correlationId,
     );
   }
+  async eligibleAssets(actor: SessionActor, allocationId: string) {
+    const tenantId = this.tenant(actor);
+    return withTenant(this.app.db, tenantId, async (tx) => {
+      await this.permit(tx, actor, "operations.read", "READ");
+      await this.resource(tx, actor, "allocations", allocationId, "READ");
+      const allocation = (
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT vendor_id FROM app.allocations WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+          tenantId,
+          allocationId,
+        )
+      )[0];
+      if (!allocation)
+        throw new AppError(404, "RESOURCE_NOT_FOUND", "Allocation not found");
+      const [vehicles, drivers] = await Promise.all([
+        tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT v.id,v.registration_number AS label,v.state,
+           (v.state='ACTIVE' AND NOT EXISTS(SELECT 1 FROM app.compliance_records c WHERE c.tenant_id=v.tenant_id AND c.subject_type='VEHICLE' AND c.subject_id=v.id AND (c.verification_state<>'VERIFIED' OR (c.valid_to IS NOT NULL AND c.valid_to<current_date)))
+             AND NOT EXISTS(SELECT 1 FROM app.allocation_assignments aa JOIN app.allocations a ON a.tenant_id=aa.tenant_id AND a.id=aa.allocation_id WHERE aa.tenant_id=v.tenant_id AND aa.vehicle_id=v.id AND aa.assigned_to IS NULL AND aa.allocation_id<>$4::uuid AND a.state NOT IN ('CANCELLED','REJECTED','EXPIRED'))) eligible
+           FROM app.vehicles v WHERE v.tenant_id=$1::uuid AND v.vendor_id=$5::uuid
+           AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','vehicles',v.id)
+           ORDER BY eligible DESC,v.registration_number`,
+          tenantId,
+          actor.membershipId,
+          actor.userId,
+          allocationId,
+          allocation.vendor_id,
+        ),
+        tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT d.id,d.display_name AS label,d.state,
+           (d.state='ACTIVE' AND d.licence_valid_to>=current_date AND NOT EXISTS(SELECT 1 FROM app.compliance_records c WHERE c.tenant_id=d.tenant_id AND c.subject_type='DRIVER' AND c.subject_id=d.id AND (c.verification_state<>'VERIFIED' OR (c.valid_to IS NOT NULL AND c.valid_to<current_date)))
+             AND NOT EXISTS(SELECT 1 FROM app.allocation_assignments aa JOIN app.allocations a ON a.tenant_id=aa.tenant_id AND a.id=aa.allocation_id WHERE aa.tenant_id=d.tenant_id AND aa.driver_id=d.id AND aa.assigned_to IS NULL AND aa.allocation_id<>$4::uuid AND a.state NOT IN ('CANCELLED','REJECTED','EXPIRED'))) eligible
+           FROM app.drivers d WHERE d.tenant_id=$1::uuid AND d.vendor_id=$5::uuid
+           AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','drivers',d.id)
+           ORDER BY eligible DESC,d.display_name`,
+          tenantId,
+          actor.membershipId,
+          actor.userId,
+          allocationId,
+          allocation.vendor_id,
+        ),
+      ]);
+      return toJsonSafe({ vehicles, drivers });
+    });
+  }
   createTrip(
     actor: SessionActor,
     input: unknown,
@@ -446,6 +693,22 @@ export class OperationsWorkbenchService {
     correlationId: string,
   ) {
     return this.canonical.createTrip(actor, input, key, correlationId);
+  }
+  updateTrip(
+    actor: SessionActor,
+    id: string,
+    input: unknown,
+    key: string,
+    correlationId: string,
+  ) {
+    return this.canonical.transition(
+      actor,
+      "trips",
+      id,
+      input,
+      key,
+      correlationId,
+    );
   }
 
   async tripAction(
@@ -458,10 +721,22 @@ export class OperationsWorkbenchService {
     const input = z
       .object({
         action: z.enum(["ACCEPT", "START", "LOAD", "TRANSIT", "UNLOAD", "END"]),
+        expectedVersion: z.number().int().positive(),
         occurredAt: z.string().datetime({ offset: true }),
         receiverName: z.string().trim().min(2).max(120).optional(),
+        notes: z.string().trim().max(500).optional(),
+        loadQuantityMilli: z.number().int().safe().positive().optional(),
+        sealNumber: z.string().trim().max(80).optional(),
+        delayReason: z.string().trim().max(240).optional(),
+        latitude: z.number().min(-90).max(90).optional(),
+        longitude: z.number().min(-180).max(180).optional(),
+        odometerKm: z.number().min(0).max(10_000_000).optional(),
       })
       .strict()
+      .refine((value) => value.action !== "END" || !!value.receiverName, {
+        path: ["receiverName"],
+        message: "Receiver name is required to complete delivery",
+      })
       .parse(raw);
     const allowedState: Record<typeof input.action, string> = {
       ACCEPT: "PLANNED",
@@ -471,59 +746,180 @@ export class OperationsWorkbenchService {
       UNLOAD: "IN_TRANSIT",
       END: "AT_DESTINATION",
     };
-    await withTenant(this.app.db, this.tenant(actor), async (tx) => {
+    const tenantId = this.tenant(actor);
+    return withTenant(this.app.db, tenantId, async (tx) => {
       await this.permit(tx, actor, "operations.admin", "UPDATE");
       await this.resource(tx, actor, "trips", id, "UPDATE");
-      const trip = (
-        await tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT state FROM app.trips WHERE tenant_id=$1::uuid AND id=$2::uuid`,
-          this.tenant(actor),
-          id,
-        )
-      )[0];
-      if (!trip || trip.state !== allowedState[input.action])
-        throw new AppError(
-          409,
-          "TRIP_ACTION_CONFLICT",
-          `Action ${input.action} requires ${allowedState[input.action]} state`,
-        );
-    });
-    const map = {
-      ACCEPT: "CHECKPOINT",
-      START: "AT_ORIGIN",
-      LOAD: "LOADED",
-      TRANSIT: "DEPARTED",
-      UNLOAD: "AT_DESTINATION",
-      END: "DELIVERED",
-    } as const;
-    const event = (await this.canonical.appendTripEvent(
-      actor,
-      id,
-      {
-        eventKey: `${input.action.toLowerCase()}:${key}`,
-        eventType: map[input.action],
-        source: "WEB",
-        deviceAt: input.occurredAt,
-        evidence: {
-          action: input.action,
-          ...(input.receiverName ? { receiverName: input.receiverName } : {}),
+      return this.idempotent(
+        tx,
+        actor,
+        `operations.trip.action:${id}`,
+        key,
+        input,
+        async () => {
+          const trip = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT t.*,EXISTS(SELECT 1 FROM app.trip_events e WHERE e.tenant_id=t.tenant_id AND e.trip_id=t.id AND e.event_type='CHECKPOINT' AND e.evidence->>'action'='ACCEPT') accepted
+               FROM app.trips t WHERE t.tenant_id=$1::uuid AND t.id=$2::uuid
+                 AND app.domain_resource_authorized($1::uuid,$3::uuid,$4::uuid,'operations.admin','UPDATE','trips',t.id)
+               FOR UPDATE`,
+              tenantId,
+              id,
+              actor.membershipId,
+              actor.userId,
+            )
+          )[0];
+          if (!trip)
+            throw new AppError(404, "RESOURCE_NOT_FOUND", "Trip not found");
+          if (Number(trip.version) !== input.expectedVersion)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Trip changed; reload and retry",
+            );
+          if (
+            trip.state !== allowedState[input.action] ||
+            (input.action === "ACCEPT" && trip.accepted === true)
+          )
+            throw new AppError(
+              409,
+              "TRIP_ACTION_CONFLICT",
+              `Action ${input.action} is not available for the current trip`,
+            );
+          const eventType = {
+            ACCEPT: "CHECKPOINT",
+            START: "AT_ORIGIN",
+            LOAD: "LOADED",
+            TRANSIT: "DEPARTED",
+            UNLOAD: "AT_DESTINATION",
+            END: "DELIVERED",
+          }[input.action];
+          const nextState = {
+            ACCEPT: "PLANNED",
+            START: "AT_ORIGIN",
+            LOAD: "LOADED",
+            TRANSIT: "IN_TRANSIT",
+            UNLOAD: "AT_DESTINATION",
+            END: "DELIVERED",
+          }[input.action];
+          const evidence = {
+            action: input.action,
+            ...(input.receiverName ? { receiverName: input.receiverName } : {}),
+            ...(input.notes ? { notes: input.notes } : {}),
+            ...(input.loadQuantityMilli
+              ? { loadQuantityMilli: input.loadQuantityMilli }
+              : {}),
+            ...(input.sealNumber ? { sealNumber: input.sealNumber } : {}),
+            ...(input.delayReason ? { delayReason: input.delayReason } : {}),
+          };
+          const latest = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `SELECT max(device_at) latest FROM app.trip_events WHERE tenant_id=$1::uuid AND trip_id=$2::uuid`,
+              tenantId,
+              id,
+            )
+          )[0]?.latest;
+          const event = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `INSERT INTO app.trip_events(tenant_id,trip_id,event_key,event_type,source,device_at,actor_id,latitude,longitude,odometer_km,evidence,ordering_conflict)
+               VALUES($1::uuid,$2::uuid,$3,$4,'WEB',$5::timestamptz,$6::uuid,$7,$8,$9,$10::jsonb,$11) RETURNING *`,
+              tenantId,
+              id,
+              `${input.action.toLowerCase()}:${key}`,
+              eventType,
+              input.occurredAt,
+              actor.userId,
+              input.latitude ?? null,
+              input.longitude ?? null,
+              input.odometerKm ?? null,
+              JSON.stringify(evidence),
+              latest
+                ? new Date(input.occurredAt) < new Date(String(latest))
+                : false,
+            )
+          )[0]!;
+          const updated = (
+            await tx.$queryRawUnsafe<Array<Row>>(
+              `UPDATE app.trips SET state=$1,updated_at=now(),version=version+1
+               WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4
+               RETURNING id,state,version,updated_at AS "updatedAt"`,
+              nextState,
+              tenantId,
+              id,
+              input.expectedVersion,
+            )
+          )[0];
+          if (!updated)
+            throw new AppError(
+              409,
+              "VERSION_CONFLICT",
+              "Trip changed; reload and retry",
+            );
+          let podTaskId: string | null = null;
+          if (input.action === "END") {
+            const pod = (
+              await tx.$queryRawUnsafe<Array<Row>>(
+                `INSERT INTO app.pod_tasks(tenant_id,trip_id,delivered_at,receiver_name,receiver_evidence,contract_snapshot)
+                 SELECT t.tenant_id,t.id,$1::timestamptz,$2,$3::jsonb,i.commercial_snapshot
+                 FROM app.trips t JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id
+                 JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id
+                 WHERE t.tenant_id=$4::uuid AND t.id=$5::uuid
+                 ON CONFLICT(tenant_id,trip_id) DO UPDATE SET trip_id=EXCLUDED.trip_id RETURNING id`,
+                input.occurredAt,
+                input.receiverName,
+                JSON.stringify(evidence),
+                tenantId,
+                id,
+              )
+            )[0]!;
+            podTaskId = String(pod.id);
+          }
+          const response = {
+            ...updated,
+            eventId: event.id,
+            eventType,
+            occurredAt: input.occurredAt,
+            podTaskId,
+          };
+          await tx.$executeRawUnsafe(
+            `INSERT INTO audit.audit_events(tenant_id,actor_id,action,target_type,target_id,correlation_id,before_json,after_json)
+             VALUES($1::uuid,$2::uuid,$3,'trip',$4::uuid,$5,$6::jsonb,$7::jsonb)`,
+            tenantId,
+            actor.userId,
+            `trip.${input.action.toLowerCase()}`,
+            id,
+            correlationId,
+            JSON.stringify(toJsonSafe(trip)),
+            JSON.stringify(toJsonSafe(response)),
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,event_version,payload,deduplication_key)
+             VALUES($1::uuid,'TENANT','trip',$2::uuid,$3,$4,$5::jsonb,$6) ON CONFLICT(deduplication_key) DO NOTHING`,
+            tenantId,
+            id,
+            `trip.${input.action.toLowerCase()}.v1`,
+            Number(updated.version),
+            JSON.stringify(toJsonSafe(response)),
+            `${tenantId}:trip:${id}:action:${String(event.id)}`,
+          );
+          if (podTaskId)
+            await tx.$executeRawUnsafe(
+              `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,event_version,payload,deduplication_key)
+               VALUES($1::uuid,'TENANT','trip',$2::uuid,'trip.delivered.v1',$3,$4::jsonb,$5) ON CONFLICT(deduplication_key) DO NOTHING`,
+              tenantId,
+              id,
+              Number(updated.version),
+              JSON.stringify({
+                tripId: id,
+                podTaskId,
+                deliveredAt: input.occurredAt,
+              }),
+              `${tenantId}:trip:${id}:delivered:v${String(updated.version)}`,
+            );
+          return response;
         },
-      },
-      key,
-      correlationId,
-    )) as Row;
-    await withTenant(this.app.db, this.tenant(actor), async (tx) => {
-      await tx.$executeRawUnsafe(
-        `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,event_version,payload,deduplication_key)
-         VALUES($1::uuid,'TENANT','trip',$2::uuid,$3,1,$4::jsonb,$5) ON CONFLICT(deduplication_key) DO NOTHING`,
-        this.tenant(actor),
-        id,
-        `trip.${input.action.toLowerCase()}.v1`,
-        JSON.stringify(toJsonSafe(event)),
-        `${this.tenant(actor)}:trip:${id}:action:${String(event.id)}`,
       );
     });
-    return event;
   }
 
   async rules(actor: SessionActor) {
@@ -532,7 +928,7 @@ export class OperationsWorkbenchService {
       await this.permit(tx, actor, "operations.read", "READ");
       const items = await tx.$queryRawUnsafe<Array<Row>>(
         `SELECT r.id,r.name,r.priority,r.client_id AS "clientId",c.legal_name AS client,r.lane_id AS "laneId",l.code AS lane,r.vendor_id AS "vendorId",v.legal_name AS vendor,r.max_vehicles AS "maxVehicles",
-         CASE WHEN (r.client_id IS NULL OR app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.commercial_rate.read','READ','clients',r.client_id))
+         CASE WHEN ((r.client_id IS NULL OR app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.commercial_rate.read','READ','clients',r.client_id))
            AND (r.lane_id IS NULL OR app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.commercial_rate.read','READ','lanes',r.lane_id))
            AND (r.vendor_id IS NULL OR app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.commercial_rate.read','READ','vendors',r.vendor_id))
            AND (r.client_id IS NOT NULL OR r.lane_id IS NOT NULL OR r.vendor_id IS NOT NULL)) OR
@@ -852,6 +1248,7 @@ export class OperationsWorkbenchService {
     const allottedVehicles = Math.min(
       preview.remaining,
       Number(executionRule.max_vehicles),
+      Number(preview.proposedVendor.availableVehicles),
     );
     const offeredAt = new Date(envelope.offeredAt);
     const allocation = (await this.canonical.create(

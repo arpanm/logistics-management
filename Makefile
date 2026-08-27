@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status dev check test policy-check deploy-local health e2e verify status
+.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status dev check test policy-check deploy-local refresh-local health e2e verify status
 
 help:
 	@echo "bootstrap           Validate tools, configure hooks, and install dependencies"
@@ -13,6 +13,7 @@ help:
 	@echo "check               Run lightweight formatting, linting, and type checks"
 	@echo "test                Run non-browser tests when explicitly requested"
 	@echo "deploy-local        Build and start frontend/backend against shared PostgreSQL"
+	@echo "refresh-local       Migrate, rebuild all packages/apps, restart, and verify without reseeding"
 	@echo "health              Verify PostgreSQL, backend, and frontend readiness"
 	@echo "e2e                 Run Playwright end-to-end tests"
 	@echo "verify              Run all final non-destructive quality gates"
@@ -47,6 +48,9 @@ policy-check:
 
 deploy-local:
 	@bash scripts/deploy-local.sh
+
+refresh-local:
+	@bash scripts/refresh-local.sh
 
 health:
 	@bash scripts/health.sh

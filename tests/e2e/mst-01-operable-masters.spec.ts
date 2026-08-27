@@ -167,7 +167,7 @@ async function assignRoleAtScope(
   expect(update.status(), await update.text()).toBe(200);
 }
 
-test("E2E-MST01-01 permitted hub, hierarchy, PIN/geofence, employee and assignment journey", async ({
+test("E2E-MST01-01 FSUX-E2E-001 FSUX-E2E-002 permitted hub, hierarchy, PIN/geofence, employee and assignment journey", async ({
   page,
 }) => {
   await ownerTenant(page, "Mst01Primary");
@@ -229,17 +229,48 @@ test("E2E-MST01-01 permitted hub, hierarchy, PIN/geofence, employee and assignme
       response.request().method() === "POST" &&
       response.url().endsWith("/api/v1/domain/masters/employees"),
   );
-  await page.getByRole("button", { name: "Create employee" }).click();
+  const employeeForm = page
+    .getByRole("button", { name: "Create employee" })
+    .locator("xpath=ancestor::form");
+  await employeeForm.getByRole("button", { name: "Create employee" }).click();
   const createdEmployeeResponse = await employeeResponse;
   expect(createdEmployeeResponse.status()).toBe(201);
   const createdEmployee = (await createdEmployeeResponse.json()) as {
     id: string;
   };
-  await expect(page.getByText("Employee created.")).toBeVisible();
+  await expect(employeeForm.getByRole("status")).toHaveText(
+    "Employee created.",
+  );
+  await expect(employeeForm.getByLabel("Employee code")).toHaveValue("");
+  await expect(employeeForm.getByLabel("Display name")).toHaveValue("");
   await page
     .getByRole("searchbox", { name: "Search", exact: true })
     .fill(employeeCode);
   await page.getByRole("button", { name: "View" }).click();
+
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const editForm = page
+    .getByRole("button", { name: "Save changes" })
+    .locator("xpath=ancestor::form");
+  await editForm.getByLabel("Designation").fill("Senior traffic manager");
+  await editForm
+    .getByLabel("Reason for change")
+    .fill("Promote after the operational ownership review");
+  const updateResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      response
+        .url()
+        .endsWith(`/api/v1/domain/masters/employees/${createdEmployee.id}`),
+  );
+  await editForm.getByRole("button", { name: "Save changes" }).click();
+  expect((await updateResponse).status()).toBe(200);
+  await expect(editForm.getByRole("status")).toHaveText("Employee updated.");
+  await expect(editForm.getByLabel("Designation")).toHaveValue(
+    "Senior traffic manager",
+  );
+  await expect(editForm.getByLabel("Employee code")).toHaveValue(employeeCode);
+  await expect(editForm.getByLabel("Reason for change")).toHaveValue("");
 
   await expect(
     page.getByRole("heading", { name: "Add operational assignment" }),

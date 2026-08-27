@@ -6,46 +6,50 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                                                        |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                      |
-| Automated feature tests           | Implemented / Not Run for the rapid remediation tree; execution is deferred to an explicitly requested batch/release test phase |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                            |
-| Feature implementation            | Canonical/product UX complete; SES owner-invitation adapter implemented, with AWS identity/production-access activation pending |
+| Item                              | Status                                                                                                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                                                                                         |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                                       |
+| Automated feature tests           | Focused OPS/FIN/CTL and Platform tenant-user Playwright cases are authored but not run; deeper concurrency, ledger, reconciliation, migration, and recovery cases remain planned |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                                             |
+| Feature implementation            | Canonical/product UX complete; SES owner-invitation delivery deployed with verified sender, while arbitrary-recipient production access remains pending                          |
 
 Agents synchronize this summary, `FEATURES.md`, `TODO.md`, affected specs, and executable test-case status once per implementation batch. New or changed tests remain `Implemented / Not Run` until an explicitly requested batch/release test phase executes them.
 
-The implementation includes normalized canonical stores and actionable workbenches for access, masters, operations, POD, finance, governance, configuration, control tower, alerts, imports, and integrations. The latest rapid batch also closes the audited scaffolding and discoverability gaps; its tests are authored but intentionally not run.
+The implementation includes normalized canonical stores and actionable workbenches for access, masters, operations, POD, finance, governance, configuration, control tower, alerts, imports, and integrations. The latest rapid batch closes the Operations/Finance/Control Tower product gaps, automatically keeps every INTERNAL tenant user linked one-to-one with an Employee master, and places mutation success/failure details beside the button that initiated the action. Successful create forms reset; successful edit forms reload the saved values. Focused tests are authored but intentionally not run; remaining deep test cases stay explicitly planned.
 
 ## Implemented feature surface
 
-| Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                                                                                  |
-| ------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FND-01  | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant provisioning with derived city/state, lifecycle, branding, setup, isolation, health, reports, and alerts                                                           |
-| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Editable profiles, paginated directory, invitation lifecycle, scoped roles, permission review, Activity & audit, MFA, sessions, and history                                         |
-| MST-01  | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable Masters hub, PIN-derived organization geography, structured geofences, employees, scoped ownership, impact/reassignment, reports, export, alerts, and cycle-safe moves |
-| MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | PIN-derived client locations, searchable references, versioned contracts, lanes, SLA rules, and effective rate cards                                                                |
-| MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | PIN-derived vendor/driver addresses, configured truck/body/cargo catalogs, compliance, eligibility, secure bank versions, and overrides                                             |
-| OPS-01  | `/app/operations`, `/app/operations/indents`                                                            | Searchable open-indent dashboard with create/update/allocate CTAs, snapshots, cancellation, lifecycle, reports, and alerts                                                          |
-| OPS-02  | `/app/operations/allocations`                                                                           | Allocation queue, scoped vendor eligibility reasons, manual allocation, and auto-allocation rule create/preview/execute/disable                                                     |
-| OPS-03  | `/app/operations/trips`, `/portal/driver`                                                               | Trip creation and actionable accept/start/load/transit/unload/end queues plus immutable milestone and offline/GPS evidence                                                          |
-| DOC-01  | `/app/pod`, governed evidence panels                                                                    | POD tasks, review/submission, secure versioned documents, scoped downloads, ageing, and value-at-risk                                                                               |
-| FIN-01  | `/app/finance`, `/app/finance/invoices`                                                                 | Unbilled and invoice queues with exact minor-unit creation, approve/post/acknowledge/reverse CTAs                                                                                   |
-| FIN-02  | `/app/finance/receipts`                                                                                 | Collection-priority and unallocated-receipt queues, follow-ups, allocation ledger, reconciliation, reversal, and balances                                                           |
-| FIN-03  | `/app/finance/vendor-bills`                                                                             | Vendor unbilled/bill/payment-run queues, maker/checker controls, verified-bank enforcement, disputes, deductions, and reversals                                                     |
-| CTL-01  | `/app/control`                                                                                          | Placement/POD/collection/trip/payable lenses with KPIs, G/Y/R search, hierarchy drill, ageing, saved filters, visible CSV, record links, and freshness                              |
-| ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts                                                          |
-| DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation                                                             |
-| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Structured policy administration plus documents, visibility-aware comments, role-sequenced approvals, immutable audit, and segregation                                              |
-| INT-01  | `/app/integrations` and owner activation email                                                           | API clients, signed webhooks, delivery/replay, plus encrypted PostgreSQL-leased Amazon SES owner invitations without a separate worker                                                |
-| CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds                                                                        |
+| Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                                                                                                                                                   |
+| ------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FND-01  | `/platform/tenants`, `/platform/tenants/:id`, `/platform/report`, `/app/setup`                          | PIN-first tenant provisioning plus Platform Admin tenant-user directory/dossiers, derived onboarding evidence, profile updates, safe enable/disable, lifecycle, setup, isolation, health, reports, and alerts                                        |
+| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Editable profiles, paginated directory, invitation lifecycle, scoped roles, permission review, Activity & audit, MFA, sessions, history, and atomic INTERNAL user-to-Employee linkage                                                                 |
+| MST-01  | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable Masters hub, PIN-derived organization geography, structured geofences, employees, optional existing-user link or explicit invited access, scoped ownership, impact/reassignment, reports, export, alerts, and cycle-safe moves             |
+| MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | PIN-derived client locations, tenant/scope-safe searchable contract-version references, versioned contracts, lanes, SLA rules, and effective rate cards                                                                                              |
+| MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | PIN-derived vendor/driver addresses, configured truck/body/cargo catalogs, compliance, eligibility, secure bank versions, and overrides                                                                                                              |
+| OPS-01  | `/app/operations`, `/app/operations/indents`                                                            | Complete filtered open-indent register with reconciled KPIs and contextual typed create/edit/cancel/submit/allocate actions, snapshots, versions, audit, reports, and alerts                                                                         |
+| OPS-02  | `/app/operations/allocations`                                                                           | Complete allocation register with accept/reject/expire, eligible vendor/vehicle/driver assign/replace, NTP/place/cancel/trip CTAs, and structured auto-allocation rule management                                                                    |
+| OPS-03  | `/app/operations/trips`, `/portal/driver`                                                               | Complete trip register and contextual accept/start/load/transit/arrival/unload/end/cancel forms plus immutable milestone, evidence, offline, and GPS handling                                                                                        |
+| DOC-01  | `/app/pod`, governed evidence panels                                                                    | POD tasks, review/submission, secure versioned documents, scoped downloads, ageing, and value-at-risk                                                                                                                                                |
+| FIN-01  | `/app/finance`, `/app/finance/invoices`                                                                 | Actionable pending-work dashboard and complete invoice register with exact minor-unit create/edit/submit/approve/reject/post/acknowledge/note/compensating-reversal lifecycle                                                                        |
+| FIN-02  | `/app/finance/receipts`                                                                                 | Complete collection and receipt registers with typed capture/allocation/follow-up forms, append-only ledger, exact reconciliation, reversal, ageing, and balances                                                                                    |
+| FIN-03  | `/app/finance/vendor-bills`, `/app/finance/payment-runs`                                                | Complete vendor service, bill, and payment-run registers with maker/checker, verified-bank, dispute, deduction, approve/submit/pay/fail/reverse actions, and margin reconciliation                                                                   |
+| CTL-01  | `/app/control`                                                                                          | Canonical Placement/POD vs Invoice/Collection/Trip/Vendor Payable lenses with prototype-depth KPIs, bucket filters, client/location/record drill, vendor summaries, ageing guidance, saved views, scoped CSV, contextual actions, and live freshness |
+| ALT-01  | `/app/alerts`                                                                                           | Scoped rules, deduplicated evaluation, work queues, acknowledgement, escalation, snooze, resolution, and delivery attempts                                                                                                                           |
+| DAT-01  | `/app/data`                                                                                             | Real CSV/XLSX parsing, header/row validation, seven canonical adapters, preview, commit, correction, and reconciliation                                                                                                                              |
+| GOV-01  | `/app/governance/policies` and record evidence panels                                                   | Structured policy administration plus documents, visibility-aware comments, role-sequenced approvals, immutable audit, and segregation                                                                                                               |
+| INT-01  | `/app/integrations` and owner activation email                                                          | API clients, signed webhooks, delivery/replay, plus encrypted PostgreSQL-leased Amazon SES owner invitations without a separate worker                                                                                                               |
+| CFG-01  | `/app/configuration/settings`                                                                           | Typed tenant configuration, semantic validation, versioned publish/rollback, branding, codes, and thresholds                                                                                                                                         |
 
 The detailed fields, calculations, reports, alerts, acceptance criteria, and cross-feature journeys remain in [FEATURES.md](FEATURES.md).
 
+All API-backed mutation forms use the same local outcome contract: the result appears beside the initiating Submit/Save/action button with validation fields and correlation reference where available. A successful create clears the form back to its documented defaults; a successful edit rebases the form to the persisted values; a failure retains non-secret input so it can be corrected in place.
+
+INTERNAL access users and Employee masters are one-to-one within a tenant. Creating an INTERNAL user automatically creates or safely links the Employee at the tenant's active legal-entity root. Creating an Employee may leave it employee-only, link an existing unlinked INTERNAL membership, or create invited access when explicit roles, scopes, actions, destination, expiry, and reason are supplied. Client, vendor, and driver portal identities remain linked to their matching persona masters and do not create Employee records.
+
 ### Pending production-adoption TODOs
 
-No local product implementation TODO remains from the audited remediation list. [TODO.md](TODO.md) now contains the unknown-PIN policy choice, production AWS execution/capacity work, activation of the implemented SES sender, and remaining provider/legal/commercial decisions. Production adoption also requires monitoring/backups/restore drills, secret rotation, and selection of SMS/WhatsApp, malware-scanning, GPS, and accounting providers.
+The Platform Admin tenant console now includes the tenant-user directory, Add user invitation, explicit profile editing, audited current-password step-up for destination reveal and password-reset links, enable/disable controls, tenant configuration editing, and representative onboarding/master data. Organization/branch, client, and vendor names can be edited in Platform context; contracts, imports, and roles remain in their governed workflows. [TODO.md](TODO.md) records the remaining platform-side role/scope editor, invitation reissue/revoke, session/MFA reset, deeper paging/filtering, and missing client/vendor persona-link work.
 
 ## Engineering baseline
 
@@ -85,11 +89,12 @@ Local and E2E bootstrap uses a small deterministic India postal fixture, includi
 make dev
 make check
 make deploy-local
+make refresh-local
 make e2e
 make verify
 ```
 
-The rapid implementation workflow does not invoke these test/deployment commands after every feature. Use `make check`, `make deploy-local`, `make e2e`, and `make verify` only for an explicitly requested batch/release test phase; run the selected scope once and record pass/fail without automatic retry.
+`make dev` provides frontend/backend hot reload. A production-style local instance started by `make deploy-local` does not hot reload; when it is already running, the rapid implementation workflow finishes with one `make refresh-local` to migrate, rebuild every shared package and both apps, restart owned listeners, and verify readiness without reseeding. Test commands (`make check`, `make e2e`, and `make verify`) remain explicit batch/release actions.
 
 See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup and [docs/SDLC.md](docs/SDLC.md) for the feature workflow.
 
@@ -138,7 +143,7 @@ Local `make deploy-local` applies migrations and runs the deterministic seed. Un
 
 This is the **Platform Admin** account used to provision and manage tenants. It is not a Tenant Owner account. Each tenant's first Tenant Owner sets their own password through the invitation created during tenant provisioning; Vendor, Driver, Client, and employee users do the same. The password is never emailed or displayed later: after logout, the user signs in with the invitation email/mobile and the password they created.
 
-Local and provider-disabled deployments do not send real email. The AWS deployment can deliver new-tenant owner activation mail through SES when the sender identity, sandbox/production access, EC2 permission, and environment settings below are complete. If the initial owner email is unavailable, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link and queues the replacement for SES when enabled. After activation, the Tenant Owner manages users, roles, scopes, invitation resend/revoke, suspension, MFA, sessions, and password recovery at `/app/access/users`; Platform Admin does not impersonate tenant administrators.
+Local and provider-disabled deployments do not send real email. The AWS deployment can deliver new-tenant owner activation mail through SES when the sender identity, sandbox/production access, EC2 permission, and environment settings below are complete. If the initial owner email is unavailable, open Platform Admin → Tenants → the tenant → **Generate replacement activation link**, enter an audit reason, and copy the one-time link to the owner through a trusted channel. Creating a replacement invalidates the previous link and queues the replacement for SES when enabled. The same tenant detail now shows all tenant memberships, masked activation/security/role facts, derived onboarding checks, tenant-specific profile editing, and **Disable user / Enable user** controls. Accepted login destinations and passwords remain read-only; disabling a membership revokes its tenant sessions and the last usable Tenant Owner cannot be disabled. Tenant Owners retain the advanced role/scope, invitation, MFA, session, and password-recovery workflows under `/app/access/users`; Platform Admin never impersonates them.
 
 An activated user who forgets their password selects **Forgot your password?** at `/login`. The public request always returns the same non-enumerating response and records a rate-limited delivery request; the current provider-free deployment does not claim that email or SMS was sent. A tenant-root identity administrator can instead open the active user in `/app/access/users`, enter an audit reason, select **Generate password reset link**, and copy the one-time link through a trusted channel. Administrator-copy recovery is intentionally blocked for identities active in multiple tenants because changing their shared platform password would affect every workspace; those users require a configured verified delivery provider. Completing any reset invalidates the link, changes the password, and signs the identity out of every active session.
 
@@ -154,17 +159,17 @@ If a commit reports `rg: command not found`, pull the current scripts: the polic
 
 ### Recommended manual flow
 
-1. Sign in as Platform Admin, open `/platform/tenants`, provision a tenant, and use the local invitation link to activate its Tenant Owner.
+1. Sign in as Platform Admin, open `/platform/tenants`, provision a tenant, and use the local invitation link to activate its Tenant Owner. Reopen that tenant to add users, search memberships, reveal a login destination after password step-up, generate a copy-once reset link, edit tenant/user/master details, inspect onboarding/security evidence, or disable/re-enable a user with an audit reason.
 2. As Tenant Owner, complete branding at `/app/setup`; create scoped users and roles under `/app/access/users` and `/app/access/roles`.
 3. Build master data in dependency order: organization/employees → client/location/contract/lane/rate → vendor/vehicle/driver/compliance.
-4. Run the operating chain: indent → allocation/offer → vehicle/driver assignment → trip events/delivery → POD review.
-5. Run finance: invoice/acknowledgement → receipt allocation/reversal → vendor bill approval → payment batch.
-6. Reconcile the same records in `/app/control`, `/app/alerts`, `/app/data`, `/app/governance/policies`, and `/app/integrations`.
+4. Open `/app/operations`. Its landing dashboard is the complete open-indent register: create or edit an indent, cancel eligible demand, or select **Allocate truck** directly on the row. Use the Allocations tab for offer acceptance/rejection, vehicle/driver assignment or replacement, NTP/placement/cancellation, auto-allocation rules, and trip creation. Use the Trips tab for the contextual Accept, Start, Load, Transit, Arrival, Unload, End, and exception actions.
+5. Open `/app/finance`. Its landing dashboard shows actionable pending invoice, collection, vendor-payable, unbilled-service, and payment-run queues. Use **All invoices** for the complete filtered register and create/edit/submit/approve/reject/post/acknowledge/note/reverse lifecycle; Collections for receipt capture/allocation and follow-ups; Vendor payables for bill verification/approval/dispute; and Payment runs for approve/submit/paid/fail/reverse actions.
+6. Reconcile the same records in `/app/control`. The Placement, POD vs Invoice, Collection, Trip, and Vendor Payable lenses use canonical records and support KPI/bucket filtering, client → location → record drill-down, ageing guidance, saved views, live/pause freshness, vendor summaries, and visible-scope CSV. Continue exception, data, policy, and connector work in `/app/alerts`, `/app/data`, `/app/governance/policies`, and `/app/integrations`.
 7. Invite Vendor, Driver, and Client users and verify their restricted `/portal/vendor`, `/portal/driver`, and `/portal/client` views.
 
 Use unique codes and idempotency keys when repeating mutations. The UI creates these keys automatically; API clients must send `Idempotency-Key` where required.
 
-The setup checklist derives completion from live tenant records and links directly to Organization, Users, Branches, Clients, Vendors, Commercial settings, Imports, and Branding. Its isolation-record panel provides both a sample CSV showing the export columns and a current-tenant-only CSV export.
+Tenant provisioning automatically creates the company/default legal entity as the first canonical `LEGAL_ENTITY` organization node, its authorization scope, and its hierarchy closure row. The Organization checklist therefore starts complete from real master data; migration `202608250027_tenant_legal_entity_root` safely repairs older tenants missing that root. The remaining setup checklist derives completion from live tenant records and covers Users, Branches, Clients, Vendors, Commercial settings, Imports, and Branding. Its isolation-record panel provides both a sample CSV showing the export columns and a current-tenant-only CSV export.
 
 ### Explicit batch/release test flows
 
@@ -184,6 +189,11 @@ pnpm exec playwright test tests/e2e/all-feature-gaps.spec.ts \
 # Foundation and access journeys
 pnpm exec playwright test tests/e2e/fnd-01-tenant-foundation.spec.ts --project=chromium
 pnpm exec playwright test tests/e2e/fnd-02-identity-access.spec.ts --project=chromium
+
+# Operations, Finance, and Control Tower workbenches
+pnpm exec playwright test tests/e2e/operations-workbench.spec.ts --project=chromium
+pnpm exec playwright test tests/e2e/finance-workbench.spec.ts --project=chromium
+pnpm exec playwright test tests/e2e/control-tower-workbench.spec.ts --project=chromium
 ```
 
 Playwright uses the deployed frontend/backend and PostgreSQL. It does not mock business APIs or write directly to business tables. Generated reports remain ignored under `playwright-report/` and `test-results/`.
@@ -641,6 +651,46 @@ curl -fsS https://logistics.example.com/api/v1/health/ready | jq
 
 ### 9. Pull and deploy the latest verified `main`
 
+The currently deployed starter environment uses the following non-secret identifiers. Update this block whenever the infrastructure is replaced:
+
+| Setting | Current value |
+| --- | --- |
+| AWS account | `997979359169` |
+| Region | `eu-north-1` |
+| EC2 instance | `i-0725da18037cca6f0` |
+| Public origin | `https://13.61.27.202` |
+| RDS endpoint | `database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com:5432` |
+| Checkout | `/opt/logistics-management` |
+| Runtime user | `logistics` |
+| Services | `logistics-backend.service`, `logistics-frontend.service` |
+
+These are resource identifiers, not credentials. Never commit the EC2 private key, `/etc/logistics-management.env`, RDS passwords, invitation tokens, or production administrator password. The workstation key currently used for break-glass SSH is `aws/ControlTower.pem`; it is Git-ignored and must remain readable only by its owner (`chmod 400 aws/ControlTower.pem`). Prefer Session Manager for routine administration.
+
+The normal release flow is:
+
+```bash
+# Developer workstation
+make policy-check
+make check
+git status --short
+git push origin main
+
+# Observe both workflows when GitHub CLI is installed and authenticated.
+gh run list --branch main --limit 10
+```
+
+`Quality` checks the pushed SHA first. Only a successful `main` run triggers `Deploy AWS`, which sends that same SHA to EC2 through Systems Manager. Do not start a simultaneous manual deployment while the GitHub deployment is running; deployments are serialized and the host deployer also uses a lock.
+
+After the workflow completes, verify the public frontend and the complete Nginx → backend → RDS path from the workstation:
+
+```bash
+curl -fsS -o /dev/null -w 'login HTTP %{http_code}\n' \
+  https://13.61.27.202/login
+curl -fsS https://13.61.27.202/api/v1/health/ready | jq
+```
+
+Expected results are login HTTP `200`, readiness `status: "ready"`, and `database: "connected"`. Do not add `--insecure` to routine verification; a certificate failure means the IP certificate or renewal needs repair.
+
 On the EC2 instance, the update wrapper fetches `origin/main`, resolves the exact SHA, and delegates to the locked deployment script. That script refuses dirty tracked changes, validates the protected environment and postal checksum, applies migrations, verifies ownership, imports idempotently, builds once, restarts once, and checks readiness:
 
 ```bash
@@ -648,6 +698,28 @@ sudo /opt/logistics-management/scripts/update-aws-deployment.sh
 ```
 
 Use this for a manual deployment. GitHub Actions invokes the underlying SHA-pinned deployment automatically.
+
+For break-glass SSH from the repository workstation, first make sure no GitHub deployment is active, then run:
+
+```bash
+chmod 400 aws/ControlTower.pem
+ssh -i aws/ControlTower.pem ubuntu@13.61.27.202 \
+  'sudo /opt/logistics-management/scripts/update-aws-deployment.sh'
+```
+
+Confirm the exact deployed revision and both internal application paths afterward:
+
+```bash
+ssh -i aws/ControlTower.pem ubuntu@13.61.27.202 <<'REMOTE'
+set -e
+sudo -u logistics git -C /opt/logistics-management rev-parse HEAD
+sudo systemctl is-active logistics-backend.service logistics-frontend.service
+curl -fsS http://127.0.0.1:4000/api/v1/health/ready | jq
+curl -fsS http://127.0.0.1:3000/api/v1/health/ready | jq
+REMOTE
+```
+
+The SHA printed by EC2 must equal the pushed `main` SHA. The deployer applies all forward migrations before restarting, including automatic tenant legal-entity roots and internal-user/employee linkage. It deliberately does not rerun `db:seed`; production administrator password rotation remains the explicit procedure in section 6.
 
 For the one update from a checkout that predates `update-aws-deployment.sh`, bootstrap it with the older SHA-based deployer that is already on EC2. This fetches `main`, deploys that exact commit, and makes the updater available; use the normal command above thereafter:
 
@@ -704,6 +776,7 @@ The skill implements dependency-compatible features/TODOs in rapid batches using
 | `make check`              | Lightweight batch gate: formatting, linting, and type checks only.              |
 | `make test`               | Explicit test phase: run non-browser test suites.                               |
 | `make deploy-local`       | Explicit deploy/test phase: migrate, build, and start local services.           |
+| `make refresh-local`      | Refresh a running local build without reseeding tenant/user data.               |
 | `make e2e`                | Explicit test phase: full Playwright regression against local services.         |
 | `make verify`             | Explicit release phase: full repository and application verification.           |
 | `make status`             | Show feature, test, TODO, and Git status.                                       |

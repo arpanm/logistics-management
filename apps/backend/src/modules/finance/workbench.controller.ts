@@ -6,6 +6,7 @@ import {
   Inject,
   Param,
   Post,
+  Query,
   Req,
   Res,
 } from "@nestjs/common";
@@ -85,6 +86,77 @@ export class FinanceWorkbenchController {
       this.service.references(await this.authorized(req)),
     );
   }
+  @Get("invoices") invoices(
+    @Query("search") search: string | undefined,
+    @Query("status") status: string | undefined,
+    @Query("clientId") clientId: string | undefined,
+    @Query("from") from: string | undefined,
+    @Query("to") to: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () =>
+      this.service.invoices(await this.authorized(req), {
+        search: z.string().trim().max(120).default("").parse(search),
+        status: z.string().trim().max(40).default("").parse(status),
+        clientId: z
+          .union([uuid, z.literal("")])
+          .default("")
+          .parse(clientId),
+        from: z
+          .union([z.string().date(), z.literal("")])
+          .default("")
+          .parse(from),
+        to: z
+          .union([z.string().date(), z.literal("")])
+          .default("")
+          .parse(to),
+      }),
+    );
+  }
+  @Get("receipts") receipts(@Req() req: Request, @Res() res: Response) {
+    return this.run(res, async () =>
+      this.service.receipts(await this.authorized(req)),
+    );
+  }
+  @Post("receipts") createReceipt(
+    @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const input = z
+          .object({
+            receiptRef: z.string().trim().min(2).max(100),
+            clientId: uuid,
+            paymentDate: z.string().date(),
+            amountMinor: nonNegative,
+            mode: z.enum([
+              "NEFT",
+              "RTGS",
+              "IMPS",
+              "CHEQUE",
+              "UPI",
+              "ADJUSTMENT",
+            ]),
+            instrumentNo: z.string().trim().min(2).max(120),
+            bankReference: z.string().trim().max(120).optional(),
+          })
+          .strict()
+          .parse(body);
+        return this.service.createReceipt(
+          await this.authorized(req, true),
+          input,
+          this.correlation(req),
+          idempotencyKey,
+        );
+      },
+      201,
+    );
+  }
   @Post("invoices") create(
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey: string,
@@ -143,6 +215,7 @@ export class FinanceWorkbenchController {
           action: z.enum([
             "SUBMIT",
             "APPROVE",
+            "REJECT",
             "POST",
             "ACKNOWLEDGE",
             "REVERSE",
@@ -162,6 +235,61 @@ export class FinanceWorkbenchController {
         idempotencyKey,
       );
     });
+  }
+  @Post("invoices/:id/update") updateInvoice(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(res, async () => {
+      const input = z
+        .object({
+          expectedVersion: z.number().int().positive(),
+          invoiceNo: z.string().trim().min(2).max(80),
+          invoiceDate: z.string().date(),
+          creditDays: z.number().int().min(0).max(365),
+        })
+        .strict()
+        .parse(body);
+      return this.service.updateInvoice(
+        await this.authorized(req, true),
+        uuid.parse(id),
+        input,
+        this.correlation(req),
+        idempotencyKey,
+      );
+    });
+  }
+  @Post("invoices/:id/notes") invoiceNote(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Headers("idempotency-key") idempotencyKey: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(
+      res,
+      async () => {
+        const input = z
+          .object({
+            noteType: z.enum(["CREDIT_NOTE", "DEBIT_NOTE"]),
+            amountMinor: z.string().regex(/^[1-9]\d*$/),
+            reason: z.string().trim().min(3).max(1000),
+          })
+          .strict()
+          .parse(body);
+        return this.service.addInvoiceNote(
+          await this.authorized(req, true),
+          uuid.parse(id),
+          input,
+          this.correlation(req),
+          idempotencyKey,
+        );
+      },
+      201,
+    );
   }
   @Post("invoices/:id/followups") followup(
     @Param("id") id: string,

@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Shell } from "../../../components/shell";
 import { api, type ApiError } from "../../../components/api";
+import { FormSubmitResult } from "../../../components/forms/form-submit-result";
 type Alert = {
   id: string;
   type: string;
@@ -17,6 +18,7 @@ export default function AlertsPage() {
   const [items, setItems] = useState<Alert[]>([]),
     [state, setState] = useState(""),
     [error, setError] = useState<ApiError | null>(null),
+    [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(""),
     [rules, setRules] = useState<Array<Record<string, unknown>>>([]);
   const load = () =>
@@ -36,6 +38,8 @@ export default function AlertsPage() {
     event.preventDefault();
     const form = event.currentTarget,
       f = new FormData(form);
+    setError(null);
+    setNotice("");
     try {
       await api("/tenant/alert-rules", {
         method: "POST",
@@ -59,6 +63,7 @@ export default function AlertsPage() {
       });
       form.reset();
       setRules(await api("/tenant/alert-rules"));
+      setNotice("Alert rule created.");
     } catch (value) {
       setError(value as ApiError);
     }
@@ -197,7 +202,9 @@ export default function AlertsPage() {
               <option>INFO</option>
             </select>
           </label>
-          <button className="primary">Create rule</button>
+          <FormSubmitResult error={error} success={notice}>
+            <button className="primary">Create rule</button>
+          </FormSubmitResult>
         </form>
       </section>
     </Shell>

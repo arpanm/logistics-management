@@ -90,9 +90,13 @@ export class OperationsWorkbenchController {
     }
   }
 
-  @Get("dashboard") dashboard(@Req() req: Request, @Res() res: Response) {
+  @Get("dashboard") dashboard(
+    @Query() query: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     return this.run(req, res, async () =>
-      this.operations.dashboard(await this.actor(req)),
+      this.operations.dashboard(await this.actor(req), query),
     );
   }
   @Get("indents") indents(
@@ -130,6 +134,22 @@ export class OperationsWorkbenchController {
   ) {
     return this.run(req, res, async () =>
       this.operations.updateIndent(
+        await this.mutationActor(req),
+        z.string().uuid().parse(id),
+        body,
+        this.key(req),
+        requestId(req),
+      ),
+    );
+  }
+  @Patch("indents/:id") editIndent(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(req, res, async () =>
+      this.operations.editIndent(
         await this.mutationActor(req),
         z.string().uuid().parse(id),
         body,
@@ -209,6 +229,18 @@ export class OperationsWorkbenchController {
       ),
     );
   }
+  @Get("allocations/:id/eligible-assets") eligibleAssets(
+    @Param("id") id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(req, res, async () =>
+      this.operations.eligibleAssets(
+        await this.actor(req),
+        z.string().uuid().parse(id),
+      ),
+    );
+  }
   @Get("trips") trips(
     @Query() query: unknown,
     @Req() req: Request,
@@ -244,6 +276,22 @@ export class OperationsWorkbenchController {
   ) {
     return this.run(req, res, async () =>
       this.operations.tripAction(
+        await this.mutationActor(req),
+        z.string().uuid().parse(id),
+        body,
+        this.key(req),
+        requestId(req),
+      ),
+    );
+  }
+  @Post("trips/:id/transition") updateTrip(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.run(req, res, async () =>
+      this.operations.updateTrip(
         await this.mutationActor(req),
         z.string().uuid().parse(id),
         body,

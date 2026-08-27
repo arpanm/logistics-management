@@ -348,6 +348,150 @@ export class AppService implements OnModuleDestroy {
     );
   }
 
+  private requireIdempotencyKey(value: string) {
+    if (!value || value.length < 8 || value.length > 200)
+      throw new AppError(
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "A valid Idempotency-Key is required",
+      );
+  }
+
+  private async platformMutationReplay(
+    tx: Tx,
+    actorId: string,
+    operation: string,
+    keyHash: string,
+    requestHash: string,
+  ) {
+    await tx.$executeRawUnsafe(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+      `${actorId}:${operation}:${keyHash}`,
+    );
+    const rows = await tx.$queryRawUnsafe<Array<Row>>(
+      `SELECT request_hash AS "requestHash",response_json AS response FROM app.idempotency_records WHERE actor_id=$1::uuid AND operation=$2 AND key_hash=$3`,
+      actorId,
+      operation,
+      keyHash,
+    );
+    if (!rows[0]) return undefined;
+    if (rows[0].requestHash !== requestHash)
+      throw new AppError(
+        409,
+        "IDEMPOTENCY_CONFLICT",
+        "This key was used for different input",
+      );
+    return rows[0].response as Row;
+  }
+
+  private async storePlatformMutation(
+    tx: Tx,
+    actorId: string,
+    operation: string,
+    keyHash: string,
+    requestHash: string,
+    resourceId: string,
+    response: Row,
+    persistedResponse: Row = response,
+  ) {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO app.idempotency_records(scope,actor_id,operation,key_hash,request_hash,resource_id,response_json) VALUES('PLATFORM',$1::uuid,$2,$3,$4,$5::uuid,$6::jsonb)`,
+      actorId,
+      operation,
+      keyHash,
+      requestHash,
+      resourceId,
+      JSON.stringify(persistedResponse),
+    );
+  }
+
+  private async verifyPlatformPassword(
+    tx: Tx,
+    actor: SessionActor,
+    currentPassword: string,
+  ) {
+    const credentials = one(
+      await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT password_hash AS "passwordHash" FROM app.users WHERE id=$1::uuid AND status='ACTIVE' AND is_platform_admin`,
+        actor.userId,
+      ),
+    );
+    if (
+      !(await argon2.verify(String(credentials.passwordHash), currentPassword))
+    )
+      throw new AppError(
+        403,
+        "STEP_UP_FAILED",
+        "Current Platform Admin password is incorrect",
+      );
+  }
+
+  private async requireProtectedActionCapacity(
+    tx: Tx,
+    actor: SessionActor,
+    tenantId: string,
+    eventType: string,
+  ) {
+    const recent = one(
+      await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT count(*)::int count FROM app.security_events WHERE tenant_id=$1::uuid AND user_id=$2::uuid AND event_type=$3 AND occurred_at>now()-interval '15 minutes'`,
+        tenantId,
+        actor.userId,
+        eventType,
+      ),
+    );
+    if (Number(recent.count) >= 10)
+      throw new AppError(
+        429,
+        "PROTECTED_ACTION_THROTTLED",
+        "Too many protected-action attempts; retry later",
+      );
+  }
+
+  private async recordPlatformProtectedOutcome(
+    actor: SessionActor,
+    tenantId: string,
+    membershipId: string,
+    eventType: string,
+    outcome: "SUCCEEDED" | "DENIED",
+    correlationId: string,
+    reason: string,
+    errorCode?: string,
+  ) {
+    try {
+      await withPlatform(this.db, async (tx) => {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id) VALUES($1::uuid,$2::uuid,(SELECT id FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND id=$3::uuid),$4,$5,$6,$7::jsonb,$8)`,
+          tenantId,
+          actor.userId,
+          membershipId,
+          eventType,
+          outcome,
+          hash(membershipId).slice(0, 24),
+          JSON.stringify({ errorCode: errorCode ?? null }),
+          correlationId,
+        );
+        await this.audit(tx, {
+          tenantId,
+          actorId: actor.userId,
+          action:
+            outcome === "SUCCEEDED"
+              ? `${eventType.toLowerCase()}.succeeded`
+              : `${eventType.toLowerCase()}.denied`,
+          targetType: "tenant_membership",
+          targetId: membershipId,
+          correlationId,
+          reason,
+          after: { outcome, errorCode: errorCode ?? null },
+        });
+      });
+    } catch (recordingError) {
+      this.logger.warn(
+        `Protected-action outcome recording failed: ${recordingError instanceof Error ? recordingError.message : "unknown"}`,
+      );
+    }
+  }
+
   async login(
     identifier: string,
     password: string,
@@ -918,6 +1062,11 @@ export class AppService implements OnModuleDestroy {
     try {
       return await withPlatform(this.db, async (tx) => {
         await tx.$executeRawUnsafe(
+          `SELECT set_config('app.actor_user_id',$1,true),set_config('app.correlation_id',$2,true)`,
+          actor.userId,
+          correlationId,
+        );
+        await tx.$executeRawUnsafe(
           `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
           `${actor.userId}:tenant.provision:${keyHash}`,
         );
@@ -1013,12 +1162,74 @@ export class AppService implements OnModuleDestroy {
         }
         const tenant = one(tenantRows),
           tenantId = String(tenant.id);
+        const tenantScope = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.authorization_scope_nodes(tenant_id,scope_type,code,name)
+             VALUES($1::uuid,'TENANT','TENANT','Entire tenant') RETURNING id`,
+            tenantId,
+          )
+        )[0]!;
         await tx.$executeRawUnsafe(
           `INSERT INTO app.legal_entities(tenant_id,code,name,tax_identifier,is_default) VALUES($1::uuid,$2,$3,$4,true)`,
           tenantId,
           input.legalEntity.code,
           input.legalEntity.name,
           input.legalEntity.taxIdentifier ?? input.taxIdentifier,
+        );
+        const legalEntityScope = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.authorization_scope_nodes(tenant_id,scope_type,code,name,parent_id)
+             VALUES($1::uuid,'LEGAL_ENTITY',$2,$3,$4::uuid) RETURNING id`,
+            tenantId,
+            input.legalEntity.code,
+            input.legalEntity.name,
+            tenantScope.id,
+          )
+        )[0]!;
+        const organizationAddress = [
+          canonicalAddress.line1,
+          canonicalAddress.line2,
+          canonicalAddress.locality,
+          canonicalAddress.city,
+          canonicalAddress.district,
+          canonicalAddress.region,
+          canonicalAddress.postalCode,
+          canonicalAddress.country,
+        ]
+          .filter((part) => typeof part === "string" && part.trim().length > 0)
+          .join(", ");
+        const legalEntityNode = (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.organization_nodes(
+               tenant_id,code,name,node_type,authorization_scope_node_id,timezone,address,
+               postal_codes,active_from,state,created_by
+             ) VALUES(
+               $1::uuid,$2,$3,'LEGAL_ENTITY',$4::uuid,$5,$6,ARRAY[$7]::text[],
+               (now() AT TIME ZONE $5)::date,'ACTIVE',$8::uuid
+             ) RETURNING id`,
+            tenantId,
+            input.legalEntity.code,
+            input.legalEntity.name,
+            legalEntityScope.id,
+            input.timezone,
+            organizationAddress,
+            String(canonicalAddress.postalCode),
+            actor.userId,
+          )
+        )[0]!;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.organization_closure(tenant_id,ancestor_id,descendant_id,depth)
+           VALUES($1::uuid,$2::uuid,$2::uuid,0)`,
+          tenantId,
+          legalEntityNode.id,
+        );
+        await tx.$executeRawUnsafe(
+          `UPDATE app.authorization_scope_nodes
+           SET canonical_resource_id=$1::uuid,updated_at=now(),version=version+1
+           WHERE tenant_id=$2::uuid AND id=$3::uuid`,
+          legalEntityNode.id,
+          tenantId,
+          legalEntityScope.id,
         );
         const configs: { namespace: string; value: unknown }[] = [
           { namespace: "roles", value: { roles: ["TENANT_OWNER"] } },
@@ -1052,12 +1263,21 @@ export class AppService implements OnModuleDestroy {
         ];
         for (let i = 0; i < keys.length; i++)
           await tx.$executeRawUnsafe(
-            `INSERT INTO app.setup_checklist_items(tenant_id,key,label,display_order,state) VALUES($1::uuid,$2,$3,$4,$5)`,
+            `INSERT INTO app.setup_checklist_items(
+               tenant_id,key,label,display_order,state,completed_by,completed_at
+             ) VALUES(
+               $1::uuid,$2,$3,$4,$5,
+               CASE WHEN $5='COMPLETE' THEN $6::uuid ELSE NULL END,
+               CASE WHEN $5='COMPLETE' THEN now() ELSE NULL END
+             )`,
             tenantId,
             keys[i]![0],
             keys[i]![1],
             i + 1,
-            keys[i]![0] === "branding" ? "COMPLETE" : "NOT_STARTED",
+            keys[i]![0] === "organization" || keys[i]![0] === "branding"
+              ? "COMPLETE"
+              : "NOT_STARTED",
+            actor.userId,
           );
         const membershipRows = await tx.$queryRawUnsafe<Array<Row>>(
           `INSERT INTO app.tenant_memberships(tenant_id,invited_email,invited_name,employee_code,role,status) VALUES($1::uuid,$2,$3,$4,'TENANT_OWNER','INVITED') RETURNING id`,
@@ -1067,12 +1287,6 @@ export class AppService implements OnModuleDestroy {
           `OWNER-${input.code}`.slice(0, 30),
         );
         const ownerMembershipId = String(membershipRows[0]!.id);
-        const root = (
-          await tx.$queryRawUnsafe<Array<Row>>(
-            `INSERT INTO app.authorization_scope_nodes(tenant_id,scope_type,code,name) VALUES($1::uuid,'TENANT','TENANT','Entire tenant') RETURNING id`,
-            tenantId,
-          )
-        )[0]!;
         const ownerRole = (
           await tx.$queryRawUnsafe<Array<Row>>(
             `INSERT INTO app.roles(tenant_id,code,name,description,portal_audiences,privilege_level,protected) VALUES($1::uuid,'TENANT_OWNER','Tenant Owner','Protected tenant administrator',ARRAY['INTERNAL']::text[],'PROTECTED',true) RETURNING id`,
@@ -1096,7 +1310,7 @@ export class AppService implements OnModuleDestroy {
           `INSERT INTO app.scope_grants(tenant_id,assignment_id,scope_node_id,action) VALUES($1::uuid,$2::uuid,$3::uuid,'ADMIN')`,
           tenantId,
           ownerAssignment.id,
-          root.id,
+          tenantScope.id,
         );
         await tx.$executeRawUnsafe(
           `WITH templates(code,name,audience,level) AS (VALUES
@@ -1305,7 +1519,1203 @@ export class AppService implements OnModuleDestroy {
         `SELECT id,email,expires_at AS "expiresAt",delivery_state AS "deliveryState",accepted_at AS "acceptedAt",revoked_at AS "revokedAt",version FROM app.owner_invitations WHERE tenant_id=$1::uuid`,
         id,
       );
-      return { tenant, invitations: invites };
+      const checklist = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT key,label,state,version,completed_at AS "completedAt" FROM app.setup_checklist_items WHERE tenant_id=$1::uuid ORDER BY display_order,key`,
+        id,
+      );
+      const availableRoles = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT id,code,name,portal_audiences AS "portalAudiences",privilege_level AS "privilegeLevel" FROM app.roles WHERE tenant_id=$1::uuid AND status='ACTIVE' ORDER BY name,id`,
+        id,
+      );
+      const evidence = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT
+          (SELECT count(*)::int FROM app.organization_nodes WHERE tenant_id=$1::uuid AND state='ACTIVE') organizations,
+          (SELECT count(*)::int FROM app.tenant_memberships WHERE tenant_id=$1::uuid) users,
+          (SELECT count(*)::int FROM app.organization_nodes WHERE tenant_id=$1::uuid AND node_type='BRANCH' AND state='ACTIVE') branches,
+          (SELECT count(*)::int FROM app.clients WHERE tenant_id=$1::uuid AND state='ACTIVE') clients,
+          (SELECT count(*)::int FROM app.vendors WHERE tenant_id=$1::uuid AND state='ACTIVE') vendors,
+          (SELECT count(*)::int FROM app.contracts WHERE tenant_id=$1::uuid AND state IN ('APPROVED','PUBLISHED')) commercial,
+          (SELECT count(*)::int FROM app.import_jobs WHERE tenant_id=$1::uuid) imports,
+          (SELECT count(*)::int FROM app.roles WHERE tenant_id=$1::uuid AND status='ACTIVE') roles`,
+          id,
+        ),
+      );
+      const representatives = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,code,name,node_type AS type,state,version FROM app.organization_nodes WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) organizations,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,employee_code AS code,invited_name AS name,status AS state,version FROM app.tenant_memberships WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) users,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,code,name,node_type AS type,state,version FROM app.organization_nodes WHERE tenant_id=$1::uuid AND node_type='BRANCH' ORDER BY updated_at DESC,id LIMIT 5) x) branches,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,code,legal_name AS name,state,version FROM app.clients WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) clients,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,code,legal_name AS name,state,version FROM app.vendors WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) vendors,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,code,name,state,version FROM app.contracts WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) commercial,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,dataset AS code,filename AS name,state,version FROM app.import_jobs WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) imports,
+          (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (SELECT id,code,name,status AS state,version FROM app.roles WHERE tenant_id=$1::uuid ORDER BY updated_at DESC,id LIMIT 5) x) roles`,
+          id,
+        ),
+      );
+      const setupEvidence = [
+        {
+          key: "organization",
+          label: "Organization nodes",
+          count: Number(evidence.organizations),
+          records: representatives.organizations,
+        },
+        {
+          key: "users",
+          label: "Tenant users",
+          count: Number(evidence.users),
+          records: representatives.users,
+        },
+        {
+          key: "branches",
+          label: "Active branches",
+          count: Number(evidence.branches),
+          records: representatives.branches,
+        },
+        {
+          key: "clients",
+          label: "Active clients",
+          count: Number(evidence.clients),
+          records: representatives.clients,
+        },
+        {
+          key: "vendors",
+          label: "Active vendors",
+          count: Number(evidence.vendors),
+          records: representatives.vendors,
+        },
+        {
+          key: "commercial",
+          label: "Approved/published contracts",
+          count: Number(evidence.commercial),
+          records: representatives.commercial,
+        },
+        {
+          key: "imports",
+          label: "Import jobs",
+          count: Number(evidence.imports),
+          records: representatives.imports,
+        },
+        {
+          key: "roles",
+          label: "Active roles",
+          count: Number(evidence.roles),
+          records: representatives.roles,
+        },
+      ];
+      return {
+        tenant,
+        invitations: invites,
+        checklist,
+        availableRoles,
+        setupEvidence,
+      };
+    });
+  }
+
+  private platformUserView(row: Row, actorUserId?: string) {
+    const roles = Array.isArray(row.roles) ? row.roles : [];
+    const activationStatus = String(row.activationStatus ?? "PENDING");
+    const personaApplicable = row.portalAudience !== "INTERNAL";
+    const mfaApplicable =
+      row.mfaPolicy === "ALL" ||
+      (row.mfaPolicy === "PRIVILEGED" && Boolean(row.privilegedRole));
+    const checks = {
+      profile: Boolean(
+        row.displayName &&
+          row.employeeCode &&
+          row.portalAudience &&
+          row.destination,
+      ),
+      activation: activationStatus === "ACCEPTED",
+      access: Boolean(row.accessComplete),
+      personaLinkage: personaApplicable ? Boolean(row.personaLinked) : null,
+      mfa: mfaApplicable ? Boolean(row.mfaEnabled) : null,
+    };
+    const applicable = [
+      checks.profile,
+      checks.activation,
+      checks.access,
+      ...(checks.personaLinkage === null ? [] : [checks.personaLinkage]),
+      ...(checks.mfa === null ? [] : [checks.mfa]),
+    ];
+    const percent = Math.floor(
+      (applicable.filter(Boolean).length * 100) / applicable.length,
+    );
+    const blocked =
+      ["EXPIRED", "REVOKED"].includes(activationStatus) ||
+      Boolean(row.audienceConflict) ||
+      checks.personaLinkage === false ||
+      checks.mfa === false;
+    const revealEligible = Boolean(row.destination);
+    const passwordResetEligible =
+      row.membershipStatus === "ACTIVE" &&
+      Boolean(row.userId) &&
+      row.userStatus === "ACTIVE" &&
+      Number(row.activeIdentityMemberships) === 1 &&
+      row.userId !== actorUserId;
+    const baseActions =
+      row.membershipStatus === "SUSPENDED"
+        ? ["EDIT_PROFILE", "REACTIVATE"]
+        : row.membershipStatus === "ACTIVE"
+          ? ["EDIT_PROFILE", "SUSPEND"]
+          : ["EDIT_PROFILE"];
+    return {
+      id: row.id,
+      displayName: row.displayName,
+      employeeCode: row.employeeCode,
+      portalAudience: row.portalAudience,
+      membershipStatus: row.membershipStatus,
+      activationStatus,
+      destination: row.destination,
+      roles,
+      onboarding: {
+        percent,
+        status:
+          percent === 100
+            ? "COMPLETE"
+            : blocked
+              ? "BLOCKED"
+              : percent === 0
+                ? "NOT_STARTED"
+                : "IN_PROGRESS",
+        checks,
+        explanations: {
+          profile: "Name, employee code, audience and invitation destination",
+          activation: "Invitation accepted with active credentials",
+          access: "Effective role and active scope grant",
+          personaLinkage: personaApplicable
+            ? "Active external persona linkage required"
+            : "Not required for this internal audience",
+          mfa: mfaApplicable
+            ? "Tenant MFA policy requires a verified factor"
+            : "Not required by tenant MFA policy",
+        },
+      },
+      lastLoginAt: row.lastLoginAt,
+      lastActivityAt: row.lastActivityAt,
+      mfaEnabled: Boolean(row.mfaEnabled),
+      activeSessions: Number(row.activeSessions ?? 0),
+      version: Number(row.version),
+      invitationEditable: !row.userId,
+      sharedIdentity: Number(row.activeIdentityMemberships) > 1,
+      permittedActions: [
+        ...baseActions,
+        ...(revealEligible ? ["REVEAL_DESTINATION"] : []),
+        ...(passwordResetEligible ? ["GENERATE_PASSWORD_RESET"] : []),
+      ],
+    };
+  }
+
+  private platformUserRows(tx: Tx, tenantId: string, membershipId?: string) {
+    return tx.$queryRawUnsafe<Array<Row>>(
+      `SELECT m.id,m.user_id AS "userId",u.status AS "userStatus",m.invited_name AS "displayName",m.employee_code AS "employeeCode",m.portal_audience AS "portalAudience",m.status AS "membershipStatus",m.version,m.last_activity_at AS "lastActivityAt",concat_ws(' ',m.invited_email,m.invited_mobile) AS "searchDestination",
+       CASE WHEN m.invited_email IS NOT NULL THEN regexp_replace(m.invited_email,'^(.).+(@.*)$','\\1***\\2') WHEN m.invited_mobile IS NOT NULL THEN left(m.invited_mobile,3)||'*****'||right(m.invited_mobile,2) END AS destination,
+       u.last_login_at AS "lastLoginAt",CASE WHEN m.user_id IS NOT NULL AND u.status='ACTIVE' THEN 'ACCEPTED' WHEN coalesce(oi.revoked_at,ai.revoked_at) IS NOT NULL THEN 'REVOKED' WHEN coalesce(oi.expires_at,ai.expires_at)<=now() THEN 'EXPIRED' ELSE 'PENDING' END AS "activationStatus",
+       coalesce((SELECT jsonb_agg(jsonb_build_object('code',r.code,'name',r.name) ORDER BY r.name) FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' AND r.status='ACTIVE' AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now())),'[]'::jsonb) AS roles,
+       EXISTS(SELECT 1 FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id JOIN app.scope_grants g ON g.tenant_id=a.tenant_id AND g.assignment_id=a.id WHERE a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' AND r.status='ACTIVE' AND g.status='ACTIVE' AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now()) AND g.effective_from<=now() AND (g.effective_to IS NULL OR g.effective_to>now())) AS "accessComplete",
+       EXISTS(SELECT 1 FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' AND r.status='ACTIVE' AND NOT (m.portal_audience=ANY(r.portal_audiences))) AS "audienceConflict",
+       EXISTS(SELECT 1 FROM app.mfa_factors f WHERE f.user_id=m.user_id AND f.verified_at IS NOT NULL AND f.disabled_at IS NULL) AS "mfaEnabled",
+       coalesce((SELECT value->>'mfaPolicy' FROM app.tenant_configuration c WHERE c.tenant_id=m.tenant_id AND c.namespace='security'),'OFF') AS "mfaPolicy",
+       EXISTS(SELECT 1 FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' AND r.status='ACTIVE' AND r.privilege_level IN ('PRIVILEGED','PROTECTED') AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now())) AS "privilegedRole",
+       CASE WHEN m.portal_audience='DRIVER' THEN EXISTS(SELECT 1 FROM app.drivers d WHERE d.tenant_id=m.tenant_id AND d.portal_membership_id=m.id AND d.state='ACTIVE') WHEN m.portal_audience IN ('CLIENT','VENDOR') THEN false ELSE true END AS "personaLinked",
+       (SELECT count(*)::int FROM app.sessions s WHERE s.active_tenant_id=m.tenant_id AND s.membership_id=m.id AND s.revoked_at IS NULL AND s.expires_at>now()) AS "activeSessions"
+       ,(SELECT count(*)::int FROM app.tenant_memberships am JOIN app.tenants at ON at.id=am.tenant_id AND at.status='ACTIVE' WHERE am.user_id=m.user_id AND am.status='ACTIVE') AS "activeIdentityMemberships"
+       FROM app.tenant_memberships m LEFT JOIN app.users u ON u.id=m.user_id LEFT JOIN app.owner_invitations oi ON oi.tenant_id=m.tenant_id AND oi.membership_id=m.id
+       LEFT JOIN LATERAL (SELECT expires_at,revoked_at FROM app.access_invitations x WHERE x.tenant_id=m.tenant_id AND x.membership_id=m.id ORDER BY x.created_at DESC LIMIT 1) ai ON true
+       WHERE m.tenant_id=$1::uuid AND ($2::uuid IS NULL OR m.id=$2::uuid) ORDER BY m.invited_name,m.id`,
+      tenantId,
+      membershipId ?? null,
+    );
+  }
+
+  async platformTenantUsers(
+    actor: SessionActor,
+    tenantId: string,
+    query: {
+      search: string;
+      membershipStatus?: string;
+      activationStatus?: string;
+      audience?: string;
+      role?: string;
+      page: number;
+    },
+  ) {
+    this.requirePlatform(actor);
+    return withPlatform(this.db, async (tx) => {
+      const search = query.search.toLowerCase();
+      if (
+        !(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT id FROM app.tenants WHERE id=$1::uuid`,
+            tenantId,
+          )
+        )[0]
+      )
+        throw new AppError(404, "NOT_FOUND", "Resource not found");
+      const items = (await this.platformUserRows(tx, tenantId))
+        .filter(
+          (row) =>
+            !search ||
+            `${row.displayName} ${row.employeeCode} ${row.searchDestination ?? ""}`
+              .toLowerCase()
+              .includes(search),
+        )
+        .map((row) => this.platformUserView(row, actor.userId))
+        .filter(
+          (item) =>
+            (!query.membershipStatus ||
+              item.membershipStatus === query.membershipStatus) &&
+            (!query.activationStatus ||
+              item.activationStatus === query.activationStatus) &&
+            (!query.audience || item.portalAudience === query.audience) &&
+            (!query.role ||
+              item.roles.some(
+                (role) => String((role as Row).code) === query.role,
+              )),
+        );
+      const pageSize = 25,
+        offset = (query.page - 1) * pageSize;
+      return {
+        items: items.slice(offset, offset + pageSize),
+        total: items.length,
+        page: query.page,
+        pageSize,
+      };
+    });
+  }
+
+  async platformTenantUser(
+    actor: SessionActor,
+    tenantId: string,
+    membershipId: string,
+  ) {
+    this.requirePlatform(actor);
+    return withPlatform(this.db, async (tx) => ({
+      ...this.platformUserView(
+        one(await this.platformUserRows(tx, tenantId, membershipId)),
+        actor.userId,
+      ),
+      activity: await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT event_type AS "eventType",outcome,occurred_at AS "occurredAt" FROM app.security_events WHERE tenant_id=$1::uuid AND membership_id=$2::uuid ORDER BY occurred_at DESC LIMIT 25`,
+        tenantId,
+        membershipId,
+      ),
+    }));
+  }
+
+  async updatePlatformTenantConfiguration(
+    actor: SessionActor,
+    tenantId: string,
+    input: {
+      expectedVersion: number;
+      legalName: string;
+      timezone: string;
+      locale: string;
+      currency: string;
+      shortName: string;
+      primaryColor: string;
+      accentColor: string;
+      reason: string;
+    },
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    this.requirePlatform(actor);
+    this.requireIdempotencyKey(idempotencyKey);
+    if (!this.config.SUPPORTED_CURRENCIES.split(",").includes(input.currency))
+      throw new AppError(
+        400,
+        "CURRENCY_UNSUPPORTED",
+        "Currency is not supported by this deployment",
+      );
+    const operation = "platform.tenant.configuration.update",
+      keyHash = hash(idempotencyKey),
+      requestHash = hash(JSON.stringify({ tenantId, input }));
+    return withPlatform(this.db, async (tx) => {
+      const replay = await this.platformMutationReplay(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+      );
+      if (replay) return replay;
+      const before = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id,legal_name AS "legalName",timezone,locale,currency,short_name AS "shortName",primary_color AS "primaryColor",accent_color AS "accentColor",version FROM app.tenants WHERE id=$1::uuid FOR UPDATE`,
+          tenantId,
+        ),
+      );
+      if (Number(before.version) !== input.expectedVersion)
+        throw new AppError(
+          409,
+          "VERSION_CONFLICT",
+          "Tenant configuration changed; reload and retry",
+        );
+      const updated = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `UPDATE app.tenants SET legal_name=$1,timezone=$2,locale=$3,currency=$4,short_name=$5,primary_color=$6,accent_color=$7,updated_at=now(),version=version+1 WHERE id=$8::uuid AND version=$9 RETURNING id,legal_name AS "legalName",timezone,locale,currency,short_name AS "shortName",primary_color AS "primaryColor",accent_color AS "accentColor",version`,
+          input.legalName,
+          input.timezone,
+          input.locale,
+          input.currency,
+          input.shortName,
+          input.primaryColor,
+          input.accentColor,
+          tenantId,
+          input.expectedVersion,
+        ),
+      );
+      await this.audit(tx, {
+        tenantId,
+        actorId: actor.userId,
+        action: "tenant.configuration.updated",
+        targetType: "tenant",
+        targetId: tenantId,
+        correlationId,
+        reason: input.reason,
+        before,
+        after: updated,
+      });
+      await this.storePlatformMutation(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        tenantId,
+        updated,
+      );
+      return updated;
+    });
+  }
+
+  async updatePlatformMasterRecord(
+    actor: SessionActor,
+    tenantId: string,
+    resourceType: "organization" | "client" | "vendor",
+    resourceId: string,
+    input: { expectedVersion: number; name: string; reason: string },
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    this.requirePlatform(actor);
+    this.requireIdempotencyKey(idempotencyKey);
+    const operation = `platform.master.${resourceType}.update`,
+      keyHash = hash(idempotencyKey),
+      requestHash = hash(JSON.stringify({ tenantId, resourceId, input }));
+    return withPlatform(this.db, async (tx) => {
+      const replay = await this.platformMutationReplay(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+      );
+      if (replay) return replay;
+      let before: Row, updated: Row;
+      if (resourceType === "organization") {
+        before = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT id,code,name,state,version FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+            tenantId,
+            resourceId,
+          ),
+        );
+        if (Number(before.version) !== input.expectedVersion)
+          throw new AppError(
+            409,
+            "VERSION_CONFLICT",
+            "Organization record changed; reload and retry",
+          );
+        updated = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `UPDATE app.organization_nodes SET name=$1,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4 RETURNING id,code,name,state,version`,
+            input.name,
+            tenantId,
+            resourceId,
+            input.expectedVersion,
+          ),
+        );
+      } else if (resourceType === "client") {
+        before = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT id,code,legal_name AS name,state,version FROM app.clients WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+            tenantId,
+            resourceId,
+          ),
+        );
+        if (Number(before.version) !== input.expectedVersion)
+          throw new AppError(
+            409,
+            "VERSION_CONFLICT",
+            "Client record changed; reload and retry",
+          );
+        updated = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `UPDATE app.clients SET legal_name=$1,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4 RETURNING id,code,legal_name AS name,state,version`,
+            input.name,
+            tenantId,
+            resourceId,
+            input.expectedVersion,
+          ),
+        );
+      } else {
+        before = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT id,code,legal_name AS name,state,version FROM app.vendors WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+            tenantId,
+            resourceId,
+          ),
+        );
+        if (Number(before.version) !== input.expectedVersion)
+          throw new AppError(
+            409,
+            "VERSION_CONFLICT",
+            "Vendor record changed; reload and retry",
+          );
+        updated = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `UPDATE app.vendors SET legal_name=$1,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4 RETURNING id,code,legal_name AS name,state,version`,
+            input.name,
+            tenantId,
+            resourceId,
+            input.expectedVersion,
+          ),
+        );
+      }
+      await this.audit(tx, {
+        tenantId,
+        actorId: actor.userId,
+        action: `master.${resourceType}.updated`,
+        targetType: resourceType,
+        targetId: resourceId,
+        correlationId,
+        reason: input.reason,
+        before,
+        after: updated,
+      });
+      await this.storePlatformMutation(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        resourceId,
+        updated,
+      );
+      return updated;
+    });
+  }
+
+  async revealPlatformTenantUserDestination(
+    actor: SessionActor,
+    tenantId: string,
+    membershipId: string,
+    input: { expectedVersion: number; reason: string; currentPassword: string },
+    correlationId: string,
+  ) {
+    this.requirePlatform(actor);
+    const eventType = "PLATFORM_DESTINATION_REVEAL";
+    try {
+      return await withPlatform(this.db, async (tx) => {
+        await this.requireProtectedActionCapacity(
+          tx,
+          actor,
+          tenantId,
+          eventType,
+        );
+        await this.verifyPlatformPassword(tx, actor, input.currentPassword);
+        const member = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT m.id,m.version,m.invited_email AS email,CASE WHEN m.invited_email IS NULL THEN m.invited_mobile END AS mobile FROM app.tenant_memberships m WHERE m.tenant_id=$1::uuid AND m.id=$2::uuid FOR UPDATE`,
+            tenantId,
+            membershipId,
+          ),
+        );
+        if (Number(member.version) !== input.expectedVersion)
+          throw new AppError(
+            409,
+            "VERSION_CONFLICT",
+            "User changed; reload and retry",
+          );
+        const type = member.email ? "EMAIL" : member.mobile ? "MOBILE" : null;
+        const destination = member.email ?? member.mobile;
+        if (!type || !destination)
+          throw new AppError(
+            409,
+            "DESTINATION_NOT_AVAILABLE",
+            "This membership has no invitation destination to reveal",
+          );
+        const revealedUntil = new Date(Date.now() + 60_000).toISOString();
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id) VALUES($1::uuid,$2::uuid,$3::uuid,$4,'SUCCEEDED',$5,$6::jsonb,$7)`,
+          tenantId,
+          actor.userId,
+          membershipId,
+          eventType,
+          hash(membershipId).slice(0, 24),
+          JSON.stringify({ type, revealedUntil }),
+          correlationId,
+        );
+        await this.audit(tx, {
+          tenantId,
+          actorId: actor.userId,
+          action: "tenant_user.destination.revealed",
+          targetType: "tenant_membership",
+          targetId: membershipId,
+          correlationId,
+          reason: input.reason,
+          after: { type, revealedUntil },
+        });
+        return { membershipId, type, destination, revealedUntil };
+      });
+    } catch (error) {
+      await this.recordPlatformProtectedOutcome(
+        actor,
+        tenantId,
+        membershipId,
+        eventType,
+        "DENIED",
+        correlationId,
+        input.reason,
+        error instanceof AppError ? error.code : "INTERNAL_ERROR",
+      );
+      throw error;
+    }
+  }
+
+  async invitePlatformTenantUser(
+    actor: SessionActor,
+    tenantId: string,
+    input: {
+      displayName: string;
+      employeeCode: string;
+      email?: string;
+      mobile?: string;
+      portalAudience: string;
+      roleIds: string[];
+      expiresInHours: number;
+      reason: string;
+      tenantWideAccessConfirmed: true;
+    },
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    this.requirePlatform(actor);
+    this.requireIdempotencyKey(idempotencyKey);
+    const normalizedEmail = input.email?.trim().toLowerCase();
+    const operation = "platform.tenant-user.invite",
+      keyHash = hash(idempotencyKey),
+      requestHash = hash(
+        JSON.stringify({
+          tenantId,
+          input: { ...input, email: normalizedEmail },
+        }),
+      );
+    return withPlatform(this.db, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT set_config('app.actor_user_id',$1,true),set_config('app.correlation_id',$2,true)`,
+        actor.userId,
+        correlationId,
+      );
+      const replay = await this.platformMutationReplay(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+      );
+      if (replay) return replay;
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `${tenantId}:invite:${normalizedEmail ?? input.mobile}`,
+      );
+      const tenant = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id,status FROM app.tenants WHERE id=$1::uuid FOR UPDATE`,
+          tenantId,
+        ),
+      );
+      if (tenant.status !== "ACTIVE")
+        throw new AppError(
+          409,
+          "TENANT_INACTIVE",
+          "Reactivate the tenant before inviting users",
+        );
+      if (
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT id FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND (employee_code=$2 OR ($3::text IS NOT NULL AND lower(invited_email)=$3) OR ($4::text IS NOT NULL AND invited_mobile=$4)) LIMIT 1`,
+            tenantId,
+            input.employeeCode.toUpperCase(),
+            normalizedEmail ?? null,
+            input.mobile ?? null,
+          )
+        )[0]
+      )
+        throw new AppError(
+          409,
+          "IDENTITY_ALREADY_MEMBER",
+          "Employee code or invitation destination already belongs to this tenant",
+        );
+      if (
+        input.portalAudience === "INTERNAL" &&
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT id FROM app.employees employee WHERE employee.tenant_id=$1::uuid AND (((($3::text IS NOT NULL AND employee.email IS NOT NULL AND lower(trim(employee.email))=lower(trim($3))) OR ($4::text IS NOT NULL AND employee.mobile IS NOT NULL AND regexp_replace(employee.mobile,'[^0-9+]','','g')=regexp_replace($4,'[^0-9+]','','g'))) AND employee.employee_code<>$2) OR (employee.employee_code=$2 AND (employee.state<>'ACTIVE' OR employee.linked_membership_id IS NOT NULL OR ($3::text IS NOT NULL AND (employee.email IS NULL OR lower(trim(employee.email))<>lower(trim($3)))) OR ($4::text IS NOT NULL AND (employee.mobile IS NULL OR regexp_replace(employee.mobile,'[^0-9+]','','g')<>regexp_replace($4,'[^0-9+]','','g')))))) ORDER BY employee.id LIMIT 1 FOR UPDATE`,
+            tenantId,
+            input.employeeCode.toUpperCase(),
+            normalizedEmail ?? null,
+            input.mobile ?? null,
+          )
+        )[0]
+      )
+        throw new AppError(
+          409,
+          "EMPLOYEE_LINK_CONFIRMATION_REQUIRED",
+          "Employee code or invitation destination conflicts with an existing Employee; reconcile the Employee identity before inviting access",
+        );
+      const roles = await tx.$queryRawUnsafe<Array<Row>>(
+        `SELECT id,code,name FROM app.roles WHERE tenant_id=$1::uuid AND id=ANY($2::uuid[]) AND status='ACTIVE' AND $3=ANY(portal_audiences)`,
+        tenantId,
+        input.roleIds,
+        input.portalAudience,
+      );
+      if (roles.length !== new Set(input.roleIds).size)
+        throw new AppError(
+          400,
+          "ROLE_INVALID",
+          "Select active roles compatible with the portal audience",
+        );
+      const root = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id FROM app.authorization_scope_nodes WHERE tenant_id=$1::uuid AND scope_type='TENANT' AND status='ACTIVE'`,
+          tenantId,
+        ),
+      );
+      const membership = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.tenant_memberships(tenant_id,invited_email,invited_mobile,invited_name,employee_code,role,portal_audience,status) VALUES($1::uuid,$2,$3,$4,$5,null,$6,'INVITED') RETURNING id,version`,
+          tenantId,
+          normalizedEmail ?? null,
+          input.mobile ?? null,
+          input.displayName,
+          input.employeeCode.toUpperCase(),
+          input.portalAudience,
+        ),
+      );
+      for (const roleId of input.roleIds) {
+        const assignment = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.membership_role_assignments(tenant_id,membership_id,role_id) VALUES($1::uuid,$2::uuid,$3::uuid) RETURNING id`,
+            tenantId,
+            membership.id,
+            roleId,
+          ),
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.scope_grants(tenant_id,assignment_id,scope_node_id,action) VALUES($1::uuid,$2::uuid,$3::uuid,'ADMIN')`,
+          tenantId,
+          assignment.id,
+          root.id,
+        );
+      }
+      const plainToken = token(),
+        destination = normalizedEmail ?? input.mobile!,
+        masked = normalizedEmail
+          ? normalizedEmail.replace(/^(.).+(@.*)$/, "$1***$2")
+          : `${String(input.mobile).slice(0, 3)}*****${String(input.mobile).slice(-2)}`;
+      const invitation = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `INSERT INTO app.access_invitations(tenant_id,membership_id,destination_hash,masked_destination,token_hash,expires_at,delivery_state) VALUES($1::uuid,$2::uuid,$3,$4,$5,now()+($6||' hours')::interval,'PENDING') RETURNING id,expires_at AS "expiresAt",version`,
+          tenantId,
+          membership.id,
+          hash(destination),
+          masked,
+          hash(plainToken),
+          String(input.expiresInHours),
+        ),
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key) VALUES($1::uuid,'TENANT','access_invitation',$2::uuid,'identity.invitation.requested.v1',$3::jsonb,$4)`,
+        tenantId,
+        invitation.id,
+        JSON.stringify({
+          invitationId: invitation.id,
+          maskedDestination: masked,
+          expiresAt: invitation.expiresAt,
+          delivery: "ADMIN_COPY_ONCE",
+        }),
+        `access-invitation:${invitation.id}:v1`,
+      );
+      await this.audit(tx, {
+        tenantId,
+        actorId: actor.userId,
+        action: "tenant_user.invited",
+        targetType: "tenant_membership",
+        targetId: String(membership.id),
+        correlationId,
+        reason: input.reason,
+        after: {
+          roleIds: input.roleIds,
+          maskedDestination: masked,
+          portalAudience: input.portalAudience,
+        },
+      });
+      const response = {
+        id: String(membership.id),
+        membershipId: String(membership.id),
+        invitationId: String(invitation.id),
+        maskedDestination: masked,
+        expiresAt: invitation.expiresAt,
+        invitationUrl: `${this.config.FRONTEND_URL}/accept-access?token=${plainToken}`,
+        shownOnce: true,
+      };
+      await this.storePlatformMutation(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        String(membership.id),
+        response,
+        { ...response, invitationUrl: null },
+      );
+      return response;
+    });
+  }
+
+  async issuePlatformTenantUserPasswordReset(
+    actor: SessionActor,
+    tenantId: string,
+    membershipId: string,
+    input: {
+      expectedVersion: number;
+      reason: string;
+      currentPassword: string;
+      expiresInHours: number;
+    },
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    this.requirePlatform(actor);
+    this.requireIdempotencyKey(idempotencyKey);
+    const operation = "platform.tenant-user.password-reset",
+      keyHash = hash(idempotencyKey),
+      eventType = "PLATFORM_PASSWORD_RESET_ISSUE";
+    try {
+      return await withPlatform(this.db, async (tx) => {
+        await this.requireProtectedActionCapacity(
+          tx,
+          actor,
+          tenantId,
+          eventType,
+        );
+        await this.verifyPlatformPassword(tx, actor, input.currentPassword);
+        const requestHash = hash(
+          JSON.stringify({
+            tenantId,
+            membershipId,
+            expectedVersion: input.expectedVersion,
+            reason: input.reason,
+            expiresInHours: input.expiresInHours,
+          }),
+        );
+        const replay = await this.platformMutationReplay(
+          tx,
+          actor.userId,
+          operation,
+          keyHash,
+          requestHash,
+        );
+        if (replay) return replay;
+        const discovered = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT user_id AS "userId" FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+            tenantId,
+            membershipId,
+          ),
+        );
+        if (!discovered.userId)
+          throw new AppError(
+            409,
+            "PASSWORD_RESET_STATE_INVALID",
+            "Password reset is available only after activation",
+          );
+        if (discovered.userId === actor.userId)
+          throw new AppError(
+            409,
+            "SELF_RESET_NOT_ALLOWED",
+            "Use self-service password recovery for your own account",
+          );
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+          `password-reset:${discovered.userId}`,
+        );
+        const membership = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT m.id,m.user_id AS "userId",m.version,m.status,u.membership_version AS "membershipVersion",CASE WHEN u.email IS NOT NULL THEN left(u.email,1)||'***@'||split_part(u.email,'@',2) ELSE '+••••••'||right(u.mobile_e164,2) END AS "maskedDestination" FROM app.tenant_memberships m JOIN app.users u ON u.id=m.user_id AND u.status='ACTIVE' WHERE m.tenant_id=$1::uuid AND m.id=$2::uuid FOR UPDATE OF m,u`,
+            tenantId,
+            membershipId,
+          ),
+        );
+        if (membership.status !== "ACTIVE")
+          throw new AppError(
+            409,
+            "PASSWORD_RESET_STATE_INVALID",
+            "Password reset is available only for active users",
+          );
+        if (Number(membership.version) !== input.expectedVersion)
+          throw new AppError(
+            409,
+            "VERSION_CONFLICT",
+            "User changed; reload and retry",
+          );
+        const active = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT count(*)::int count FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id AND t.status='ACTIVE' WHERE m.user_id=$1::uuid AND m.status='ACTIVE'`,
+            membership.userId,
+          ),
+        );
+        if (Number(active.count) !== 1)
+          throw new AppError(
+            409,
+            "SHARED_IDENTITY_SELF_SERVICE_REQUIRED",
+            "This identity belongs to multiple workspaces; the user must use self-service password recovery",
+          );
+        await tx.$executeRawUnsafe(
+          `UPDATE app.password_reset_tokens SET revoked_at=now(),token_envelope=NULL,updated_at=now(),version=version+1 WHERE user_id=$1::uuid AND used_at IS NULL AND revoked_at IS NULL`,
+          membership.userId,
+        );
+        const plainToken = token();
+        const reset = one(
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `INSERT INTO app.password_reset_tokens(tenant_id,membership_id,user_id,user_membership_version,requested_by,request_source,token_hash,expires_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,'TENANT_ADMIN',$6,now()+($7||' hours')::interval) RETURNING id,expires_at AS "expiresAt"`,
+            tenantId,
+            membershipId,
+            membership.userId,
+            membership.membershipVersion,
+            actor.userId,
+            hash(plainToken),
+            String(input.expiresInHours),
+          ),
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id) VALUES($1::uuid,$2::uuid,$3::uuid,'PASSWORD_RESET_ADMIN_ISSUED','SUCCEEDED',$4,$5::jsonb,$6)`,
+          tenantId,
+          membership.userId,
+          membershipId,
+          hash(String(reset.id)).slice(0, 24),
+          JSON.stringify({
+            requestedBy: actor.userId,
+            source: "PLATFORM_ADMIN",
+          }),
+          correlationId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.security_events(tenant_id,user_id,membership_id,event_type,outcome,safe_target_hash,metadata,correlation_id) VALUES($1::uuid,$2::uuid,$3::uuid,$4,'SUCCEEDED',$5,$6::jsonb,$7)`,
+          tenantId,
+          actor.userId,
+          membershipId,
+          eventType,
+          hash(membershipId).slice(0, 24),
+          JSON.stringify({ resetId: reset.id }),
+          correlationId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO app.outbox_events(tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key) VALUES($1::uuid,'TENANT','password_reset',$2::uuid,'identity.password_reset.admin_issued.v1',$3::jsonb,$4)`,
+          tenantId,
+          reset.id,
+          JSON.stringify({
+            passwordResetId: reset.id,
+            membershipId,
+            expiresAt: reset.expiresAt,
+            delivery: "ADMIN_COPY_ONCE",
+          }),
+          `password-reset:${reset.id}:platform-issued:v1`,
+        );
+        await this.audit(tx, {
+          tenantId,
+          actorId: actor.userId,
+          action: "tenant_user.password_reset.issued",
+          targetType: "tenant_membership",
+          targetId: membershipId,
+          correlationId,
+          reason: input.reason,
+          after: {
+            resetId: reset.id,
+            expiresAt: reset.expiresAt,
+            maskedDestination: membership.maskedDestination,
+          },
+        });
+        const response = {
+          id: String(reset.id),
+          membershipId,
+          expiresAt: reset.expiresAt,
+          maskedDestination: membership.maskedDestination,
+          resetUrl: `${this.config.FRONTEND_URL}/reset-password#token=${plainToken}`,
+          shownOnce: true,
+        };
+        await this.storePlatformMutation(
+          tx,
+          actor.userId,
+          operation,
+          keyHash,
+          requestHash,
+          String(reset.id),
+          response,
+          { ...response, resetUrl: null },
+        );
+        return response;
+      });
+    } catch (error) {
+      await this.recordPlatformProtectedOutcome(
+        actor,
+        tenantId,
+        membershipId,
+        eventType,
+        "DENIED",
+        correlationId,
+        input.reason,
+        error instanceof AppError ? error.code : "INTERNAL_ERROR",
+      );
+      throw error;
+    }
+  }
+
+  async updatePlatformTenantUser(
+    actor: SessionActor,
+    tenantId: string,
+    membershipId: string,
+    input: {
+      expectedVersion: number;
+      displayName: string;
+      employeeCode: string;
+      portalAudience: string;
+      reason: string;
+    },
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    this.requirePlatform(actor);
+    this.requireIdempotencyKey(idempotencyKey);
+    const operation = "platform.tenant-user.profile.update",
+      keyHash = hash(idempotencyKey),
+      requestHash = hash(JSON.stringify({ tenantId, membershipId, input }));
+    return withPlatform(this.db, async (tx) => {
+      const replay = await this.platformMutationReplay(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+      );
+      if (replay) return replay;
+      const current = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT id,user_id AS "userId",invited_name AS "displayName",employee_code AS "employeeCode",portal_audience AS "portalAudience",version FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+          tenantId,
+          membershipId,
+        ),
+      );
+      if (Number(current.version) !== input.expectedVersion)
+        throw new AppError(
+          409,
+          "VERSION_CONFLICT",
+          "User changed; reload and retry",
+        );
+      if (
+        (
+          await tx.$queryRawUnsafe<Array<Row>>(
+            `SELECT 1 FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE a.tenant_id=$1::uuid AND a.membership_id=$2::uuid AND a.status='ACTIVE' AND r.status='ACTIVE' AND NOT ($3=ANY(r.portal_audiences)) LIMIT 1`,
+            tenantId,
+            membershipId,
+            input.portalAudience,
+          )
+        )[0]
+      )
+        throw new AppError(
+          409,
+          "AUDIENCE_ROLE_INCOMPATIBLE",
+          "Selected audience is incompatible with an assigned role",
+        );
+      const changed = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `UPDATE app.tenant_memberships SET invited_name=$1,employee_code=$2,portal_audience=$3,authorization_version=authorization_version+CASE WHEN portal_audience<>$3 THEN 1 ELSE 0 END,updated_at=now(),version=version+1 WHERE tenant_id=$4::uuid AND id=$5::uuid AND version=$6 RETURNING id,version`,
+          input.displayName,
+          input.employeeCode.toUpperCase(),
+          input.portalAudience,
+          tenantId,
+          membershipId,
+          input.expectedVersion,
+        ),
+      );
+      if (current.portalAudience !== input.portalAudience)
+        await tx.$executeRawUnsafe(
+          `UPDATE app.sessions SET revoked_at=now(),revoked_reason='MEMBERSHIP_PROFILE_CHANGED',updated_at=now(),version=version+1 WHERE active_tenant_id=$1::uuid AND membership_id=$2::uuid AND revoked_at IS NULL`,
+          tenantId,
+          membershipId,
+        );
+      await this.audit(tx, {
+        tenantId,
+        actorId: actor.userId,
+        action: "tenant_user.profile.updated",
+        targetType: "tenant_membership",
+        targetId: membershipId,
+        correlationId,
+        reason: input.reason,
+        before: {
+          displayName: current.displayName,
+          employeeCode: current.employeeCode,
+          portalAudience: current.portalAudience,
+          version: current.version,
+        },
+        after: changed,
+      });
+      const response = this.platformUserView(
+        one(await this.platformUserRows(tx, tenantId, membershipId)),
+        actor.userId,
+      );
+      await this.storePlatformMutation(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        membershipId,
+        response,
+      );
+      return response;
+    });
+  }
+
+  async setPlatformTenantUserStatus(
+    actor: SessionActor,
+    tenantId: string,
+    membershipId: string,
+    status: "ACTIVE" | "SUSPENDED",
+    input: { expectedVersion: number; reason: string },
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    this.requirePlatform(actor);
+    this.requireIdempotencyKey(idempotencyKey);
+    const operation = `platform.tenant-user.${status.toLowerCase()}`,
+      keyHash = hash(idempotencyKey),
+      requestHash = hash(
+        JSON.stringify({ tenantId, membershipId, status, input }),
+      );
+    return withPlatform(this.db, async (tx) => {
+      const replay = await this.platformMutationReplay(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+      );
+      if (replay) return replay;
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        `platform-tenant-user-status:${tenantId}`,
+      );
+      const current = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT m.id,m.status,m.user_id AS "userId",m.version,t.status AS "tenantStatus",EXISTS(SELECT 1 FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' AND r.status='ACTIVE' AND r.code='TENANT_OWNER' AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now())) AS "tenantOwner" FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id WHERE m.tenant_id=$1::uuid AND m.id=$2::uuid FOR UPDATE`,
+          tenantId,
+          membershipId,
+        ),
+      );
+      if (Number(current.version) !== input.expectedVersion)
+        throw new AppError(
+          409,
+          "VERSION_CONFLICT",
+          "User changed; reload and retry",
+        );
+      if (current.status === status)
+        throw new AppError(
+          409,
+          "STATE_CONFLICT",
+          "User is already in that state",
+        );
+      if (
+        status === "ACTIVE" &&
+        (current.status !== "SUSPENDED" ||
+          current.tenantStatus !== "ACTIVE" ||
+          !current.userId)
+      )
+        throw new AppError(
+          409,
+          "REACTIVATION_NOT_ALLOWED",
+          "Only an activated suspended user can be re-enabled for an active tenant",
+        );
+      if (status === "SUSPENDED" && current.status !== "ACTIVE")
+        throw new AppError(
+          409,
+          "SUSPENSION_NOT_ALLOWED",
+          "Only an active user can be disabled",
+        );
+      if (status === "SUSPENDED" && current.tenantOwner) {
+        const others = await tx.$queryRawUnsafe<Array<Row>>(
+          `SELECT count(*)::int total FROM app.tenant_memberships m WHERE m.tenant_id=$1::uuid AND m.id<>$2::uuid AND m.status='ACTIVE' AND m.user_id IS NOT NULL AND EXISTS(SELECT 1 FROM app.membership_role_assignments a JOIN app.roles r ON r.tenant_id=a.tenant_id AND r.id=a.role_id WHERE a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.status='ACTIVE' AND r.status='ACTIVE' AND r.code='TENANT_OWNER' AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now()))`,
+          tenantId,
+          membershipId,
+        );
+        if (Number(others[0]?.total ?? 0) === 0)
+          throw new AppError(
+            409,
+            "FINAL_OWNER_PROTECTED",
+            "Assign another active Tenant Owner before disabling this user",
+          );
+      }
+      const changed = one(
+        await tx.$queryRawUnsafe<Array<Row>>(
+          `UPDATE app.tenant_memberships SET status=$1,authorization_version=authorization_version+1,updated_at=now(),version=version+1 WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4 RETURNING id,status,version`,
+          status,
+          tenantId,
+          membershipId,
+          input.expectedVersion,
+        ),
+      );
+      const revokedSessions =
+        status === "SUSPENDED"
+          ? await tx.$executeRawUnsafe(
+              `UPDATE app.sessions SET revoked_at=now(),revoked_reason='MEMBERSHIP_SUSPENDED',updated_at=now(),version=version+1 WHERE active_tenant_id=$1::uuid AND membership_id=$2::uuid AND revoked_at IS NULL`,
+              tenantId,
+              membershipId,
+            )
+          : 0;
+      await this.audit(tx, {
+        tenantId,
+        actorId: actor.userId,
+        action:
+          status === "ACTIVE"
+            ? "tenant_user.reactivated"
+            : "tenant_user.suspended",
+        targetType: "tenant_membership",
+        targetId: membershipId,
+        correlationId,
+        reason: input.reason,
+        before: { status: current.status, version: current.version },
+        after: { ...changed, revokedSessions },
+      });
+      const response = this.platformUserView(
+        one(await this.platformUserRows(tx, tenantId, membershipId)),
+        actor.userId,
+      );
+      await this.storePlatformMutation(
+        tx,
+        actor.userId,
+        operation,
+        keyHash,
+        requestHash,
+        membershipId,
+        response,
+      );
+      return response;
     });
   }
 

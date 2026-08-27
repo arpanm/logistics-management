@@ -43,6 +43,26 @@
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1rem;
 }
+.dashboardGrid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+}
+.panelHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+.panelHeading h2 {
+  margin: 0;
+}
+.panel summary {
+  cursor: pointer;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
 .tableWrap {
   overflow: auto;
 }
@@ -67,6 +87,14 @@
 .form button {
   padding: 0.5rem 0.7rem;
 }
+.actions a {
+  align-items: center;
+  display: inline-flex;
+  padding: 0.5rem 0.7rem;
+}
+.danger {
+  color: #b42318;
+}
 .priority {
   font-weight: 700;
 }
@@ -86,6 +114,35 @@
 .form label {
   display: grid;
   gap: 0.3rem;
+}
+.formGrid,
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+.filters {
+  margin-bottom: 1rem;
+}
+.field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.field > span {
+  font-weight: 600;
+}
+.field small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem;
 }
 .form input,
 .form select,
@@ -114,15 +171,86 @@
   background: #fef3f2;
   color: #b42318;
 }
+.error {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.loading {
+  min-height: 12rem;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
 .empty {
   color: var(--muted);
   padding: 0.75rem 0;
+}
+.empty {
+  display: grid;
+  gap: 0.25rem;
+  text-align: center;
+}
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  padding: 0.22rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.red,
+.rejected,
+.failed,
+.disputed,
+.validation_exception {
+  color: #b42318;
+  background: #fef3f2;
+}
+.yellow,
+.pending_approval,
+.pending_operational_verification,
+.pending_finance_approval,
+.submitted,
+.part_paid {
+  color: #8a6100;
+  background: #fffaeb;
+}
+.green,
+.paid,
+.approved,
+.reconciled {
+  color: #067647;
+  background: #ecfdf3;
+}
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(16 24 40 / 62%);
+}
+.dialog {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 1rem;
+  box-shadow: 0 24px 64px rgb(16 24 40 / 30%);
 }
 @media (max-width: 720px) {
   .hero {
     display: grid;
   }
   .line {
+    grid-template-columns: 1fr;
+  }
+  .dashboardGrid {
     grid-template-columns: 1fr;
   }
   .table {

@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Shell } from "../../../components/shell";
 import { api, type ApiError } from "../../../components/api";
+import { FormSubmitResult } from "../../../components/forms/form-submit-result";
 type Job = {
   id: string;
   dataset: string;
@@ -24,6 +25,7 @@ export default function DataImportsPage() {
   const [jobs, setJobs] = useState<Job[]>([]),
     [preview, setPreview] = useState<Job | null>(null),
     [error, setError] = useState<ApiError | null>(null),
+    [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [dataset, setDataset] = useState("CLIENT");
   const load = () =>
@@ -35,7 +37,12 @@ export default function DataImportsPage() {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    const form = new FormData(event.currentTarget),
+    setNotice("");
+    const formElement = event.currentTarget;
+    const feedbackAnchor = formElement.querySelector<HTMLElement>(
+      'button[type="submit"], button:not([type])',
+    );
+    const form = new FormData(formElement),
       file = form.get("file") as File;
     try {
       if (!file?.size)
@@ -53,6 +60,9 @@ export default function DataImportsPage() {
         checksum: string;
       }>("/tenant/imports/parse", {
         method: "POST",
+        // Parsing is an internal step; the preview mutation below owns the
+        // user-visible result for this one submit action.
+        feedbackAnchor: null,
         body: JSON.stringify({
           filename: file.name,
           mediaType: file.type || "text/csv",
@@ -61,6 +71,7 @@ export default function DataImportsPage() {
       });
       const result = await api<Job>("/tenant/imports/preview", {
         method: "POST",
+        feedbackAnchor,
         headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
           dataset: form.get("dataset"),
@@ -75,6 +86,8 @@ export default function DataImportsPage() {
         }),
       });
       setPreview(result);
+      formElement.reset();
+      setNotice("File validated. Review the preview before committing it.");
       await load();
     } catch (value) {
       setError(value as ApiError);
@@ -85,6 +98,8 @@ export default function DataImportsPage() {
   async function commit() {
     if (!preview) return;
     setBusy(true);
+    setError(null);
+    setNotice("");
     try {
       await api(`/tenant/imports/${preview.id}/commit`, {
         method: "POST",
@@ -92,6 +107,7 @@ export default function DataImportsPage() {
         body: JSON.stringify({ expectedVersion: preview.version }),
       });
       setPreview(null);
+      setNotice("Import committed successfully.");
       await load();
     } catch (value) {
       setError(value as ApiError);
@@ -180,9 +196,11 @@ export default function DataImportsPage() {
               required
             />
           </label>
-          <button className="primary" disabled={busy}>
-            {busy ? "Validating…" : "Validate complete file"}
-          </button>
+          <FormSubmitResult error={error} success={notice} busy={busy}>
+            <button className="primary" disabled={busy}>
+              {busy ? "Validating…" : "Validate complete file"}
+            </button>
+          </FormSubmitResult>
         </form>
         {preview && (
           <div role="status">
@@ -191,13 +209,15 @@ export default function DataImportsPage() {
               {JSON.stringify(preview.summary, null, 2)}
             </pre>
             {preview.state === "VALIDATED" && (
-              <button
-                className="primary"
-                disabled={busy}
-                onClick={() => void commit()}
-              >
-                Commit import
-              </button>
+              <FormSubmitResult error={error} success={notice} busy={busy}>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void commit()}
+                >
+                  Commit import
+                </button>
+              </FormSubmitResult>
             )}
           </div>
         )}

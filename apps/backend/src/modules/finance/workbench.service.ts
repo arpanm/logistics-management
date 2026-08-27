@@ -63,7 +63,7 @@ export class FinanceWorkbenchService {
     tx: Tx,
     actor: TenantActor,
     capability: "finance.read" | "finance.admin",
-    action: "READ" | "CREATE" | "UPDATE",
+    action: "READ" | "CREATE" | "UPDATE" | "APPROVE",
     resource: "invoices" | "receipts" | "vendor-bills" | "clients" | "vendors",
     id: string,
   ) {
@@ -116,7 +116,7 @@ export class FinanceWorkbenchService {
       id,
       action,
       JSON.stringify({ id, action }),
-      `${action}:${id}:${String(after.version ?? "1")}`,
+      `${action}:${id}:${sha256(jsonSafe(after)).slice(0, 24)}`,
     );
   }
 
@@ -214,32 +214,35 @@ export class FinanceWorkbenchService {
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT i.id,i.invoice_no AS "invoiceNo",c.legal_name AS client,i.state,i.invoice_date AS "invoiceDate",i.due_date AS "dueDate",i.total_minor::text AS "totalMinor",i.version
+          `SELECT i.id,i.invoice_no AS "invoiceNo",c.legal_name AS client,i.state,i.invoice_date AS "invoiceDate",i.due_date AS "dueDate",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN i.total_minor::text ELSE '••••' END AS "totalMinor",i.version
              FROM app.client_invoices i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id
-             WHERE i.tenant_id=$1::uuid AND i.state IN ('DRAFT','PENDING_APPROVAL','APPROVED','POSTED')
+             WHERE i.tenant_id=$1::uuid AND i.state IN ('DRAFT','REJECTED','PENDING_APPROVAL','APPROVED','POSTED')
              AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','invoices',i.id)
-             ORDER BY CASE i.state WHEN 'PENDING_APPROVAL' THEN 0 WHEN 'APPROVED' THEN 1 WHEN 'POSTED' THEN 2 ELSE 3 END,i.created_at LIMIT 50`,
+             ORDER BY CASE i.state WHEN 'PENDING_APPROVAL' THEN 0 WHEN 'APPROVED' THEN 1 WHEN 'POSTED' THEN 2 ELSE 3 END,i.created_at LIMIT 500`,
           tenant,
           actor.membershipId,
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT i.id,i.invoice_no AS "invoiceNo",c.legal_name AS client,i.due_date AS "dueDate",i.total_minor::text AS "totalMinor",
-              greatest(i.total_minor-coalesce((SELECT sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END) FROM app.receipt_ledger_entries e WHERE e.tenant_id=i.tenant_id AND e.invoice_id=i.id),0),0)::text AS "openMinor",
+          `SELECT i.id,i.invoice_no AS "invoiceNo",c.legal_name AS client,i.due_date AS "dueDate",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN i.total_minor::text ELSE '••••' END AS "totalMinor",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN greatest(i.total_minor-coalesce((SELECT sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END) FROM app.receipt_ledger_entries e WHERE e.tenant_id=i.tenant_id AND e.invoice_id=i.id),0),0)::text ELSE '••••' END AS "openMinor",
               CASE WHEN current_date>i.due_date+45 THEN 'RED' WHEN current_date>i.due_date+30 THEN 'YELLOW' ELSE 'GREEN' END priority,
               (SELECT max(f.created_at) FROM app.collection_followups f WHERE f.tenant_id=i.tenant_id AND f.invoice_id=i.id) AS "lastFollowupAt",i.version
              FROM app.client_invoices i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id
              WHERE i.tenant_id=$1::uuid AND i.state IN ('POSTED','SUBMITTED')
              AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','invoices',i.id)
              GROUP BY i.id,c.legal_name HAVING i.total_minor-coalesce((SELECT sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END) FROM app.receipt_ledger_entries e WHERE e.tenant_id=i.tenant_id AND e.invoice_id=i.id),0)>0
-             ORDER BY priority DESC,i.due_date NULLS LAST LIMIT 50`,
+             ORDER BY priority DESC,i.due_date NULLS LAST LIMIT 500`,
           tenant,
           actor.membershipId,
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT r.id,r.receipt_ref AS "receiptRef",c.legal_name AS client,r.payment_date AS "paymentDate",r.amount_minor::text AS "amountMinor",
-              (r.amount_minor-coalesce(sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END),0))::text AS "unallocatedMinor",r.state,r.version
+          `SELECT r.id,r.receipt_ref AS "receiptRef",c.legal_name AS client,r.payment_date AS "paymentDate",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','receipts',r.id) THEN r.amount_minor::text ELSE '••••' END AS "amountMinor",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','receipts',r.id) THEN (r.amount_minor-coalesce(sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END),0))::text ELSE '••••' END AS "unallocatedMinor",r.state,r.version
              FROM app.receipts r JOIN app.clients c ON c.tenant_id=r.tenant_id AND c.id=r.client_id
              LEFT JOIN app.receipt_ledger_entries e ON e.tenant_id=r.tenant_id AND e.receipt_id=r.id
              WHERE r.tenant_id=$1::uuid AND r.state<>'REVERSED'
@@ -251,28 +254,33 @@ export class FinanceWorkbenchService {
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT b.id,b.vendor_id AS "vendorId",b.vendor_invoice_no AS "vendorInvoiceNo",v.legal_name AS vendor,b.state,b.invoice_date AS "invoiceDate",b.payable_minor::text AS "payableMinor",
-              (b.payable_minor-coalesce(sum(pa.amount_minor) FILTER(WHERE pb.id IS NOT NULL),0))::text AS "outstandingMinor",b.version
+          `SELECT b.id,b.vendor_id AS "vendorId",b.vendor_invoice_no AS "vendorInvoiceNo",v.legal_name AS vendor,b.state,b.invoice_date AS "invoiceDate",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','vendor-bills',b.id) THEN b.payable_minor::text ELSE '••••' END AS "payableMinor",
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','vendor-bills',b.id) THEN (b.payable_minor-coalesce(sum(pa.amount_minor) FILTER(WHERE pb.id IS NOT NULL),0))::text ELSE '••••' END AS "outstandingMinor",b.version
              FROM app.vendor_bills b JOIN app.vendors v ON v.tenant_id=b.tenant_id AND v.id=b.vendor_id
              LEFT JOIN app.payment_allocations pa ON pa.tenant_id=b.tenant_id AND pa.vendor_bill_id=b.id
              LEFT JOIN app.payment_batches pb ON pb.tenant_id=pa.tenant_id AND pb.id=pa.payment_batch_id AND pb.state='PAID'
-             WHERE b.tenant_id=$1::uuid AND b.state NOT IN ('PAID','REVERSED')
+             WHERE b.tenant_id=$1::uuid
              AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','vendor-bills',b.id)
-             GROUP BY b.id,v.legal_name ORDER BY CASE WHEN b.state IN ('VALIDATION_EXCEPTION','DISPUTED') THEN 0 WHEN b.state LIKE 'PENDING_%' THEN 1 ELSE 2 END,b.invoice_date LIMIT 50`,
+             GROUP BY b.id,v.legal_name ORDER BY CASE WHEN b.state IN ('VALIDATION_EXCEPTION','DISPUTED') THEN 0 WHEN b.state LIKE 'PENDING_%' THEN 1 ELSE 2 END,b.invoice_date DESC LIMIT 500`,
           tenant,
           actor.membershipId,
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT p.id,p.batch_no AS "batchNo",p.state,p.total_minor::text AS "totalMinor",p.utr,p.version,count(a.id)::int AS allocations
+          `SELECT p.id,p.batch_no AS "batchNo",p.state,
+              CASE WHEN NOT EXISTS(SELECT 1 FROM app.payment_allocations sx WHERE sx.tenant_id=p.tenant_id AND sx.payment_batch_id=p.id AND NOT app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','vendor-bills',sx.vendor_bill_id)) THEN p.total_minor::text ELSE '••••' END AS "totalMinor",
+              CASE WHEN NOT EXISTS(SELECT 1 FROM app.payment_allocations sx WHERE sx.tenant_id=p.tenant_id AND sx.payment_batch_id=p.id AND NOT app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.bank_detail.read','READ','vendor-bills',sx.vendor_bill_id)) THEN p.utr ELSE CASE WHEN p.utr IS NULL THEN NULL ELSE '••••' END END AS utr,
+              p.version,count(a.id)::int AS allocations
              FROM app.payment_batches p LEFT JOIN app.payment_allocations a ON a.tenant_id=p.tenant_id AND a.payment_batch_id=p.id
-             WHERE p.tenant_id=$1::uuid AND EXISTS(SELECT 1 FROM app.payment_allocations x WHERE x.tenant_id=p.tenant_id AND x.payment_batch_id=p.id AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','vendor-bills',x.vendor_bill_id)) GROUP BY p.id ORDER BY p.created_at DESC LIMIT 30`,
+             WHERE p.tenant_id=$1::uuid AND EXISTS(SELECT 1 FROM app.payment_allocations x WHERE x.tenant_id=p.tenant_id AND x.payment_batch_id=p.id AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','vendor-bills',x.vendor_bill_id)) GROUP BY p.id ORDER BY p.created_at DESC LIMIT 500`,
           tenant,
           actor.membershipId,
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT t.id,t.id AS "tripId",t.trip_no AS "tripNo",t.lr_no AS "lrNo",v.id AS "vendorId",v.legal_name AS vendor,a.offered_rate_minor::text AS "expectedMinor"
+          `SELECT t.id,t.id AS "tripId",t.trip_no AS "tripNo",t.lr_no AS "lrNo",v.id AS "vendorId",v.legal_name AS vendor,
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.commercial_rate.read','READ','vendors',v.id) THEN a.offered_rate_minor::text ELSE '••••' END AS "expectedMinor"
              FROM app.trips t JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id
              JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id
              WHERE t.tenant_id=$1::uuid AND t.state='DELIVERED'
@@ -299,11 +307,86 @@ export class FinanceWorkbenchService {
     });
   }
 
+  async invoices(
+    actor: TenantActor,
+    filters: {
+      search: string;
+      status: string;
+      clientId: string;
+      from: string;
+      to: string;
+    },
+  ) {
+    const tenant = this.tenant(actor);
+    return withTenant(this.app.db, tenant, async (tx) => {
+      await this.assertInternal(tx, actor);
+      const rows = await tx.$queryRawUnsafe<Row[]>(
+        `SELECT i.id,i.invoice_no AS "invoiceNo",i.client_id AS "clientId",c.legal_name AS client,
+            i.invoice_date AS "invoiceDate",i.acknowledged_at AS "acknowledgedAt",i.due_date AS "dueDate",
+            i.currency,i.credit_days AS "creditDays",
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN i.taxable_minor::text ELSE '••••' END AS "taxableMinor",
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN i.tax_minor::text ELSE '••••' END AS "taxMinor",
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN i.total_minor::text ELSE '••••' END AS "totalMinor",i.state,i.version,
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','invoices',i.id) THEN greatest(i.total_minor-coalesce((SELECT sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END) FROM app.receipt_ledger_entries e WHERE e.tenant_id=i.tenant_id AND e.invoice_id=i.id),0),0)::text ELSE '••••' END AS "openMinor"
+         FROM app.client_invoices i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id
+         WHERE i.tenant_id=$1::uuid
+           AND ($4='' OR i.state=$4)
+           AND (nullif($5,'') IS NULL OR i.client_id=nullif($5,'')::uuid)
+           AND (nullif($6,'') IS NULL OR i.invoice_date>=nullif($6,'')::date)
+           AND (nullif($7,'') IS NULL OR i.invoice_date<=nullif($7,'')::date)
+           AND ($8='' OR i.invoice_no ILIKE '%'||$8||'%' OR c.legal_name ILIKE '%'||$8||'%')
+           AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','invoices',i.id)
+         ORDER BY i.invoice_date DESC,i.created_at DESC LIMIT 500`,
+        tenant,
+        actor.membershipId,
+        actor.userId,
+        filters.status,
+        filters.clientId,
+        filters.from,
+        filters.to,
+        filters.search,
+      );
+      return {
+        items: rows,
+        count: rows.length,
+        asOf: new Date().toISOString(),
+      };
+    });
+  }
+
+  async receipts(actor: TenantActor) {
+    const tenant = this.tenant(actor);
+    return withTenant(this.app.db, tenant, async (tx) => {
+      await this.assertInternal(tx, actor);
+      const rows = await tx.$queryRawUnsafe<Row[]>(
+        `SELECT r.id,r.receipt_ref AS "receiptRef",r.client_id AS "clientId",c.legal_name AS client,
+            r.payment_date AS "paymentDate",
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','receipts',r.id) THEN r.amount_minor::text ELSE '••••' END AS "amountMinor",r.mode,
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.bank_detail.read','READ','receipts',r.id) THEN r.instrument_no ELSE '••••' END AS "instrumentNo",
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.bank_detail.read','READ','receipts',r.id) THEN r.bank_reference ELSE CASE WHEN r.bank_reference IS NULL THEN NULL ELSE '••••' END END AS "bankReference",r.state,r.version,
+            CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.payment.read','READ','receipts',r.id) THEN (r.amount_minor-coalesce(sum(CASE WHEN e.entry_type='REVERSAL' THEN -abs(e.amount_minor) ELSE abs(e.amount_minor) END),0))::text ELSE '••••' END AS "unallocatedMinor"
+         FROM app.receipts r JOIN app.clients c ON c.tenant_id=r.tenant_id AND c.id=r.client_id
+         LEFT JOIN app.receipt_ledger_entries e ON e.tenant_id=r.tenant_id AND e.receipt_id=r.id
+         WHERE r.tenant_id=$1::uuid
+           AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','receipts',r.id)
+         GROUP BY r.id,c.legal_name ORDER BY r.payment_date DESC,r.created_at DESC LIMIT 500`,
+        tenant,
+        actor.membershipId,
+        actor.userId,
+      );
+      return {
+        items: rows,
+        count: rows.length,
+        asOf: new Date().toISOString(),
+      };
+    });
+  }
+
   async references(actor: TenantActor) {
     const tenant = this.tenant(actor);
     return withTenant(this.app.db, tenant, async (tx) => {
       await this.assertInternal(tx, actor);
-      const [services, charges, banks] = await Promise.all([
+      const [services, charges, banks, clients] = await Promise.all([
         tx.$queryRawUnsafe<Row[]>(
           `SELECT t.id AS "tripId",p.id AS "podTaskId",t.trip_no AS "tripNo",t.lr_no AS "lrNo",i.client_id AS "clientId",i.client_location_id AS "clientLocationId",i.lane_id AS "laneId",c.legal_name AS client,p.state AS "podState"
            FROM app.trips t JOIN app.pod_tasks p ON p.tenant_id=t.tenant_id AND p.trip_id=t.id
@@ -318,7 +401,8 @@ export class FinanceWorkbenchService {
           actor.userId,
         ),
         tx.$queryRawUnsafe<Row[]>(
-          `SELECT DISTINCT ON (lane_id,charge_code) lane_id AS "laneId",charge_code AS code,basis,amount_minor::text AS "rateMinor",tax_basis_points AS "taxBasisPoints"
+          `SELECT DISTINCT ON (lane_id,charge_code) lane_id AS "laneId",charge_code AS code,basis,
+              CASE WHEN app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.commercial_rate.read','READ','lanes',lane_id) THEN amount_minor::text ELSE '••••' END AS "rateMinor",tax_basis_points AS "taxBasisPoints"
            FROM app.client_rate_lines WHERE tenant_id=$1::uuid AND state='PUBLISHED' AND effective_from<=now() AND (effective_to IS NULL OR effective_to>now())
              AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','lanes',lane_id)
            ORDER BY lane_id,charge_code,priority DESC,effective_from DESC`,
@@ -331,13 +415,85 @@ export class FinanceWorkbenchService {
            FROM app.vendor_bank_versions b JOIN app.vendors v ON v.tenant_id=b.tenant_id AND v.id=b.vendor_id
            WHERE b.tenant_id=$1::uuid AND b.state='VERIFIED'
              AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','vendors',v.id)
+             AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'sensitive.bank_detail.read','READ','vendors',v.id)
            ORDER BY v.legal_name`,
           tenant,
           actor.membershipId,
           actor.userId,
         ),
+        tx.$queryRawUnsafe<Row[]>(
+          `SELECT id,legal_name AS name,code FROM app.clients
+           WHERE tenant_id=$1::uuid AND state='ACTIVE'
+             AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'finance.read','READ','clients',id)
+           ORDER BY legal_name LIMIT 500`,
+          tenant,
+          actor.membershipId,
+          actor.userId,
+        ),
       ]);
-      return { services, charges, banks };
+      return { services, charges, banks, clients };
+    });
+  }
+
+  async createReceipt(
+    actor: TenantActor,
+    input: CreateReceipt,
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    const tenant = this.tenant(actor);
+    return withTenant(this.app.db, tenant, async (tx) => {
+      await this.allowed(
+        tx,
+        actor,
+        "finance.admin",
+        "CREATE",
+        "clients",
+        input.clientId,
+      );
+      const replay = await this.replay(
+        tx,
+        actor,
+        "receipts:create",
+        idempotencyKey,
+        input,
+      );
+      if (replay.prior) return replay.prior;
+      const amount = asBigInt(input.amountMinor, "amountMinor");
+      if (amount <= 0n)
+        throw new AppError(
+          400,
+          "VALIDATION_FAILED",
+          "Receipt amount must be positive",
+        );
+      const row = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `INSERT INTO app.receipts(tenant_id,receipt_ref,client_id,payment_date,amount_minor,mode,instrument_no,bank_reference,created_by)
+           VALUES($1::uuid,$2,$3::uuid,$4::date,$5,$6,$7,$8,$9::uuid)
+           RETURNING id,receipt_ref AS "receiptRef",state,amount_minor::text AS "amountMinor",version`,
+          tenant,
+          input.receiptRef,
+          input.clientId,
+          input.paymentDate,
+          amount.toString(),
+          input.mode,
+          input.instrumentNo,
+          input.bankReference ?? null,
+          actor.userId,
+        )
+      )[0]!;
+      await this.audit(
+        tx,
+        actor,
+        "receipt.created",
+        "receipt",
+        String(row.id),
+        correlationId,
+        null,
+        row,
+      );
+      await this.remember(tx, actor, replay, String(row.id), row);
+      return row;
     });
   }
 
@@ -524,7 +680,19 @@ export class FinanceWorkbenchService {
   ) {
     const tenant = this.tenant(actor);
     return withTenant(this.app.db, tenant, async (tx) => {
-      await this.allowed(tx, actor, "finance.admin", "UPDATE", "invoices", id);
+      const scopedAction = ["APPROVE", "REJECT", "POST", "REVERSE"].includes(
+        input.action,
+      )
+        ? "APPROVE"
+        : "UPDATE";
+      await this.allowed(
+        tx,
+        actor,
+        "finance.admin",
+        scopedAction,
+        "invoices",
+        id,
+      );
       const replay = await this.replay(
         tx,
         actor,
@@ -610,6 +778,7 @@ export class FinanceWorkbenchService {
       const rules: Record<string, { from: string[]; to: string }> = {
         SUBMIT: { from: ["DRAFT", "REJECTED"], to: "PENDING_APPROVAL" },
         APPROVE: { from: ["PENDING_APPROVAL"], to: "APPROVED" },
+        REJECT: { from: ["PENDING_APPROVAL"], to: "REJECTED" },
         POST: { from: ["APPROVED"], to: "POSTED" },
         ACKNOWLEDGE: { from: ["POSTED"], to: "SUBMITTED" },
       };
@@ -619,6 +788,12 @@ export class FinanceWorkbenchService {
           409,
           "STATE_CONFLICT",
           `${input.action} is not available from ${state}`,
+        );
+      if (input.action === "REJECT" && !input.reason)
+        throw new AppError(
+          400,
+          "VALIDATION_FAILED",
+          "A rejection reason is required",
         );
       if (
         input.action === "APPROVE" &&
@@ -661,6 +836,141 @@ export class FinanceWorkbenchService {
       );
       await this.remember(tx, actor, replay, id, after);
       return after;
+    });
+  }
+
+  async updateInvoice(
+    actor: TenantActor,
+    id: string,
+    input: UpdateInvoice,
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    const tenant = this.tenant(actor);
+    return withTenant(this.app.db, tenant, async (tx) => {
+      await this.allowed(tx, actor, "finance.admin", "UPDATE", "invoices", id);
+      const replay = await this.replay(
+        tx,
+        actor,
+        `invoices:${id}:update`,
+        idempotencyKey,
+        input,
+      );
+      if (replay.prior) return replay.prior;
+      const before = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `SELECT * FROM app.client_invoices WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
+          tenant,
+          id,
+        )
+      )[0];
+      if (!before)
+        throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+      if (Number(before.version) !== input.expectedVersion)
+        throw new AppError(
+          409,
+          "VERSION_CONFLICT",
+          "Invoice changed; refresh and try again",
+        );
+      if (!["DRAFT", "REJECTED"].includes(String(before.state)))
+        throw new AppError(
+          409,
+          "STATE_CONFLICT",
+          "Only draft or rejected invoices can be edited",
+        );
+      const after = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `UPDATE app.client_invoices SET invoice_no=$1,invoice_date=$2::date,credit_days=$3,version=version+1
+           WHERE tenant_id=$4::uuid AND id=$5::uuid
+           RETURNING id,invoice_no AS "invoiceNo",invoice_date AS "invoiceDate",credit_days AS "creditDays",state,total_minor::text AS "totalMinor",version`,
+          input.invoiceNo,
+          input.invoiceDate,
+          input.creditDays,
+          tenant,
+          id,
+        )
+      )[0]!;
+      await this.audit(
+        tx,
+        actor,
+        "invoice.updated",
+        "client_invoice",
+        id,
+        correlationId,
+        before,
+        after,
+      );
+      await this.remember(tx, actor, replay, id, after);
+      return after;
+    });
+  }
+
+  async addInvoiceNote(
+    actor: TenantActor,
+    id: string,
+    input: InvoiceNote,
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    const tenant = this.tenant(actor);
+    return withTenant(this.app.db, tenant, async (tx) => {
+      await this.allowed(tx, actor, "finance.admin", "UPDATE", "invoices", id);
+      const replay = await this.replay(
+        tx,
+        actor,
+        `invoices:${id}:notes:create`,
+        idempotencyKey,
+        input,
+      );
+      if (replay.prior) return replay.prior;
+      const invoice = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `SELECT id,state,version FROM app.client_invoices WHERE tenant_id=$1::uuid AND id=$2::uuid AND state IN ('POSTED','SUBMITTED')`,
+          tenant,
+          id,
+        )
+      )[0];
+      if (!invoice)
+        throw new AppError(
+          409,
+          "STATE_CONFLICT",
+          "Notes are available only for posted invoices",
+        );
+      const unsignedAmount = asBigInt(input.amountMinor, "amountMinor");
+      if (unsignedAmount <= 0n)
+        throw new AppError(
+          400,
+          "VALIDATION_FAILED",
+          "Memo amount must be positive",
+        );
+      const amount =
+        input.noteType === "CREDIT_NOTE" ? -unsignedAmount : unsignedAmount;
+      const row = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `INSERT INTO app.invoice_notes(tenant_id,invoice_id,note_type,amount_minor,reason,evidence,actor_id)
+           VALUES($1::uuid,$2::uuid,$3,$4,$5,'{}'::jsonb,$6::uuid)
+           RETURNING id,note_type AS "noteType",amount_minor::text AS "amountMinor",reason,created_at AS "createdAt"`,
+          tenant,
+          id,
+          input.noteType,
+          amount.toString(),
+          input.reason,
+          actor.userId,
+        )
+      )[0]!;
+      await this.audit(
+        tx,
+        actor,
+        "invoice.note_created",
+        "client_invoice",
+        id,
+        correlationId,
+        null,
+        row,
+        input.reason,
+      );
+      await this.remember(tx, actor, replay, String(row.id), row);
+      return row;
     });
   }
 
@@ -719,11 +1029,14 @@ export class FinanceWorkbenchService {
   ) {
     const tenant = this.tenant(actor);
     return withTenant(this.app.db, tenant, async (tx) => {
+      const scopedAction = ["VERIFY", "APPROVE", "PAY"].includes(input.action)
+        ? "APPROVE"
+        : "UPDATE";
       await this.allowed(
         tx,
         actor,
         "finance.admin",
-        "UPDATE",
+        scopedAction,
         "vendor-bills",
         id,
       );
@@ -1093,14 +1406,6 @@ export class FinanceWorkbenchService {
     const tenant = this.tenant(actor);
     return withTenant(this.app.db, tenant, async (tx) => {
       await this.assertInternal(tx, actor);
-      const replay = await this.replay(
-        tx,
-        actor,
-        `payment-runs:${id}:action`,
-        idempotencyKey,
-        input,
-      );
-      if (replay.prior) return replay.prior;
       const billIds = await tx.$queryRawUnsafe<Array<{ id: string }>>(
         `SELECT DISTINCT vendor_bill_id AS id FROM app.payment_allocations WHERE tenant_id=$1::uuid AND payment_batch_id=$2::uuid`,
         tenant,
@@ -1113,10 +1418,20 @@ export class FinanceWorkbenchService {
           tx,
           actor,
           "finance.admin",
-          "UPDATE",
+          ["APPROVE", "MARK_PAID", "REVERSE"].includes(input.action)
+            ? "APPROVE"
+            : "UPDATE",
           "vendor-bills",
           bill.id,
         );
+      const replay = await this.replay(
+        tx,
+        actor,
+        `payment-runs:${id}:action`,
+        idempotencyKey,
+        input,
+      );
+      if (replay.prior) return replay.prior;
       const before = (
         await tx.$queryRawUnsafe<Row[]>(
           `SELECT * FROM app.payment_batches WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`,
@@ -1217,11 +1532,31 @@ export type CreateInvoice = {
   }>;
 };
 export type InvoiceAction = {
-  action: "SUBMIT" | "APPROVE" | "POST" | "ACKNOWLEDGE" | "REVERSE";
+  action: "SUBMIT" | "APPROVE" | "REJECT" | "POST" | "ACKNOWLEDGE" | "REVERSE";
   expectedVersion: number;
   acknowledgedAt?: string;
   reversalInvoiceNo?: string;
   reason?: string;
+};
+export type UpdateInvoice = {
+  expectedVersion: number;
+  invoiceNo: string;
+  invoiceDate: string;
+  creditDays: number;
+};
+export type InvoiceNote = {
+  noteType: "CREDIT_NOTE" | "DEBIT_NOTE";
+  amountMinor: string;
+  reason: string;
+};
+export type CreateReceipt = {
+  receiptRef: string;
+  clientId: string;
+  paymentDate: string;
+  amountMinor: string;
+  mode: "NEFT" | "RTGS" | "IMPS" | "CHEQUE" | "UPI" | "ADJUSTMENT";
+  instrumentNo: string;
+  bankReference?: string;
 };
 export type FollowUp = {
   outcome: string;

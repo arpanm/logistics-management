@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type { SessionActor } from "@logistics/auth";
 import {
@@ -23,6 +23,9 @@ const digest = (value: unknown) =>
   createHash("sha256")
     .update(JSON.stringify(toJsonSafe(value)))
     .digest("hex");
+const shaText = (value: string) =>
+  createHash("sha256").update(value).digest("hex");
+const opaqueToken = () => randomBytes(32).toString("base64url");
 const activeAlertRecipientSql = `(SELECT EXISTS(
   SELECT 1 FROM app.tenant_memberships m
   WHERE m.tenant_id=r.tenant_id AND m.status='ACTIVE' AND (
@@ -1088,6 +1091,7 @@ export class Mst01Service {
       homeNodeId: string;
       regionIds: string[];
       linkedMembershipId?: string | null;
+      accessInvitation?: { email?: string; mobile?: string };
     },
     selfId?: string,
   ) {
@@ -1171,7 +1175,8 @@ export class Mst01Service {
       if (
         !(
           await tx.$queryRawUnsafe<Row[]>(
-            `SELECT id FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND id=$2::uuid AND status='ACTIVE'`,
+            `SELECT id FROM app.tenant_memberships membership
+             WHERE tenant_id=$1::uuid AND id=$2::uuid AND status='ACTIVE' AND portal_audience='INTERNAL'`,
             this.tenant(actor),
             input.linkedMembershipId,
           )
@@ -1181,6 +1186,22 @@ export class Mst01Service {
           404,
           "RESOURCE_NOT_FOUND",
           "Linked membership not found",
+        );
+      const linked = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `SELECT EXISTS(SELECT 1 FROM app.employees
+             WHERE tenant_id=$1::uuid AND linked_membership_id=$2::uuid
+               AND ($3::uuid IS NULL OR id<>$3::uuid)) linked`,
+          this.tenant(actor),
+          input.linkedMembershipId,
+          selfId ?? null,
+        )
+      )[0];
+      if (bool(linked?.linked) && input.linkedMembershipId)
+        throw new AppError(
+          409,
+          "MEMBERSHIP_EMPLOYEE_ALREADY_LINKED",
+          "This internal user already has an employee master",
         );
     }
   }
@@ -1287,6 +1308,232 @@ export class Mst01Service {
     );
   }
 
+  private async inviteEmployeeAccess(
+    tx: Tx,
+    actor: SessionActor,
+    tenant: string,
+    input: {
+      employeeCode: string;
+      displayName: string;
+      email?: string | null;
+      mobile?: string | null;
+      accessInvitation: {
+        email?: string;
+        mobile?: string;
+        assignments: Array<{
+          roleId: string;
+          grants: Array<{ scopeNodeId: string; actions: string[] }>;
+        }>;
+        expiresInHours: number;
+        reason: string;
+      };
+    },
+    correlation: string,
+  ) {
+    const invitation = input.accessInvitation;
+    const email = invitation.email ?? input.email ?? undefined;
+    const mobile = invitation.mobile ?? input.mobile ?? undefined;
+    if (!email && !mobile)
+      throw new AppError(
+        400,
+        "INVITATION_DESTINATION_REQUIRED",
+        "Email or mobile is required to invite employee access",
+      );
+    await tx.$executeRawUnsafe(
+      `SELECT set_config('app.actor_user_id',$1,true),set_config('app.correlation_id',$2,true),pg_advisory_xact_lock(hashtextextended($3,0))`,
+      actor.userId,
+      correlation,
+      `${tenant}:employee-access:${email ?? mobile}`,
+    );
+    if (
+      (
+        await tx.$queryRawUnsafe<Row[]>(
+          `SELECT id FROM app.tenant_memberships
+           WHERE tenant_id=$1::uuid AND (employee_code=$2 OR
+             ($3::text IS NOT NULL AND lower(invited_email)=lower($3)) OR
+             ($4::text IS NOT NULL AND invited_mobile=$4)) LIMIT 1`,
+          tenant,
+          input.employeeCode,
+          email ?? null,
+          mobile ?? null,
+        )
+      )[0]
+    )
+      throw new AppError(
+        409,
+        "IDENTITY_ALREADY_MEMBER",
+        "Employee code or invitation destination already belongs to this tenant",
+      );
+    const employeeLinkConflict = (
+      await tx.$queryRawUnsafe<Row[]>(
+        `SELECT id FROM app.employees employee
+         WHERE employee.tenant_id=$1::uuid AND (
+           ((($3::text IS NOT NULL AND employee.email IS NOT NULL AND lower(trim(employee.email))=lower(trim($3))) OR
+             ($4::text IS NOT NULL AND employee.mobile IS NOT NULL AND regexp_replace(employee.mobile,'[^0-9+]','','g')=regexp_replace($4,'[^0-9+]','','g')))
+             AND employee.employee_code<>$2)
+           OR (employee.employee_code=$2 AND (
+             employee.state<>'ACTIVE' OR employee.linked_membership_id IS NOT NULL OR
+             ($3::text IS NOT NULL AND (employee.email IS NULL OR lower(trim(employee.email))<>lower(trim($3)))) OR
+             ($4::text IS NOT NULL AND (employee.mobile IS NULL OR regexp_replace(employee.mobile,'[^0-9+]','','g')<>regexp_replace($4,'[^0-9+]','','g')))
+           ))
+         ) ORDER BY employee.id LIMIT 1 FOR UPDATE`,
+        tenant,
+        input.employeeCode,
+        email ?? null,
+        mobile ?? null,
+      )
+    )[0];
+    if (employeeLinkConflict)
+      throw new AppError(
+        409,
+        "EMPLOYEE_LINK_CONFIRMATION_REQUIRED",
+        "Employee code or invitation destination conflicts with an existing Employee; reconcile the Employee identity before inviting access",
+      );
+    const roleIds = [...new Set(invitation.assignments.map((a) => a.roleId))];
+    const roles = await tx.$queryRawUnsafe<Row[]>(
+      `SELECT id,protected FROM app.roles
+       WHERE tenant_id=$1::uuid AND id=ANY($2::uuid[]) AND status='ACTIVE'
+         AND 'INTERNAL'=ANY(portal_audiences)`,
+      tenant,
+      roleIds,
+    );
+    if (roles.length !== roleIds.length)
+      throw new AppError(
+        400,
+        "ROLE_INVALID",
+        "Select active roles compatible with internal users",
+      );
+    if (roles.some((role) => bool(role.protected))) {
+      const owner = bool(
+        (
+          await tx.$queryRawUnsafe<Row[]>(
+            `SELECT EXISTS(
+               SELECT 1 FROM app.membership_role_assignments assignment
+               JOIN app.roles role ON role.tenant_id=assignment.tenant_id AND role.id=assignment.role_id
+               WHERE assignment.tenant_id=$1::uuid AND assignment.membership_id=$2::uuid
+                 AND assignment.status='ACTIVE' AND role.status='ACTIVE' AND role.code='TENANT_OWNER'
+             ) allowed`,
+            tenant,
+            actor.membershipId,
+          )
+        )[0]?.allowed,
+      );
+      if (!owner)
+        throw new AppError(
+          403,
+          "DELEGATION_DENIED",
+          "Only a Tenant Owner may delegate a protected role",
+        );
+    }
+    for (const assignment of invitation.assignments)
+      for (const grant of assignment.grants) {
+        const scope = (
+          await tx.$queryRawUnsafe<Row[]>(
+            `SELECT id FROM app.authorization_scope_nodes
+             WHERE tenant_id=$1::uuid AND id=$2::uuid AND status='ACTIVE'`,
+            tenant,
+            grant.scopeNodeId,
+          )
+        )[0];
+        if (!scope)
+          throw new AppError(400, "SCOPE_INVALID", "Access scope is invalid");
+        await this.scopeCapability(
+          tx,
+          actor,
+          "identity.user.admin",
+          "ADMIN",
+          grant.scopeNodeId,
+        );
+      }
+    const membership = (
+      await tx.$queryRawUnsafe<Row[]>(
+        `INSERT INTO app.tenant_memberships(
+           tenant_id,invited_email,invited_mobile,invited_name,employee_code,role,portal_audience,status
+         ) VALUES($1::uuid,$2,$3,$4,$5,null,'INTERNAL','INVITED') RETURNING id,version`,
+        tenant,
+        email ?? null,
+        mobile ?? null,
+        input.displayName,
+        input.employeeCode,
+      )
+    )[0]!;
+    for (const assignment of invitation.assignments) {
+      const assignmentRow = (
+        await tx.$queryRawUnsafe<Row[]>(
+          `INSERT INTO app.membership_role_assignments(tenant_id,membership_id,role_id)
+           VALUES($1::uuid,$2::uuid,$3::uuid) RETURNING id`,
+          tenant,
+          membership.id,
+          assignment.roleId,
+        )
+      )[0]!;
+      for (const grant of assignment.grants)
+        for (const action of [...new Set(grant.actions)])
+          await tx.$executeRawUnsafe(
+            `INSERT INTO app.scope_grants(tenant_id,assignment_id,scope_node_id,action)
+             VALUES($1::uuid,$2::uuid,$3::uuid,$4)`,
+            tenant,
+            assignmentRow.id,
+            grant.scopeNodeId,
+            action,
+          );
+    }
+    const plainToken = opaqueToken();
+    const destination = email ?? mobile!;
+    const masked = email
+      ? `${email.slice(0, 1)}***@${email.split("@")[1] ?? "hidden"}`
+      : `+••••••${mobile?.slice(-2) ?? ""}`;
+    const accessInvite = (
+      await tx.$queryRawUnsafe<Row[]>(
+        `INSERT INTO app.access_invitations(
+           tenant_id,membership_id,destination_hash,masked_destination,token_hash,expires_at,delivery_state
+         ) VALUES($1::uuid,$2::uuid,$3,$4,$5,now()+($6||' hours')::interval,'PENDING')
+         RETURNING id,expires_at AS "expiresAt"`,
+        tenant,
+        membership.id,
+        shaText(destination),
+        masked,
+        shaText(plainToken),
+        String(invitation.expiresInHours),
+      )
+    )[0]!;
+    await tx.$executeRawUnsafe(
+      `INSERT INTO app.outbox_events(
+         tenant_id,scope,aggregate_type,aggregate_id,event_type,payload,deduplication_key
+       ) VALUES($1::uuid,'TENANT','access_invitation',$2::uuid,'identity.invitation.requested.v1',$3::jsonb,$4)`,
+      tenant,
+      accessInvite.id,
+      JSON.stringify({
+        invitationId: accessInvite.id,
+        maskedDestination: masked,
+        expiresAt: accessInvite.expiresAt,
+      }),
+      `access-invitation:${accessInvite.id}:v1`,
+    );
+    await this.audit(
+      tx,
+      actor,
+      "identity.invitation.created",
+      "membership",
+      String(membership.id),
+      correlation,
+      undefined,
+      { maskedDestination: masked, source: "EMPLOYEE_CREATE" },
+      invitation.reason,
+    );
+    return {
+      membershipId: String(membership.id),
+      invitationId: String(accessInvite.id),
+      maskedDestination: masked,
+      expiresAt: accessInvite.expiresAt,
+      ...(this.app.config.ENABLE_TEST_HOOKS === "true"
+        ? {
+            invitationUrl: `${this.app.config.FRONTEND_URL}/accept-access?token=${plainToken}`,
+          }
+        : {}),
+    };
+  }
+
   async createEmployee(
     actor: SessionActor,
     raw: unknown,
@@ -1299,7 +1546,12 @@ export class Mst01Service {
       await this.graphLock(tx, tenant, "employees");
       await this.capability(tx, actor, "masters.admin", "CREATE");
       await this.employeeReferences(tx, actor, input);
-      if (input.email || input.mobile) {
+      if (
+        input.email ||
+        input.mobile ||
+        input.accessInvitation?.email ||
+        input.accessInvitation?.mobile
+      ) {
         const home = (
           await tx.$queryRawUnsafe<Row[]>(
             `SELECT authorization_scope_node_id FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid`,
@@ -1322,32 +1574,68 @@ export class Mst01Service {
         key,
         input,
         async () => {
-          const row = (
-            await tx.$queryRawUnsafe<Row[]>(
-              `INSERT INTO app.employees(tenant_id,employee_code,display_name,designation,email,mobile,manager_id,home_node_id,linked_membership_id,active_from,active_to,created_by) VALUES($1::uuid,$2,$3,$4,$5,$6,$7::uuid,$8::uuid,$9::uuid,$10::date,$11::date,$12::uuid) RETURNING *`,
-              tenant,
-              input.employeeCode,
-              input.displayName,
-              input.designation,
-              input.email ?? null,
-              input.mobile ?? null,
-              input.managerId ?? null,
-              input.homeNodeId,
-              input.linkedMembershipId ?? null,
-              input.activeFrom,
-              input.activeTo ?? null,
-              actor.userId,
-            )
-          )[0]!;
+          const access = input.accessInvitation
+            ? await this.inviteEmployeeAccess(
+                tx,
+                actor,
+                tenant,
+                {
+                  employeeCode: input.employeeCode,
+                  displayName: input.displayName,
+                  email: input.email,
+                  mobile: input.mobile,
+                  accessInvitation: input.accessInvitation,
+                },
+                correlation,
+              )
+            : undefined;
+          const row = access
+            ? (
+                await tx.$queryRawUnsafe<Row[]>(
+                  `UPDATE app.employees SET
+                     display_name=$1,designation=$2,email=$3,mobile=$4,manager_id=$5::uuid,
+                     home_node_id=$6::uuid,active_from=$7::date,active_to=$8::date,
+                     updated_at=now(),version=version+1
+                   WHERE tenant_id=$9::uuid AND linked_membership_id=$10::uuid
+                   RETURNING *`,
+                  input.displayName,
+                  input.designation,
+                  input.email ?? input.accessInvitation?.email ?? null,
+                  input.mobile ?? input.accessInvitation?.mobile ?? null,
+                  input.managerId ?? null,
+                  input.homeNodeId,
+                  input.activeFrom,
+                  input.activeTo ?? null,
+                  tenant,
+                  access.membershipId,
+                )
+              )[0]!
+            : (
+                await tx.$queryRawUnsafe<Row[]>(
+                  `INSERT INTO app.employees(tenant_id,employee_code,display_name,designation,email,mobile,manager_id,home_node_id,linked_membership_id,active_from,active_to,created_by) VALUES($1::uuid,$2,$3,$4,$5,$6,$7::uuid,$8::uuid,$9::uuid,$10::date,$11::date,$12::uuid) RETURNING *`,
+                  tenant,
+                  input.employeeCode,
+                  input.displayName,
+                  input.designation,
+                  input.email ?? null,
+                  input.mobile ?? null,
+                  input.managerId ?? null,
+                  input.homeNodeId,
+                  input.linkedMembershipId ?? null,
+                  input.activeFrom,
+                  input.activeTo ?? null,
+                  actor.userId,
+                )
+              )[0]!;
           await this.saveRegions(tx, tenant, String(row.id), input.regionIds);
           await this.provisionManagedEmployeeGrants(
             tx,
             tenant,
             String(row.id),
-            input.linkedMembershipId ?? null,
+            access?.membershipId ?? input.linkedMembershipId ?? null,
           );
           await this.bumpMembershipAuthorization(tx, tenant, [
-            input.linkedMembershipId,
+            access?.membershipId ?? input.linkedMembershipId,
           ]);
           const snapshot = await this.employeeSnapshot(
             tx,
@@ -1372,7 +1660,7 @@ export class Mst01Service {
             "employee.created",
             snapshot ?? row,
           );
-          return row;
+          return { ...row, ...(access ? { accessInvitation: access } : {}) };
         },
       );
     });
@@ -1646,6 +1934,32 @@ export class Mst01Service {
               input.expectedVersion,
             )
           )[0]!;
+          if (merged.linkedMembershipId)
+            await tx.$executeRawUnsafe(
+              `UPDATE app.tenant_memberships SET
+                 employee_code=$1,invited_name=$2,
+                 invited_email=CASE WHEN $3 THEN $4 ELSE invited_email END,
+                 invited_mobile=CASE WHEN $5 THEN $6 ELSE invited_mobile END,
+                 updated_at=now(),version=version+1
+               WHERE tenant_id=$7::uuid AND id=$8::uuid`,
+              String(row.employee_code),
+              String(row.display_name),
+              Object.hasOwn(input, "email"),
+              input.email ?? null,
+              Object.hasOwn(input, "mobile"),
+              input.mobile ?? null,
+              tenant,
+              merged.linkedMembershipId,
+            );
+          const persistedRow = merged.linkedMembershipId
+            ? (
+                await tx.$queryRawUnsafe<Row[]>(
+                  `SELECT * FROM app.employees WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+                  tenant,
+                  id,
+                )
+              )[0]!
+            : row;
           if (
             input.homeNodeId ||
             input.regionIds ||
@@ -1696,7 +2010,7 @@ export class Mst01Service {
             "employee.updated",
             afterSnapshot ?? row,
           );
-          return row;
+          return persistedRow;
         },
       );
     });

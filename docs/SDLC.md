@@ -13,7 +13,8 @@ flowchart LR
     I --> T["Author/update automated tests: Not Run"]
     T --> R["One integrated batch review"]
     R --> S["Synchronize trackers and docs once"]
-    S --> G["One lightweight commit gate"]
+    S --> L["Refresh running local artifacts once"]
+    L --> G["One lightweight commit gate"]
     G --> C["Optional batch commit"]
     C -. "explicit request only" .-> X["Deploy/test once; record pass/fail"]
 ```
@@ -26,7 +27,7 @@ The default agents are implementation workers and one batch reviewer. Add a spec
 2. Inspect the working tree and list included feature/TODO IDs.
 3. Record compact acceptance notes: outcome, critical rules, dependencies, affected interfaces, and planned automated tests. Reuse existing specs instead of creating ceremony-only documents.
 4. Implement migrations, backend, frontend, authorization, audit, affected reporting/events, documentation, and automated tests together.
-5. Do not run tests, deploy, run Playwright, or invoke `make check`/`make verify` automatically per feature. Mark changed tests `Implemented / Not Run`.
+5. Do not run tests, Playwright, or `make check`/`make verify` automatically per feature. Mark changed tests `Implemented / Not Run`. When repository-owned local services are already running in production-style mode, run `make refresh-local` once after the batch so migrations and all package/app artifacts are rebuilt and restarted without reseeding. `make dev` remains the hot-reload alternative.
 6. Review the integrated batch once. Resolve clear blocking findings together without automatically testing after each fix.
 7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case lists, and documentation once.
 8. When a commit is requested, run formatting, type checking, and policy/status checks once for the batch; inspect the cached diff and create one related Conventional Commit.

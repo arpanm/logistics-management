@@ -205,4 +205,28 @@ describe("BUG-GAP-006/007/008 canonical scope security", () => {
     expect(frontend).toContain("amountMinor: command.amountMinor");
     expect(frontend).not.toContain("amountMinor: Number(command.amountMinor)");
   });
+
+  it("authorizes and locks an allocatable same-client invoice before receipt-ledger mutation", () => {
+    const canonical = readFileSync(
+      new URL("../src/modules/canonical/canonical.service.ts", import.meta.url),
+      "utf8",
+    );
+    const allocation = canonical.slice(
+      canonical.indexOf("async allocateReceipt("),
+      canonical.indexOf("async assignAllocation("),
+    );
+    expect(allocation).toContain('"APPROVE",\n              "invoices"');
+    expect(allocation).toContain("app.domain_resource_authorized");
+    expect(allocation).toContain("'finance.admin','APPROVE','invoices'");
+    expect(allocation).toContain("FOR UPDATE");
+    expect(allocation).toContain("RECEIPT_CLIENT_MISMATCH");
+    expect(allocation).toContain("INVOICE_NOT_ALLOCATABLE");
+    expect(allocation).toContain('["POSTED", "SUBMITTED"]');
+    expect(allocation.indexOf("RECEIPT_CLIENT_MISMATCH")).toBeLessThan(
+      allocation.indexOf("INSERT INTO app.receipt_ledger_entries"),
+    );
+    expect(allocation.indexOf("INVOICE_NOT_ALLOCATABLE")).toBeLessThan(
+      allocation.indexOf("INSERT INTO app.receipt_ledger_entries"),
+    );
+  });
 });

@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page } from "@playwright/test";
+import { api } from "../fixtures/fnd01";
 import {
   accessApi,
   actorPage,
@@ -53,7 +54,7 @@ async function operationPreview(
   return body(response);
 }
 
-test("E2E-FND02-01: invitation validation, identity verification, MFA, and role home", async ({
+test("E2E-FND02-01: invitation validation, employee linkage, identity verification, MFA, and role home", async ({
   browser,
   page,
 }, testInfo) => {
@@ -95,6 +96,20 @@ test("E2E-FND02-01: invitation validation, identity verification, MFA, and role 
     actions: ["READ", "CREATE", "UPDATE", "EXPORT"],
   });
   expect(invited.response.status(), await invited.response.text()).toBe(201);
+  const linkedEmployees = (await (
+    await api(
+      owner,
+      `/domain/masters/employees?query=${encodeURIComponent(`RM-${suffix}`)}`,
+    )
+  ).json()) as {
+    items: Array<{ employeeCode: string; linkedMembershipId?: string }>;
+  };
+  expect(linkedEmployees.items).toEqual([
+    expect.objectContaining({
+      employeeCode: `RM-${suffix}`.toUpperCase(),
+      linkedMembershipId: invited.body.membershipId,
+    }),
+  ]);
   const pendingCard = owner
     .locator("article.access-card")
     .filter({ hasText: `RM-${suffix}`.toUpperCase() });

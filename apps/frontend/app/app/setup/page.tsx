@@ -3,6 +3,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { Shell } from "../../../components/shell";
 import { api, ApiError } from "../../../components/api";
+import { FormSubmitResult } from "../../../components/forms/form-submit-result";
 type Context = {
   tenant: {
     id: string;
@@ -281,9 +282,11 @@ export default function Setup() {
                   Note
                   <textarea name="note" maxLength={2000} />
                 </label>
-                <button className="primary" disabled={busy}>
-                  {busy ? "Saving…" : "Add isolated record"}
-                </button>
+                <FormSubmitResult error={error} success={notice} busy={busy}>
+                  <button className="primary" disabled={busy}>
+                    {busy ? "Saving…" : "Add isolated record"}
+                  </button>
+                </FormSubmitResult>
               </form>
               <div className="probe-list">
                 {probes.length === 0 ? (

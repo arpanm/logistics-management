@@ -276,19 +276,89 @@ const employeeMasterBaseSchema = z
     homeNodeId: uuid,
     regionIds: z.array(uuid).max(100).default([]),
     linkedMembershipId: uuid.nullish(),
+    accessInvitation: z
+      .object({
+        email: z.string().trim().toLowerCase().email().max(254).optional(),
+        mobile: e164MobileSchema.optional(),
+        assignments: z
+          .array(
+            z
+              .object({
+                roleId: uuid,
+                grants: z
+                  .array(
+                    z
+                      .object({
+                        scopeNodeId: uuid,
+                        actions: z
+                          .array(
+                            z.enum([
+                              "READ",
+                              "CREATE",
+                              "UPDATE",
+                              "APPROVE",
+                              "EXPORT",
+                              "ADMIN",
+                            ]),
+                          )
+                          .min(1),
+                      })
+                      .strict(),
+                  )
+                  .min(1),
+              })
+              .strict(),
+          )
+          .min(1),
+        expiresInHours: z.number().int().min(1).max(720).default(72),
+        reason: z.string().trim().min(10).max(500),
+      })
+      .strict()
+      .refine((value) => Boolean(value.email || value.mobile), {
+        path: ["email"],
+        message: "Email or mobile is required",
+      })
+      .optional(),
     activeFrom: isoDate,
     activeTo: isoDate.nullish(),
   })
   .strict();
-export const employeeMasterCreateSchema = employeeMasterBaseSchema.refine(
-  (value) => !value.activeTo || value.activeTo >= value.activeFrom,
-  {
+export const employeeMasterCreateSchema = employeeMasterBaseSchema
+  .refine((value) => !value.activeTo || value.activeTo >= value.activeFrom, {
     path: ["activeTo"],
     message: "Active end must not precede start",
-  },
-);
+  })
+  .superRefine((value, context) => {
+    if (value.linkedMembershipId && value.accessInvitation)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accessInvitation"],
+        message: "Choose an existing membership or invite access, not both",
+      });
+    if (
+      value.accessInvitation?.email &&
+      value.email &&
+      value.accessInvitation.email !== value.email
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accessInvitation", "email"],
+        message: "Invitation email must match the employee email",
+      });
+    if (
+      value.accessInvitation?.mobile &&
+      value.mobile &&
+      value.accessInvitation.mobile !== value.mobile
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["accessInvitation", "mobile"],
+        message: "Invitation mobile must match the employee mobile",
+      });
+  });
 
 export const employeeMasterPatchSchema = employeeMasterBaseSchema
+  .omit({ accessInvitation: true })
   .partial()
   .extend({
     expectedVersion: z.number().int().positive(),

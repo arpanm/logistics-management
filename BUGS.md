@@ -38,8 +38,24 @@ This register began with the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`
 | BUG-GAP-018 | E2E-GOV01-01                | GOV-01        | Product routing        | P1 / High     | Policy URL renders the governed-evidence workspace, so policy create/edit fields are absent      | Resolved |
 | BUG-GAP-019 | Five UI cases × 2 viewports | FND-01/FND-02 | Test maintenance       | P2 / Medium   | Regression tests targeted superseded submit, invitation, permission-preview, and report controls | Resolved |
 | BUG-GAP-020 | FND02-AUTH-REC-\*           | FND-02        | Product authentication | P1 / High     | Activated users had no discoverable repeat-login guidance or password-recovery path              | Resolved |
+| BUG-OPS-021 | OPS-WB-11                   | OPS-02        | Product API            | P1 / High     | Auto-allocation register SQL closed an authorization group that had never been opened             | Resolved |
+| BUG-MST-022 | MST02-CONTRACT-SEARCH-I-001 | MST-02        | Product API            | P1 / High     | Contract-version search selected lifecycle state from a version table that has no state column    | Resolved |
 
 ## Detailed RCA
+
+### BUG-MST-022 — Contract-version search returned HTTP 500
+
+- **Observed:** `GET /api/v1/domain/commands/contracts/versions?search=...` returned `INTERNAL_ERROR`, blocking the searchable Contract version reference and therefore lane creation.
+- **RCA:** The query projected `v.state` from `app.contract_versions`; lifecycle state is stored on the joined parent `app.contracts` row.
+- **Resolution:** The projection now uses `c.state` while preserving tenant filtering and per-contract resource authorization. Focused integration passed `3/3`; the no-mock Chromium lane journey passed `1/1`, proving the searched version is selectable and lane creation returns `201`. Mobile and full regression were not run in this focused fix.
+- **Status:** Resolved locally.
+
+### BUG-OPS-021 — Auto-allocation rule register returned HTTP 500
+
+- **Observed:** `GET /api/v1/operations/auto-allocation-rules` returned `INTERNAL_ERROR`; PostgreSQL reported `42601 syntax error at or near ")"`.
+- **RCA:** The sensitive commercial-rate `CASE` expression closed an overall authorization group without opening it.
+- **Resolution:** The expression is now correctly grouped while retaining tenant, client, lane, vendor, and sensitive-rate authorization. `OPS-WB-11` is Implemented / Not Run; PostgreSQL successfully planned the complete corrected query with `EXPLAIN`.
+- **Status:** Resolved locally.
 
 ### BUG-GAP-018 — Governance policy route does not expose policy administration
 

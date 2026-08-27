@@ -1064,7 +1064,7 @@ export class AdvancedDomainService {
     return this.safeTenant(tenant, async (tx) => {
       await this.access(tx, actor, "masters.read", "READ");
       const items = await tx.$queryRawUnsafe<Row[]>(
-        `SELECT v.id,c.code||' · version '||v.version::text AS name,c.code,v.version,v.state
+        `SELECT v.id,c.code||' · version '||v.version::text AS name,c.code,v.version,c.state
          FROM app.contract_versions v JOIN app.contracts c ON c.tenant_id=v.tenant_id AND c.id=v.contract_id
          WHERE v.tenant_id=$1::uuid AND app.domain_resource_authorized($1::uuid,$3::uuid,$4::uuid,'masters.read','READ','contracts',c.id)
          AND ($2='' OR c.code ILIKE '%'||$2||'%' OR c.name ILIKE '%'||$2||'%')

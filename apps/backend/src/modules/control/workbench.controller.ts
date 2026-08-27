@@ -52,6 +52,12 @@ export class ControlWorkbenchController {
           code: "VALIDATION_FAILED",
           message: "Check the highlighted fields",
           correlationId,
+          fields: Object.fromEntries(
+            error.issues.map((issue) => [
+              issue.path.join(".") || "request",
+              [issue.message],
+            ]),
+          ),
         });
       if (error instanceof AppError)
         return res
@@ -67,6 +73,11 @@ export class ControlWorkbenchController {
         correlationId,
       });
     }
+  }
+  @Get("access") access(@Req() req: Request, @Res() res: Response) {
+    return this.run(req, res, async () =>
+      this.service.access(await this.actor(req)),
+    );
   }
   @Get(":lens") dashboard(
     @Param("lens") lens: string,

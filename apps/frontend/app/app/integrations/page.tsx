@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Shell } from "../../../components/shell";
 import { api, type ApiError } from "../../../components/api";
+import { FormSubmitResult } from "../../../components/forms/form-submit-result";
 type Endpoint = {
   id: string;
   code: string;
@@ -48,6 +49,7 @@ export default function IntegrationsPage() {
     [dead, setDead] = useState<Dead[]>([]),
     [accounting, setAccounting] = useState<Accounting[]>([]),
     [error, setError] = useState<ApiError | null>(null),
+    [notice, setNotice] = useState(""),
     [secret, setSecret] = useState("");
   const load = () =>
     Promise.all([
@@ -71,6 +73,8 @@ export default function IntegrationsPage() {
     event.preventDefault();
     const form = event.currentTarget;
     const f = new FormData(form);
+    setError(null);
+    setNotice("");
     try {
       await api("/tenant/integrations", {
         method: "POST",
@@ -89,7 +93,7 @@ export default function IntegrationsPage() {
       });
       form.reset();
       await load();
-      setTab("health");
+      setNotice("Integration registered.");
     } catch (value) {
       setError(value as ApiError);
     }
@@ -306,7 +310,9 @@ export default function IntegrationsPage() {
                 placeholder="secret-store reference only"
               />
             </label>
-            <button className="primary">Create integration</button>
+            <FormSubmitResult error={error} success={notice}>
+              <button className="primary">Create integration</button>
+            </FormSubmitResult>
           </form>
         </section>
       )}
@@ -340,7 +346,14 @@ export default function IntegrationsPage() {
                 placeholder="indent.created.v1, trip.event.v1"
               />
             </label>
-            <button className="primary">Create credential</button>
+            <FormSubmitResult
+              error={error}
+              success={
+                secret ? "Credential created. Copy the secret now." : notice
+              }
+            >
+              <button className="primary">Create credential</button>
+            </FormSubmitResult>
           </form>
         </section>
       )}

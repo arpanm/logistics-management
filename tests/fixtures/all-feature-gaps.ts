@@ -198,7 +198,6 @@ export function createMasterGraph(world: GapWorld): Promise<MasterGraph> {
       displayName: `Manager ${world.suffix}`,
       email: `manager-${world.suffix.toLowerCase()}@test.local`,
       homeNodeId: branch.id,
-      linkedMembershipId: world.owner.membershipId,
       activeFrom: "2026-01-01",
     });
     const client = await createResource(world.page, "clients", {

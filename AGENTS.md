@@ -23,7 +23,7 @@ Use `spec_analyst`, `test_designer`, or `e2e_tester` only when the user explicit
 2. Add or update lightweight acceptance notes in existing feature specs. Create a full spec/test plan only for material ambiguity, high-risk authorization/financial behavior, or an explicit user request.
 3. Implement the batch end to end: migrations, domain logic, API, authorization, UI, audit/telemetry, affected reports/events, documentation, and automated test cases.
 4. Author or update focused unit, integration, contract, security, migration, and Playwright cases as applicable, but mark newly added or changed cases `Implemented / Not Run` until an explicit test phase executes them.
-5. Do not automatically run tests, deploy locally, invoke Playwright, run `make check`, or run `make verify` for each feature. Do not enter fix/retest loops unless the user asks.
+5. Do not automatically run tests, invoke Playwright, run `make check`, or run `make verify` for each feature. If repository-owned local frontend/backend services are already running, finish the implementation batch with one `make refresh-local` so the user never receives stale UI/API artifacts; this migrates/builds/restarts without reseeding and is not a test run. If no local services are running, leave deployment explicit. Do not enter fix/retest loops unless the user asks.
 6. Review the combined batch once. Fix clear code-review blockers together without automatically running tests afterward.
 7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case lists, and documentation once for the batch. Implementation and test status must remain distinct.
 8. When the user explicitly requests a batch/release test phase, deploy once if needed, run the selected focused suites or full regression once, and record each result as Passing, Failing, or Blocked. Do not automatically fix or rerun failures; add them to the bug/TODO list with evidence unless asked to fix.
@@ -39,7 +39,7 @@ A feature may be implementation-complete before its tests have been executed. Ke
 - UI is accessible, responsive, and handles loading, empty, error, and retry states.
 - Domain calculations have exact boundary tests and use exact decimal/timezone-safe handling.
 - Relevant reports reconcile with transaction detail.
-- Local deployment and Playwright results are not prerequisites for `Implemented`; they are executed only in an explicit batch/release test phase.
+- A full deployment/Playwright result is not a prerequisite for `Implemented`. When repository-owned local services are already running, `make refresh-local` is nevertheless required before handoff to keep runtime artifacts aligned; record only build/readiness evidence, not test Passing.
 - No secrets, backup source artifacts, generated test output, or unrelated changes enter the commit.
 - A batch review has no unresolved blocking code finding.
 - Feature/test statuses, README summary, TODO queue, specs, and executable test-case status are mutually consistent. `Implemented / Not Run` is valid and must never be reported as Passing.
@@ -78,6 +78,7 @@ make policy-check
 make postgres-status
 make check
 make deploy-local
+make refresh-local
 make e2e
 make verify
 ```

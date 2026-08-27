@@ -1117,6 +1117,11 @@ export class AccessService {
   ) {
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT set_config('app.actor_user_id',$1,true),set_config('app.correlation_id',$2,true)`,
+        actor.userId,
+        correlationId,
+      );
       await this.authorizeRoot(
         tx,
         actor,
@@ -1147,6 +1152,33 @@ export class AccessService {
               "IDENTITY_ALREADY_MEMBER",
               "This identity already has tenant access",
             );
+          if (input.portalAudience === "INTERNAL") {
+            const employeeLinkConflict = (
+              await tx.$queryRawUnsafe<Array<Row>>(
+                `SELECT id FROM app.employees employee
+                 WHERE employee.tenant_id=$1::uuid AND (
+                   (($3::text IS NOT NULL AND employee.email IS NOT NULL AND lower(trim(employee.email))=lower(trim($3))) OR
+                    ($4::text IS NOT NULL AND employee.mobile IS NOT NULL AND regexp_replace(employee.mobile,'[^0-9+]','','g')=regexp_replace($4,'[^0-9+]','','g')))
+                     AND employee.employee_code<>$2
+                   OR employee.employee_code=$2 AND (
+                     employee.state<>'ACTIVE' OR employee.linked_membership_id IS NOT NULL OR
+                     ($3::text IS NOT NULL AND (employee.email IS NULL OR lower(trim(employee.email))<>lower(trim($3)))) OR
+                     ($4::text IS NOT NULL AND (employee.mobile IS NULL OR regexp_replace(employee.mobile,'[^0-9+]','','g')<>regexp_replace($4,'[^0-9+]','','g')))
+                   )
+                 ) ORDER BY employee.id LIMIT 1 FOR UPDATE`,
+                tenantId,
+                input.employeeCode,
+                input.email ?? null,
+                input.mobile ?? null,
+              )
+            )[0];
+            if (employeeLinkConflict)
+              throw new AppError(
+                409,
+                "EMPLOYEE_LINK_CONFIRMATION_REQUIRED",
+                "Employee code or invitation destination conflicts with an existing Employee; reconcile the Employee identity before inviting access",
+              );
+          }
           await this.validateAssignments(
             tx,
             tenantId,

@@ -37,7 +37,12 @@ test("E2E-RAPID-FND02-01: filtered directory exposes editable profile, invitatio
   );
   await dialog.getByRole("button", { name: "Save profile" }).click();
   expect((await response).status()).toBe(200);
-  await expect(owner.getByRole("status")).toContainText("User profile updated");
+  await expect(dialog.getByRole("status")).toContainText(
+    "User profile updated",
+  );
+  await expect(dialog.getByLabel("Display name")).toHaveValue(
+    "Rapid Directory Owner",
+  );
   await ownerSession.context.close();
 });
 

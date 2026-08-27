@@ -307,7 +307,7 @@ describe.sequential(
       ).rejects.toThrow(/migration-managed/);
     });
 
-    it("FND02-I-001/FND02-I-002/FND02-C-001/FND02-C-002: invitation is normalized, idempotent, single-use, hashed and collision-safe", async () => {
+    it("FND02-I-001/FND02-I-002/FND02-C-001/FND02-C-002/FND02-LINK-I-001/FND02-LINK-I-003: invitation is normalized, idempotent, single-use, hashed, employee-linked and collision-safe", async () => {
       const payload = {
         displayName: "Regional User",
         employeeCode: "RM-001",
@@ -337,6 +337,27 @@ describe.sequential(
         "fnd02-invite",
       );
       regionalMembership = String(invited.membershipId);
+      const employeeLink = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{
+            employeeId: string;
+            employeeCode: string;
+            linkedMembershipId: string;
+          }>
+        >(
+          `SELECT e.id AS "employeeId",e.employee_code AS "employeeCode",e.linked_membership_id AS "linkedMembershipId"
+           FROM app.employees e
+           WHERE e.tenant_id=$1::uuid AND e.linked_membership_id=$2::uuid`,
+          tenantA,
+          regionalMembership,
+        ),
+      );
+      expect(employeeLink).toEqual([
+        expect.objectContaining({
+          employeeCode: payload.employeeCode,
+          linkedMembershipId: regionalMembership,
+        }),
+      ]);
       const inviteUrl = String(invited.invitationUrl);
       expect(inviteUrl).toContain("/accept-access?token=");
       const replay = await access.invite(
@@ -530,6 +551,208 @@ describe.sequential(
           "fnd02-existing-correct",
         ),
       ).resolves.toMatchObject({ activeTenantId: tenantB });
+    });
+
+    it("FND02-LINK-I-001/FND02-LINK-A-001 links one exact candidate and rejects mismatched, inactive, or ambiguous candidates without partial identity rows", async () => {
+      const homeNodeId = await withTenant(app.db, tenantA, async (tx) =>
+        String(
+          (
+            await tx.$queryRawUnsafe<Array<{ id: string }>>(
+              `SELECT id FROM app.organization_nodes
+               WHERE tenant_id=$1::uuid AND node_type='LEGAL_ENTITY' AND state='ACTIVE'
+               ORDER BY id LIMIT 1`,
+              tenantA,
+            )
+          )[0]!.id,
+        ),
+      );
+      const insertCandidate = (
+        code: string,
+        email: string,
+        state: "ACTIVE" | "INACTIVE" = "ACTIVE",
+      ) =>
+        withTenant(app.db, tenantA, (tx) =>
+          tx.$queryRawUnsafe<Array<{ id: string }>>(
+            `INSERT INTO app.employees(
+               tenant_id,employee_code,display_name,email,home_node_id,active_from,state,created_by
+             ) VALUES($1::uuid,$2,$2,$3,$4::uuid,current_date,$5,$6::uuid)
+             RETURNING id`,
+            tenantA,
+            code,
+            email,
+            homeNodeId,
+            state,
+            owner.userId,
+          ),
+        );
+      const invite = (code: string, email: string, suffix: string) =>
+        access.invite(
+          owner,
+          {
+            displayName: `Link candidate ${suffix}`,
+            employeeCode: code,
+            email,
+            authenticationMethod: "LOCAL_PASSWORD",
+            portalAudience: "INTERNAL",
+            assignments: [
+              {
+                roleId: regionalRole,
+                grants: [{ scopeNodeId: north, actions: ["READ"] }],
+              },
+            ],
+            expiresInHours: 72,
+            reason: "Validate the canonical employee linkage boundary",
+          },
+          `fnd02-link-${suffix}`,
+          `fnd02-link-${suffix}`,
+        );
+
+      await insertCandidate("LINK-WRONG-DST", "expected-link@test.local");
+      await expect(
+        invite("LINK-WRONG-DST", "different-link@test.local", "wrong-dst"),
+      ).rejects.toMatchObject({ code: "EMPLOYEE_LINK_CONFIRMATION_REQUIRED" });
+
+      await insertCandidate(
+        "LINK-INACTIVE",
+        "inactive-link@test.local",
+        "INACTIVE",
+      );
+      await expect(
+        invite("LINK-INACTIVE", "inactive-link@test.local", "inactive"),
+      ).rejects.toMatchObject({ code: "EMPLOYEE_LINK_CONFIRMATION_REQUIRED" });
+
+      await insertCandidate("LINK-OTHER-CODE", "wrong-code-link@test.local");
+      await expect(
+        invite("LINK-WRONG-CODE", "wrong-code-link@test.local", "wrong-code"),
+      ).rejects.toMatchObject({ code: "EMPLOYEE_LINK_CONFIRMATION_REQUIRED" });
+
+      await insertCandidate("LINK-AMB-A", "ambiguous-link@test.local");
+      await insertCandidate("LINK-AMB-B", "ambiguous-link@test.local");
+      await expect(
+        invite("LINK-AMB-NEW", "ambiguous-link@test.local", "ambiguous"),
+      ).rejects.toMatchObject({ code: "EMPLOYEE_LINK_CONFIRMATION_REQUIRED" });
+
+      const validCandidate = await insertCandidate(
+        "LINK-VALID",
+        "valid-link@test.local",
+      );
+      const validLink = await invite(
+        "LINK-VALID",
+        "valid-link@test.local",
+        "valid",
+      );
+      const validEvidence = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{ id: string; linkedMembershipId: string; count: number }>
+        >(
+          `SELECT min(id::text)::uuid id,min(linked_membership_id::text)::uuid AS "linkedMembershipId",count(*)::int count
+           FROM app.employees WHERE tenant_id=$1::uuid AND employee_code='LINK-VALID'`,
+          tenantA,
+        ),
+      );
+      expect(validEvidence).toEqual([
+        {
+          id: validCandidate[0]!.id,
+          linkedMembershipId: String(validLink.membershipId),
+          count: 1,
+        },
+      ]);
+
+      const evidence = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<Array<{ memberships: number; invitations: number }>>(
+          `SELECT
+             (SELECT count(*)::int FROM app.tenant_memberships
+              WHERE tenant_id=$1::uuid AND employee_code=ANY($2::text[])) memberships,
+             (SELECT count(*)::int FROM app.access_invitations invitation
+              JOIN app.tenant_memberships membership
+                ON membership.tenant_id=invitation.tenant_id AND membership.id=invitation.membership_id
+              WHERE membership.tenant_id=$1::uuid AND membership.employee_code=ANY($2::text[])) invitations`,
+          tenantA,
+          [
+            "LINK-WRONG-DST",
+            "LINK-INACTIVE",
+            "LINK-WRONG-CODE",
+            "LINK-AMB-NEW",
+          ],
+        ),
+      );
+      expect(evidence[0]).toEqual({ memberships: 0, invitations: 0 });
+    });
+
+    it("FND02-LINK-A-001 prevents reverse unlink while the membership remains INTERNAL", async () => {
+      await expect(
+        withTenant(app.db, tenantA, (tx) =>
+          tx.$executeRawUnsafe(
+            `UPDATE app.employees SET linked_membership_id=NULL
+             WHERE tenant_id=$1::uuid AND linked_membership_id=$2::uuid`,
+            tenantA,
+            regionalMembership,
+          ),
+        ),
+      ).rejects.toThrow(/internal membership.*employee|reverse link/i);
+      const link = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<Array<{ membershipId: string }>>(
+          `SELECT linked_membership_id AS "membershipId" FROM app.employees
+           WHERE tenant_id=$1::uuid AND linked_membership_id=$2::uuid`,
+          tenantA,
+          regionalMembership,
+        ),
+      );
+      expect(link).toEqual([{ membershipId: regionalMembership }]);
+    });
+
+    it("FND02-LINK-I-003 concurrent same-candidate invitations converge to one membership, employee, audit, and outbox", async () => {
+      const code = "LINK-CONCURRENT";
+      const email = "link-concurrent@test.local";
+      const payload = {
+        displayName: "Concurrent linked employee",
+        employeeCode: code,
+        email,
+        authenticationMethod: "LOCAL_PASSWORD" as const,
+        portalAudience: "INTERNAL" as const,
+        assignments: [
+          {
+            roleId: regionalRole,
+            grants: [{ scopeNodeId: north, actions: ["READ" as const] }],
+          },
+        ],
+        expiresInHours: 72,
+        reason: "Prove one canonical link under concurrent invitation",
+      };
+      const raced = await Promise.allSettled([
+        access.invite(owner, payload, "link-race-a", "link-race-a"),
+        access.invite(owner, payload, "link-race-b", "link-race-b"),
+      ]);
+      expect(
+        raced.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        raced.filter((result) => result.status === "rejected"),
+      ).toHaveLength(1);
+      const evidence = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{
+            memberships: number;
+            employees: number;
+            linkAudits: number;
+            linkEvents: number;
+          }>
+        >(
+          `SELECT
+             (SELECT count(*)::int FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND employee_code=$2) memberships,
+             (SELECT count(*)::int FROM app.employees WHERE tenant_id=$1::uuid AND employee_code=$2 AND linked_membership_id IS NOT NULL) employees,
+             (SELECT count(*)::int FROM audit.audit_events audit WHERE audit.tenant_id=$1::uuid AND audit.action='identity.employee.linked' AND audit.after_json->>'membershipId'=(SELECT id::text FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND employee_code=$2)) "linkAudits",
+             (SELECT count(*)::int FROM app.outbox_events event WHERE event.tenant_id=$1::uuid AND event.event_type='identity.employee.linked.v1' AND event.payload->>'membershipId'=(SELECT id::text FROM app.tenant_memberships WHERE tenant_id=$1::uuid AND employee_code=$2)) "linkEvents"`,
+          tenantA,
+          code,
+        ),
+      );
+      expect(evidence[0]).toEqual({
+        memberships: 1,
+        employees: 1,
+        linkAudits: 1,
+        linkEvents: 1,
+      });
     });
 
     it("FND02-A-001/FND02-A-002/FND02-A-006/FND02-C-003/FND02-C-004: SQL scope precedes list/detail/export and preview matches enforcement", async () => {
@@ -979,7 +1202,7 @@ describe.sequential(
       ).toBe(false);
     });
 
-    it("FND02-A-003/FND02-A-004/FND02-A-005/FND02-I-005: external portals, masking and live driver reassignment stay constrained", async () => {
+    it("FND02-A-003/FND02-A-004/FND02-A-005/FND02-I-005/FND02-LINK-A-002: external portals, masking and live driver reassignment stay constrained", async () => {
       const fixture = await withTenant(app.db, tenantA, async (tx) => {
         const vendor = String(
           (
@@ -1087,6 +1310,20 @@ describe.sequential(
         fixture.roles.CLIENT_VIEWER!,
         alpha,
       );
+      const externalEmployeeLinks = await withTenant(app.db, tenantA, (tx) =>
+        tx.$queryRawUnsafe<Array<{ count: number }>>(
+          `SELECT count(*)::int count FROM app.employees
+             WHERE tenant_id=$1::uuid AND linked_membership_id=ANY($2::uuid[])`,
+          tenantA,
+          [
+            vendor.actor.membershipId,
+            driver.actor.membershipId,
+            driverTwo.actor.membershipId,
+            client.actor.membershipId,
+          ],
+        ),
+      );
+      expect(externalEmployeeLinks[0]?.count).toBe(0);
       const vendorProbe = await access.createProbe(
         owner,
         {

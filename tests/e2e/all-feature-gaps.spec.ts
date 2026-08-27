@@ -340,12 +340,115 @@ async function acceptanceEvidence(world: GapWorld, id: string) {
       origin_location_id: graph.origin.id,
       destination_location_id: graph.destination.id,
     });
-    const client = await tenantJson(
-      world,
-      `/domain/clients/${graph.client.id}`,
+    const truckType = await expectJson<{ id: string }>(
+      await api(world.page, "/domain/master-admin/catalogs", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotency("lane-truck-type") },
+        data: {
+          kind: "TRUCK_TYPE",
+          code: `UI${world.suffix}`,
+          name: `UI lane truck ${world.suffix}`,
+          capacityMilli: "32000",
+        },
+      }),
+      201,
     );
-    expect(client.id).toBe(graph.client.id);
-    return "client, locations, versioned contract, SLA and rate lane persisted as one graph";
+
+    await world.page.goto("/app/masters/lanes");
+    await expect(
+      world.page.getByRole("heading", { name: "Lanes, SLA and rates" }),
+    ).toBeVisible();
+    const form = world.page
+      .getByRole("button", { name: "Create lane" })
+      .locator("xpath=ancestor::form");
+
+    const contractSearchResponse = world.page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes("/api/v1/domain/commands/contracts/versions") &&
+        response.url().includes(`search=CT${world.suffix}`),
+    );
+    await form.getByLabel("Search Contract version").fill(`CT${world.suffix}`);
+    const contractLookup = await contractSearchResponse;
+    expect(contractLookup.status(), await contractLookup.text()).toBe(200);
+    await expect(
+      form
+        .getByLabel("Contract version", { exact: true })
+        .locator(`option[value="${graph.contractVersion.id}"]`),
+    ).toHaveCount(1);
+    await form
+      .getByLabel("Contract version", { exact: true })
+      .selectOption(String(graph.contractVersion.id));
+
+    for (const [label, resource, search, selectedId] of [
+      [
+        "Origin location",
+        "client-locations",
+        `OR${world.suffix}`,
+        graph.origin.id,
+      ],
+      [
+        "Destination location",
+        "client-locations",
+        `DS${world.suffix}`,
+        graph.destination.id,
+      ],
+      [
+        "Truck type",
+        "master-admin/catalogs/TRUCK_TYPE",
+        `UI${world.suffix}`,
+        truckType.id,
+      ],
+    ] as const) {
+      const lookupResponse = world.page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          response.url().includes(`/api/v1/domain/${resource}`) &&
+          response.url().includes(`search=${search}`),
+      );
+      await form.getByLabel(`Search ${label}`).fill(search);
+      expect((await lookupResponse).status()).toBe(200);
+      const select = form.getByLabel(label, { exact: true });
+      await expect(
+        select.locator(`option[value="${String(selectedId)}"]`),
+      ).toHaveCount(1);
+      await select.selectOption(String(selectedId));
+    }
+
+    const laneCode = `UILN${world.suffix}`;
+    await form.getByLabel("Lane code").fill(laneCode);
+    await form.getByLabel("Placement minutes").fill("120");
+    await form.getByLabel("Transit minutes").fill("1440");
+    await form.getByLabel("POD minutes").fill("2880");
+    await form.getByLabel("Rate minor units").fill("150000");
+    await form.getByLabel("Tax basis points").fill("1800");
+    await form.getByLabel("Effective from").fill("2027-01-01T00:00");
+
+    const laneResponse = world.page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/api/v1/domain/lanes"),
+    );
+    await form.getByRole("button", { name: "Create lane" }).click();
+    const createdResponse = await laneResponse;
+    expect(createdResponse.status(), await createdResponse.text()).toBe(201);
+    const created = (await createdResponse.json()) as {
+      contract_version_id: string;
+      code: string;
+    };
+    expect(created).toMatchObject({
+      contract_version_id: graph.contractVersion.id,
+      code: laneCode,
+    });
+    await expect(form.getByRole("status")).toHaveText("lane created.");
+    await expect(form.getByLabel("Lane code")).toHaveValue("");
+    await expect(
+      world.page
+        .locator(".responsive-list")
+        .getByRole("article")
+        .filter({ hasText: laneCode }),
+    ).toBeVisible();
+    return "contract-version search returned the tenant-scoped version and the selected contract enabled UI lane creation";
   }
 
   if (id === "E2E-GAP-MST02-02") {

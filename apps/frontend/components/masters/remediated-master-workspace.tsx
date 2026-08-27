@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { api, type ApiError } from "../api";
+import { FormSubmitResult } from "../forms/form-submit-result";
 import { SmartField } from "../forms/smart-field";
 import { Shell } from "../shell";
 import { MastersNav } from "./masters-nav";
@@ -688,7 +689,9 @@ export function RemediatedMasterWorkspace({ mode }: { mode: Mode }) {
               </label>
             </>
           )}
-          <button className="primary">Create</button>
+          <FormSubmitResult error={error} success={notice}>
+            <button className="primary">Create</button>
+          </FormSubmitResult>
         </form>
       </section>
       {mode === "vehicles" && (

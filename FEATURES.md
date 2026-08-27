@@ -101,7 +101,7 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 | ID     | Feature                                                        | Evidence                                       | Implementation status | Test status           | Depends on                  |
 | ------ | -------------------------------------------------------------- | ---------------------------------------------- | --------------------- | --------------------- | --------------------------- |
-| FND-01 | Multi-tenant product foundation                                | Product objective                              | Complete              | Passing               | —                           |
+| FND-01 | Multi-tenant product foundation                                | Product objective                              | Complete              | Implemented / Not Run | —                           |
 | FND-02 | Identity, roles, and scoped access                             | Operating-model roles                          | Complete              | Implemented / Not Run | FND-01                      |
 | MST-01 | Organization, employee, and geography masters                  | Workbook managers; stated hierarchy            | Complete              | Implemented / Not Run | FND-01, FND-02              |
 | MST-02 | Client, contract, lane, SLA, and rate-card masters             | Client/location forms; contract business model | Complete              | Implemented / Not Run | MST-01                      |
@@ -124,53 +124,54 @@ Exceptions remain visible and actionable: cancellation, NTP, replacement vehicle
 
 The register above records the canonical backend/contract baseline. A browser-level product audit on 2026-08-25 identified the following user-facing gaps. Implementation completion and test verification are tracked separately; focused Playwright evidence is required only to label a remediation row verified/passing.
 
-| Feature slice                         | Remediation state   | Test state            | Remaining product gap                                     |
-| ------------------------------------- | ------------------- | --------------------- | --------------------------------------------------------- |
-| Access UX (`FND-02`)                  | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
-| Address UX (`FND-01`, `MST-01/02/03`) | Implemented locally | Implemented / Not Run | Unknown-PIN exception behavior remains a product decision |
-| Masters UX (`MST-01/02/03`, `CFG-01`) | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
-| Operations UX (`OPS-01/02/03`)        | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
-| Finance UX (`FIN-01/02/03`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
-| Control-tower UX (`CTL-01`)           | Implemented locally | Implemented / Not Run | None in the approved local implementation scope           |
+| Feature slice                                     | Remediation state   | Test state            | Remaining product gap                                                                                                     |
+| ------------------------------------------------- | ------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Access UX (`FND-02`)                              | Implemented locally | Implemented / Not Run | INTERNAL user-to-Employee linkage and form-local mutation outcomes are implemented; focused tests are not run             |
+| Platform tenant-user administration (`FND-01/02`) | Implemented locally | Implemented / Not Run | Add/edit/reveal/reset/onboarding master support is implemented; role/scope, invitation reissue/revoke, session, and MFA actions remain planned |
+| Address UX (`FND-01`, `MST-01/02/03`)             | Implemented locally | Implemented / Not Run | Unknown-PIN exception behavior remains a product decision                                                                 |
+| Masters UX (`MST-01/02/03`, `CFG-01`)             | Implemented locally | Implemented / Not Run | None in the approved local implementation scope                                                                           |
+| Operations UX (`OPS-01/02/03`)                    | Implemented locally | Planned               | Focused Playwright/contract cases are authored but deeper concurrency, isolation, and reconciliation cases remain planned |
+| Finance UX (`FIN-01/02/03`)                       | Implemented locally | Planned               | Focused Playwright/contract cases are authored but deeper ledger, concurrency, and reconciliation cases remain planned    |
+| Control-tower UX (`CTL-01`)                       | Implemented locally | Planned               | Focused Playwright/contract cases are authored but deeper KPI reconciliation and authorization cases remain planned       |
 
 ### 5.1 Implemented delivery map
 
-All rows below are live, tenant-authorized, PostgreSQL-backed, and covered by the passing acceptance suite.
+All rows below describe the implemented tenant-authorized PostgreSQL-backed surface. Current executable test completeness and execution state are recorded separately in the feature register and affected test plans.
 
-| Feature    | UI routes                                                                                               | Implemented APIs and persistence                                                                                                                                                                                                            |
-| ---------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **FND-01** | `/platform/tenants`, `/platform/report`, `/app/setup`                                                   | PIN-first tenant registry/provisioning with PostgreSQL-derived locality/city/state, lifecycle, setup checklist, health, isolation probes, documents, exports, reports, and platform alerts                                                  |
-| **FND-02** | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured directory/lifecycle and access editor, secure activation-link rotation/copy, capability roles/scopes, MFA/session reset, permission review, Activity & audit, and alerts                                                         |
-| **MST-01** | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable hub/navigation, canonical subtree scopes, PIN-derived address snapshots, structured geofences, employees, assignments, versioned impact, idempotent reassignment/deactivation, ownership reports/CSV/alerts and audit evidence |
-| **MST-02** | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Client/location masters, versioned contracts, lanes, SLA rules, rate lines, duplicate analysis, publish selection, and immutable transaction snapshots                                                                                      |
-| **MST-03** | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted/versioned bank accounts, vehicles, drivers, compliance records/decisions, eligibility evaluation, and approved overrides                                                                                                 |
-| **OPS-01** | `/app/operations/indents`                                                                               | Idempotent indent creation, commercial/SLA snapshots, status transitions, partial cancellation, canonical demand/fill reports, and alerts                                                                                                   |
-| **OPS-02** | `/app/operations/allocations`                                                                           | Split allocation locking, offer response/expiry, vendor/vehicle/driver eligibility, assignment/replacement history, placement states, and risk reports                                                                                      |
-| **OPS-03** | `/app/operations/trips`, `/portal/driver`                                                               | Assigned-trip execution, append-only milestone/GPS events, ordering-conflict evidence, offline retry idempotency, privacy enforcement, delivery, and POD creation                                                                           |
-| **DOC-01** | `/app/pod` and record evidence panels                                                                   | POD task/review/submission, document bytes and immutable versions, checksum/signature/size checks, scoped access tokens, ageing, and invoice-value risk                                                                                     |
-| **FIN-01** | `/app/finance/invoices`                                                                                 | Exact BigInt minor-unit invoices/lines, billable service links, approval/posting controls, acknowledgement, notes, due dates, and compensating reversals                                                                                    |
-| **FIN-02** | `/app/finance/receipts`                                                                                 | Receipts, append-only allocation/reversal ledger, exact balances, follow-up promises, reconciliation, collection ageing, and statements                                                                                                     |
-| **FIN-03** | `/app/finance/vendor-bills`                                                                             | Vendor bill/line validation, duplicate prevention, maker/checker decisions, verified-bank payment batches/allocations, deductions, reversals, and margin reconciliation                                                                     |
-| **CTL-01** | `/app/control`                                                                                          | Canonical placement/POD/collection/trip/payable lenses, server filters, saved views, three-level drill, freshness/as-of evidence, and reconciled totals                                                                                     |
-| **ALT-01** | `/app/alerts`                                                                                           | Scoped rules, PostgreSQL evaluation/deduplication, linked evidence, queue ownership, acknowledge/assign/snooze/escalate/resolve/reopen, and channel-attempt history                                                                         |
-| **DAT-01** | `/app/data`                                                                                             | CSV/XLSX parsing, duplicate/blank/header/row validation, seven canonical adapters, preview/commit/correction, checksum idempotency, scoped errors, and reconciliation                                                                       |
-| **GOV-01** | `/app/governance/policies` and record evidence panels                                                   | Governed documents, audience comments/history, approval definitions/instances/decisions, segregation, immutable audit, and reason/correlation evidence                                                                                      |
-| **INT-01** | `/app/integrations`                                                                                     | API clients/rotation, HMAC webhooks, mapping versions, endpoint registry, idempotent delivery attempts, retry/dead-letter/replay, and integration health                                                                                    |
-| **CFG-01** | `/app/configuration/settings`                                                                           | Typed/semantic tenant configuration, versioned draft/publish/rollback, branding/locale/codes/reasons/thresholds, and projection invalidation                                                                                                |
+| Feature    | UI routes                                                                                               | Implemented APIs and persistence                                                                                                                                                                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FND-01** | `/platform/tenants`, `/platform/tenants/:id`, `/platform/report`, `/app/setup`                          | PIN-first tenant registry/provisioning plus Platform Admin tenant-user directory/dossiers, derived onboarding evidence, tenant-profile edits, safe enable/disable, lifecycle, setup checklist, health, isolation probes, documents, exports, reports, and alerts          |
+| **FND-02** | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Structured directory/lifecycle and access editor, secure activation-link rotation/copy, capability roles/scopes, MFA/session reset, permission review, Activity & audit, alerts, and atomic INTERNAL membership-to-Employee linkage                                          |
+| **MST-01** | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable hub/navigation, canonical subtree scopes, PIN-derived address snapshots, structured geofences, employees with employee-only/link-existing/create-invited-access modes, assignments, versioned impact, reassignment, ownership reports/CSV/alerts and audit       |
+| **MST-02** | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | Client/location masters, versioned contracts, lanes, SLA rules, rate lines, duplicate analysis, publish selection, and immutable transaction snapshots                                                                                                                    |
+| **MST-03** | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | Vendors, encrypted/versioned bank accounts, vehicles, drivers, compliance records/decisions, eligibility evaluation, and approved overrides                                                                                                                               |
+| **OPS-01** | `/app/operations`, `/app/operations/indents`                                                            | Actionable open-indent landing register with reconciled risk/fill totals, filters, typed create/edit/cancel/submit forms, contextual truck allocation, optimistic versions, idempotency, audit/outbox evidence, and canonical demand reporting                            |
+| **OPS-02** | `/app/operations/allocations`                                                                           | Complete allocation register with offer accept/reject/expiry, split-allocation locking, eligible vendor/vehicle/driver assignment and replacement, NTP/placement/cancellation, trip handoff, editable auto-allocation rules, and risk reports                             |
+| **OPS-03** | `/app/operations/trips`, `/portal/driver`                                                               | Full trip register with contextual accept/start/load/transit/arrival/unload/end/cancel forms, append-only milestone/GPS evidence, ordering-conflict handling, offline idempotency, privacy enforcement, delivery, and POD creation                                        |
+| **DOC-01** | `/app/pod` and record evidence panels                                                                   | POD task/review/submission, document bytes and immutable versions, checksum/signature/size checks, scoped access tokens, ageing, and invoice-value risk                                                                                                                   |
+| **FIN-01** | `/app/finance`, `/app/finance/invoices`                                                                 | Actionable pending-work dashboard and complete invoice register with filtered search, exact BigInt service billing, typed edit/submit/approve/reject/post/acknowledge/note/reverse actions, immutable posting, and compensating reversals                                 |
+| **FIN-02** | `/app/finance/receipts`                                                                                 | Complete collection and receipt registers with typed receipt capture, append-only allocation/reversal ledger, exact balances, follow-up promises, reconciliation, ageing, and statements                                                                                  |
+| **FIN-03** | `/app/finance/vendor-bills`, `/app/finance/payment-runs`                                                | Complete vendor-service, bill, and payment-run registers with validation, maker/checker decisions, verified-bank allocations, contextual submit/verify/approve/pay/fail/reverse/dispute actions, deductions, reversals, and margin reconciliation                         |
+| **CTL-01** | `/app/control`                                                                                          | Prototype-depth canonical Placement, POD vs Invoice, Collection, Trip, and Vendor Payable lenses with scoped KPI/bucket drills, client-to-location-to-record navigation, vendor allocation summaries, ageing guidance, saved views, live freshness, and exact visible CSV |
+| **ALT-01** | `/app/alerts`                                                                                           | Scoped rules, PostgreSQL evaluation/deduplication, linked evidence, queue ownership, acknowledge/assign/snooze/escalate/resolve/reopen, and channel-attempt history                                                                                                       |
+| **DAT-01** | `/app/data`                                                                                             | CSV/XLSX parsing, duplicate/blank/header/row validation, seven canonical adapters, preview/commit/correction, checksum idempotency, scoped errors, and reconciliation                                                                                                     |
+| **GOV-01** | `/app/governance/policies` and record evidence panels                                                   | Governed documents, audience comments/history, approval definitions/instances/decisions, segregation, immutable audit, and reason/correlation evidence                                                                                                                    |
+| **INT-01** | `/app/integrations`                                                                                     | API clients/rotation, HMAC webhooks, mapping versions, endpoint registry, idempotent delivery attempts, retry/dead-letter/replay, and integration health                                                                                                                  |
+| **CFG-01** | `/app/configuration/settings`                                                                           | Typed/semantic tenant configuration, versioned draft/publish/rollback, branding/locale/codes/reasons/thresholds, and projection invalidation                                                                                                                              |
 
 ### 5.2 Pending production and product-owner TODOs
 
 These items do not reopen the completed PostgreSQL-only feature scope. They are required before or during production adoption:
 
-| Area               | Pending work                                                                                                                                                                           | Status                         |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| AWS operations     | EC2/RDS, systemd, public-IP Nginx, pinned postal bootstrap, and provision/setup/update scripts are implemented; DNS/TLS, OIDC/SSM, budgets, alarms, backups, and restore drills remain | In progress                    |
+| Area               | Pending work                                                                                                                                                                                                                                               | Status                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| AWS operations     | EC2/RDS, systemd, public-IP Nginx, pinned postal bootstrap, and provision/setup/update scripts are implemented; DNS/TLS, OIDC/SSM, budgets, alarms, backups, and restore drills remain                                                                     | In progress                          |
 | Messaging          | AWS SES owner-activation delivery is implemented with encrypted retry material and an in-process PostgreSQL dispatcher; verify the selected identity and obtain SES production access. General user/password-reset email, SMS, and WhatsApp remain pending | Implemented / AWS activation pending |
-| Document security  | Select a production malware-scanning provider; benign local uploads remain pending until a real scanner attests them                                                                   | Provider decision pending      |
-| GPS/accounting     | Confirm production GPS and accounting vendors, credentials, mappings, retry policy, and reconciliation ownership                                                                       | Provider decision pending      |
-| Commercial policy  | Confirm cancellation/fill-rate treatment, placement/POD ageing boundaries, deductions/credit notes, over-receipts, approval thresholds, GST/TDS, and bank-verification rules           | Product-owner decision pending |
-| Privacy/compliance | Confirm retention, consent, location-collection, document, audit-export, and data-residency requirements for each operating geography                                                  | Legal/product decision pending |
-| Capacity           | Replace the single small EC2 instance with an artifact-based or multi-instance topology when measured load requires it; add infrastructure only through an approved ADR                | Capacity-triggered             |
+| Document security  | Select a production malware-scanning provider; benign local uploads remain pending until a real scanner attests them                                                                                                                                       | Provider decision pending            |
+| GPS/accounting     | Confirm production GPS and accounting vendors, credentials, mappings, retry policy, and reconciliation ownership                                                                                                                                           | Provider decision pending            |
+| Commercial policy  | Confirm cancellation/fill-rate treatment, placement/POD ageing boundaries, deductions/credit notes, over-receipts, approval thresholds, GST/TDS, and bank-verification rules                                                                               | Product-owner decision pending       |
+| Privacy/compliance | Confirm retention, consent, location-collection, document, audit-export, and data-residency requirements for each operating geography                                                                                                                      | Legal/product decision pending       |
+| Capacity           | Replace the single small EC2 instance with an artifact-based or multi-instance topology when measured load requires it; add infrastructure only through an approved ADR                                                                                    | Capacity-triggered                   |
 
 ## 6. Common Codex build contract
 
@@ -195,17 +196,18 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 
 **Status:** Complete
 
-**Test status:** Passing
+**Test status:** Implemented / Not Run
 
 **Outcome:** One deployable product can safely serve multiple logistics companies, each with isolated data, branding, configuration, and legal entities.
 
 ### UX flow and details
 
 1. Platform Admin creates a tenant from a protected admin console.
-2. Enter tenant name, code, legal name, GSTIN/tax identifier, registered address, timezone, locale, currency, fiscal-year start, default legal entity, support contact, and active state.
+2. Enter tenant name, code, legal name, GSTIN/tax identifier, registered address, timezone, locale, currency, fiscal-year start, default legal entity, support contact, and active state. Provisioning atomically creates that legal entity as the first canonical organization root with its tenant-scoped authorization node and hierarchy closure.
 3. The system creates an owner invitation, default roles, default reason lists, default thresholds, and tenant-scoped PostgreSQL records.
 4. Tenant Owner completes a setup checklist: organization, users, branches, clients, vendors, commercial settings, imports, and branding.
 5. Tenant switcher appears only for users explicitly assigned to more than one tenant; switching clears tenant-specific frontend/session state.
+6. Platform Admin opens a tenant to add and search memberships, inspect masked identity/role/security and canonical onboarding records, reveal a login destination or generate a reset link after current-password step-up, edit tenant/user and supported master details, and safely disable or re-enable users without impersonation. Disabling the final usable Tenant Owner is blocked and disabling any membership revokes its active sessions.
 
 ### Reports and alerts
 
@@ -219,6 +221,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 - A multi-tenant user switches from A to B and sees only B branding, settings, counts, and recent records.
 - Tenant deactivation blocks login and jobs without deleting records; reactivation restores access.
 - Automated isolation tests run for every tenant-owned table/resource.
+- Platform tenant-user reads and mutations are conjunctively tenant-scoped; changed profile/status requests are versioned and idempotent, accepted login destinations are read-only, and new focused tests remain `Implemented / Not Run` until the explicit test phase.
 
 ### Master prompt for Codex
 
@@ -242,6 +245,8 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 4. Admin can suspend access, reset sessions, change scope, and review effective permissions before saving.
 5. Vendor, driver, and client users use limited portals with no access to internal margins, unrelated parties, or unrestricted exports.
 6. The password created during activation is used for every later login. Forgot-password records a generic request for a configured verified-delivery provider; provider-free deployments use a tenant-root copy-once reset link for a single-tenant identity. Successful reset revokes all sessions and reset tokens.
+7. Creating any INTERNAL tenant membership atomically creates or safely links exactly one Employee master at the active legal-entity root. The command rolls back on collision or missing root. CLIENT, VENDOR, and DRIVER audiences use their persona masters and never create Employee rows.
+8. Mutation success or error appears beside the initiating action, including field reasons and correlation reference. Create success resets the form; edit success retains the newly persisted values; failure preserves non-secret input.
 
 ### Reports and alerts
 
@@ -274,7 +279,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 ### UX flow and form fields
 
 1. Admin creates legal entities, then regions, branches, and teams in a hierarchy view.
-2. Employee form: employee code, name, designation, email, mobile, manager, home branch, regions, active dates, linked user account, and roles.
+2. Employee form: employee code, name, designation, email, mobile, manager, home branch, regions, active dates, and one explicit access mode: employee only, link an existing unlinked INTERNAL user, or create invited access with complete roles/scopes/actions.
 3. Geography form: country, state, district, city, postal code, latitude, longitude, and geofence radius.
 4. Bulk assignment lets an admin map KAMs to clients, branch managers to locations, and traffic executives to operating queues.
 5. Deactivation preview lists impacted users, clients, locations, open records, and escalation routes before confirmation.
@@ -329,6 +334,7 @@ Every feature prompt below includes this rapid batch contract by reference. Code
 ### Acceptance criteria and end-to-end tests
 
 - A valid client/location/contract/lane/rate can be created, approved, published, selected, and later versioned.
+- Searchable contract-version references return the parent contract lifecycle state, remain tenant/scope filtered, and can be selected directly by the lane form without a server error.
 - An indent snapshots the correct effective rate, credit terms, document rules, and TAT; later master changes do not alter that snapshot.
 - Overlapping active rate versions for the same matching dimensions are rejected or resolved by an explicit priority rule.
 - Deactivated clients/locations disappear from new-entry selectors but remain readable on historical records.

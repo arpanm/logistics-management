@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
+import { FormSubmitResult } from "../forms/form-submit-result";
 import { Shell } from "../shell";
 import type { UiField, UiManifest } from "./manifests";
 
@@ -352,9 +353,11 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
               }
             />
           ))}
-          <button className="primary" type="submit">
-            Create {manifest.singular.toLowerCase()}
-          </button>
+          <FormSubmitResult error={error} success={notice}>
+            <button className="primary" type="submit">
+              Create {manifest.singular.toLowerCase()}
+            </button>
+          </FormSubmitResult>
         </form>
       </section>
       <section className="panel" aria-labelledby="records-heading">
@@ -414,9 +417,11 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
               onChange={(event) => setEditName(event.target.value)}
             />
           </label>
-          <button type="button" onClick={() => void save()}>
-            Save changes
-          </button>
+          <FormSubmitResult error={error} success={notice}>
+            <button type="button" onClick={() => void save()}>
+              Save changes
+            </button>
+          </FormSubmitResult>
           {transitions.length > 0 && (
             <div>
               <label htmlFor="transition-reason">
@@ -455,7 +460,9 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
                 onChange={(event) => setComment(event.target.value)}
               />
             </label>
-            <button type="submit">Post comment</button>
+            <FormSubmitResult error={error} success={notice}>
+              <button type="submit">Post comment</button>
+            </FormSubmitResult>
           </form>
           {selected.comments?.map((item) => (
             <article key={item.id}>

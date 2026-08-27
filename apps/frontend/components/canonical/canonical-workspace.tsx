@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
 import { SmartField } from "../forms/smart-field";
+import { FormSubmitResult } from "../forms/form-submit-result";
 import type { CanonicalField, CanonicalManifest } from "./manifests";
 
 type Row = Record<string, unknown> & {
@@ -170,6 +171,7 @@ export function CanonicalWorkspace({
   async function create(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setNotice("");
     try {
       const body = Object.fromEntries(
         manifest.fields
@@ -265,7 +267,13 @@ export function CanonicalWorkspace({
       setError(value as ApiError);
     }
   }
-  async function runCommand(path: string, body: Record<string, unknown>) {
+  async function runCommand(
+    path: string,
+    body: Record<string, unknown>,
+    resetValueKeys: string[] = [],
+  ) {
+    setError(null);
+    setNotice("");
     try {
       const changed = await api<Row>(`/domain/commands/${path}`, {
         method: "POST",
@@ -274,6 +282,11 @@ export function CanonicalWorkspace({
       });
       setNotice("Command completed and audit evidence was recorded.");
       setCommand({});
+      if (resetValueKeys.length)
+        setValues((current) => ({
+          ...current,
+          ...Object.fromEntries(resetValueKeys.map((key) => [key, ""])),
+        }));
       if (selected) await open(selected);
       await load();
       return changed;
@@ -340,9 +353,11 @@ export function CanonicalWorkspace({
                 }
               />
             ))}
-            <button className="primary" type="submit">
-              Create {manifest.singular}
-            </button>
+            <FormSubmitResult error={error} success={notice}>
+              <button className="primary" type="submit">
+                Create {manifest.singular}
+              </button>
+            </FormSubmitResult>
           </form>
         </section>
       )}
@@ -353,21 +368,35 @@ export function CanonicalWorkspace({
             className="access-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void runCommand("vendor-bills", {
-                vendorId: values.vendorId,
-                vendorInvoiceNo: values.vendorInvoiceNo,
-                invoiceDate: values.invoiceDate,
-                gstMinor: values.gstMinor || "0",
-                tdsMinor: values.tdsMinor || "0",
-                deductionMinor: values.deductionMinor || "0",
-                advanceMinor: values.advanceMinor || "0",
-                lines: [
-                  {
-                    tripId: values.tripId,
-                    claimedMinor: values.claimedMinor,
-                  },
+              void runCommand(
+                "vendor-bills",
+                {
+                  vendorId: values.vendorId,
+                  vendorInvoiceNo: values.vendorInvoiceNo,
+                  invoiceDate: values.invoiceDate,
+                  gstMinor: values.gstMinor || "0",
+                  tdsMinor: values.tdsMinor || "0",
+                  deductionMinor: values.deductionMinor || "0",
+                  advanceMinor: values.advanceMinor || "0",
+                  lines: [
+                    {
+                      tripId: values.tripId,
+                      claimedMinor: values.claimedMinor,
+                    },
+                  ],
+                },
+                [
+                  "vendorId",
+                  "vendorInvoiceNo",
+                  "invoiceDate",
+                  "tripId",
+                  "claimedMinor",
+                  "gstMinor",
+                  "tdsMinor",
+                  "deductionMinor",
+                  "advanceMinor",
                 ],
-              });
+              );
             }}
           >
             <CommandReference
@@ -441,7 +470,9 @@ export function CanonicalWorkspace({
                 }
               />
             </label>
-            <button className="primary">Validate and create</button>
+            <FormSubmitResult error={error} success={notice}>
+              <button className="primary">Validate and create</button>
+            </FormSubmitResult>
           </form>
         </section>
       )}
@@ -452,16 +483,20 @@ export function CanonicalWorkspace({
             className="access-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void runCommand("payment-batches", {
-                batchNo: values.batchNo,
-                bankVersionId: values.bankVersionId,
-                allocations: [
-                  {
-                    vendorBillId: values.paymentBillId,
-                    amountMinor: values.paymentAmount,
-                  },
-                ],
-              });
+              void runCommand(
+                "payment-batches",
+                {
+                  batchNo: values.batchNo,
+                  bankVersionId: values.bankVersionId,
+                  allocations: [
+                    {
+                      vendorBillId: values.paymentBillId,
+                      amountMinor: values.paymentAmount,
+                    },
+                  ],
+                },
+                ["batchNo", "bankVersionId", "paymentBillId", "paymentAmount"],
+              );
             }}
           >
             <label>
@@ -531,7 +566,9 @@ export function CanonicalWorkspace({
                 }
               />
             </label>
-            <button className="primary">Create payment batch</button>
+            <FormSubmitResult error={error} success={notice}>
+              <button className="primary">Create payment batch</button>
+            </FormSubmitResult>
           </form>
           <form
             className="access-form"

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type ApiError } from "../../../../components/api";
+import { FormSubmitResult } from "../../../../components/forms/form-submit-result";
 import { Shell } from "../../../../components/shell";
 
 export type WorkspaceField = {
@@ -175,9 +176,11 @@ export function TransactionWorkspace({
               )}
             </label>
           ))}
-          <button type="submit" className="primary">
-            Create draft
-          </button>
+          <FormSubmitResult error={error} success={success}>
+            <button type="submit" className="primary">
+              Create draft
+            </button>
+          </FormSubmitResult>
         </form>
       </section>
       <section className="panel" aria-busy={loading}>

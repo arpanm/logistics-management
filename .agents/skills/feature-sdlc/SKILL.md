@@ -16,7 +16,8 @@ Follow `AGENTS.md`, `docs/SDLC.md`, and `docs/TESTING.md`. Optimize for finishin
 5. Mark unexecuted test cases `Implemented / Not Run`. Never infer Passing from code review, compilation, an old result, or another test.
 6. Use one `reviewer` for the integrated batch. Fix clear blocking findings together. Do not automatically run tests or enter a test/fix/retest loop.
 7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case files, and documentation once for the batch.
-8. If the user asks to commit, run the lightweight batch gate once: formatting, type checking, policy/status synchronization, and cached-diff review. One related batch commit is allowed. Do not push unless explicitly asked.
+8. If repository-owned local frontend/backend services are already running, run `make refresh-local` once before handoff. It applies migrations, builds every shared package and both apps, restarts only owned processes, preserves tenant data, and verifies readiness. This prevents stale production-style local artifacts and does not authorize test execution. If the user is using `make dev`, rely on its hot reload instead.
+9. If the user asks to commit, run the lightweight batch gate once: formatting, type checking, policy/status synchronization, and cached-diff review. One related batch commit is allowed. Do not push unless explicitly asked.
 
 ## Optional specialist roles
 

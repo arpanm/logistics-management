@@ -95,6 +95,7 @@ export function GovernanceWorkspace() {
   async function upload(event: FormEvent) {
     event.preventDefault();
     if (!file) return;
+    const formElement = event.currentTarget as HTMLFormElement;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const checksum = Array.from(
@@ -119,6 +120,7 @@ export function GovernanceWorkspace() {
         }),
       });
       setFile(null);
+      formElement.reset();
       setNotice("Verified document version stored in PostgreSQL.");
     } catch (value) {
       setError(value as ApiError);
