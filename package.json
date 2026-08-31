@@ -18,6 +18,7 @@
     "test:e2e": "bash scripts/e2e.sh",
     "verify": "bash scripts/verify.sh",
     "db:seed": "pnpm --filter @logistics/db run db:seed",
+    "demo:seed": "bash scripts/run-app-command.sh demo:seed",
     "db:reset:test": "pnpm --filter @logistics/db run db:reset:test"
   },
   "devDependencies": {

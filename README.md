@@ -6,13 +6,13 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                                                                                                         |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                                       |
-| Automated feature tests           | Focused OPS/FIN/CTL and Platform tenant-user Playwright cases are authored but not run; deeper concurrency, ledger, reconciliation, migration, and recovery cases remain planned |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                                             |
-| Feature implementation            | Canonical/product UX complete; SES owner-invitation delivery deployed with verified sender, while arbitrary-recipient production access remains pending                          |
+| Item                              | Status                                                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                                                                                                          |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                                                        |
+| Automated feature tests           | Demo bootstrap: 11 focused database checks and 4 real-browser journeys passing locally; deeper cross-feature concurrency, isolation, reconciliation, migration, and recovery cases remain planned |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                                                              |
+| Feature implementation            | Canonical/product UX and versioned reusable demo bootstrap complete; SES owner-invitation delivery is deployed with verified sender, while arbitrary-recipient production access remains pending  |
 
 Agents synchronize this summary, `FEATURES.md`, `TODO.md`, affected specs, and executable test-case status once per implementation batch. New or changed tests remain `Implemented / Not Run` until an explicitly requested batch/release test phase executes them.
 
@@ -23,8 +23,8 @@ The implementation includes normalized canonical stores and actionable workbench
 | Feature | Implemented user surface                                                                                | Canonical behavior                                                                                                                                                                                                                                   |
 | ------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | FND-01  | `/platform/tenants`, `/platform/tenants/:id`, `/platform/report`, `/app/setup`                          | PIN-first tenant provisioning plus Platform Admin tenant-user directory/dossiers, derived onboarding evidence, profile updates, safe enable/disable, lifecycle, setup, isolation, health, reports, and alerts                                        |
-| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Editable profiles, paginated directory, invitation lifecycle, scoped roles, permission review, Activity & audit, MFA, sessions, history, and atomic INTERNAL user-to-Employee linkage                                                                 |
-| MST-01  | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable Masters hub, PIN-derived organization geography, structured geofences, employees, optional existing-user link or explicit invited access, scoped ownership, impact/reassignment, reports, export, alerts, and cycle-safe moves             |
+| FND-02  | `/app/access/users`, `/app/access/roles`, `/app/access/reports`, `/mfa`                                 | Editable profiles, paginated directory, invitation lifecycle, scoped roles, permission review, Activity & audit, MFA, sessions, history, and atomic INTERNAL user-to-Employee linkage                                                                |
+| MST-01  | `/app/masters`, `/app/masters/locations`, `/app/masters/employees`                                      | Discoverable Masters hub, PIN-derived organization geography, structured geofences, employees, optional existing-user link or explicit invited access, scoped ownership, impact/reassignment, reports, export, alerts, and cycle-safe moves          |
 | MST-02  | `/app/masters/parties`, `/app/masters/client-locations`, `/app/masters/contracts`, `/app/masters/lanes` | PIN-derived client locations, tenant/scope-safe searchable contract-version references, versioned contracts, lanes, SLA rules, and effective rate cards                                                                                              |
 | MST-03  | `/app/masters/vendors`, `/app/masters/fleet`, `/app/masters/drivers`                                    | PIN-derived vendor/driver addresses, configured truck/body/cargo catalogs, compliance, eligibility, secure bank versions, and overrides                                                                                                              |
 | OPS-01  | `/app/operations`, `/app/operations/indents`                                                            | Complete filtered open-indent register with reconciled KPIs and contextual typed create/edit/cancel/submit/allocate actions, snapshots, versions, audit, reports, and alerts                                                                         |
@@ -148,6 +148,60 @@ Local and provider-disabled deployments do not send real email. The AWS deployme
 An activated user who forgets their password selects **Forgot your password?** at `/login`. The public request always returns the same non-enumerating response and records a rate-limited delivery request; the current provider-free deployment does not claim that email or SMS was sent. A tenant-root identity administrator can instead open the active user in `/app/access/users`, enter an audit reason, select **Generate password reset link**, and copy the one-time link through a trusted channel. Administrator-copy recovery is intentionally blocked for identities active in multiple tenants because changing their shared platform password would affect every workspace; those users require a configured verified delivery provider. Completing any reset invalidates the link, changes the password, and signs the identity out of every active session.
 
 `make deploy-local` reseeds the Platform Admin and therefore resets its password to the current `PLATFORM_ADMIN_PASSWORD` value in `.env`. Never use the committed local default in AWS or any shared environment.
+
+### Reusable end-to-end demo environment
+
+After migrations and the normal Platform Admin seed, install the deterministic demo dataset once:
+
+```bash
+make demo-seed
+make refresh-local
+```
+
+`make demo-seed` loads `.env`, requires `DEMO_DATA_ENABLED=true` internally, and creates the reserved `DEMO` tenant. Dataset `2026.08.1` is transactionally anchored to `2026-08-31` and recorded in `app.demo_bootstrap_runs` with a content hash. An identical rerun verifies the configured password hashes and exits without changing IDs, timestamps, ledgers, passwords, or sessions. It never creates or changes the Platform Administrator.
+
+Local credentials are intentionally disposable:
+
+| Account              | Email                            | Local password   | Access                                                       |
+| -------------------- | -------------------------------- | ---------------- | ------------------------------------------------------------ |
+| Platform Admin       | `admin@local.test`               | `LocalAdmin!234` | Platform tenant registry; independently created by `db:seed` |
+| Tenant Owner         | `demo.owner@logistics.test`      | `DemoAccess!234` | Full `DEMO` tenant administration                            |
+| Traffic / Operations | `demo.operations@logistics.test` | `DemoAccess!234` | Indents, allocations, trips, POD and control tower           |
+| Finance Executive    | `demo.finance@logistics.test`    | `DemoAccess!234` | Invoices, receipts, vendor bills and payment runs            |
+| Vendor Owner         | `demo.vendor@logistics.test`     | `DemoAccess!234` | Vendor-scoped portal                                         |
+| Driver               | `demo.driver@logistics.test`     | `DemoAccess!234` | Assigned-trip driver portal                                  |
+| Client Viewer        | `demo.client@logistics.test`     | `DemoAccess!234` | Client-scoped portal                                         |
+
+The shared demo password is rejected in production. Never add it to `/etc/logistics-management.env`. AWS uses the same tenant code and role emails, but its `DEMO_USER_PASSWORD` is a protected environment-specific secret of at least 16 characters. The production Platform Admin continues to use the independently configured `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`.
+
+The stable walkthrough records are:
+
+- Client `DEMO-RETAIL`, locations `BLR-DC` and `HYD-STORE`, contract `DEMO-CONTRACT`, and lane `BLR-HYD`.
+- Vendor `DEMO-FLEET`, two synthetic vehicles and two drivers with valid compliance.
+- Indents `DEMO-IND-OPEN`, `DEMO-IND-OFFERED`, `DEMO-IND-LIVE`, and `DEMO-IND-DELIVERED`.
+- Live trip/LR `DEMO-TRIP-LIVE` / `DEMO-LR-LIVE` and delivered trip/LR `DEMO-TRIP-DONE` / `DEMO-LR-DONE` with closed POD.
+- Invoices `DEMO-INV-DRAFT` and `DEMO-INV-POSTED`, partial receipt `DEMO-RCPT-001`, paid vendor bill `DEMO-VBILL-001`, and paid run `DEMO-PAYOUT-001` / UTR `DEMO-UTR-000001`.
+- A collection follow-up, acknowledged operational alert/action, saved control view, auto-allocation rule, and import rows with `CREATE`, `UPDATE`, and `REJECT` dispositions.
+
+A concise demonstration flow is:
+
+1. Use Platform Admin to search `DEMO` under `/platform/tenants` and inspect its users/onboarding.
+2. Sign in as Tenant Owner and open Operations; search `DEMO-IND-OPEN`, then inspect Truck allocations and Trips.
+3. Search the live and delivered records, then open POD and Control to show the same canonical chain.
+4. Sign in as Finance Executive; open All invoices, Collections, Vendor payables, and Payment runs and search the stable references above.
+5. Sign in separately as Vendor Owner, Driver, and Client Viewer to demonstrate their scoped portals.
+6. Open Imports to show the three row dispositions and Alerts/Control to show the seeded exception and saved view.
+
+Focused local verification uses real PostgreSQL, backend, frontend, and browser requests:
+
+```bash
+set -a; source .env; set +a
+pnpm --filter @logistics/db exec vitest run \
+  src/demo-seed-config.test.ts src/demo-seed.integration.test.ts
+pnpm exec playwright test tests/e2e/demo-data.spec.ts --project=chromium
+```
+
+Do not use a demo tenant for real business data. Normal deployments never seed, reset, or rotate it. To rotate all AWS demo-user passwords, change the protected `DEMO_USER_PASSWORD`, run the production command below with `DEMO_ROTATE_PASSWORD=true`, and clear that one-shot flag afterward; the bootstrap increments authentication versions and revokes existing demo sessions. To take the demo offline without destructive shared-database cleanup, deactivate tenant `DEMO` from the Platform Admin screen.
 
 In local/test environments, `http://localhost:3000` and `http://127.0.0.1:3000` are treated as equivalent loopback origins on the configured port. Production accepts only the exact HTTPS origin configured in `FRONTEND_URL`.
 
@@ -653,16 +707,16 @@ curl -fsS https://logistics.example.com/api/v1/health/ready | jq
 
 The currently deployed starter environment uses the following non-secret identifiers. Update this block whenever the infrastructure is replaced:
 
-| Setting | Current value |
-| --- | --- |
-| AWS account | `997979359169` |
-| Region | `eu-north-1` |
-| EC2 instance | `i-0725da18037cca6f0` |
-| Public origin | `https://13.61.27.202` |
-| RDS endpoint | `database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com:5432` |
-| Checkout | `/opt/logistics-management` |
-| Runtime user | `logistics` |
-| Services | `logistics-backend.service`, `logistics-frontend.service` |
+| Setting       | Current value                                               |
+| ------------- | ----------------------------------------------------------- |
+| AWS account   | `997979359169`                                              |
+| Region        | `eu-north-1`                                                |
+| EC2 instance  | `i-0725da18037cca6f0`                                       |
+| Public origin | `https://13.61.27.202`                                      |
+| RDS endpoint  | `database-1.cngus0cc0c50.eu-north-1.rds.amazonaws.com:5432` |
+| Checkout      | `/opt/logistics-management`                                 |
+| Runtime user  | `logistics`                                                 |
+| Services      | `logistics-backend.service`, `logistics-frontend.service`   |
 
 These are resource identifiers, not credentials. Never commit the EC2 private key, `/etc/logistics-management.env`, RDS passwords, invitation tokens, or production administrator password. The workstation key currently used for break-glass SSH is `aws/ControlTower.pem`; it is Git-ignored and must remain readable only by its owner (`chmod 400 aws/ControlTower.pem`). Prefer Session Manager for routine administration.
 
@@ -721,6 +775,54 @@ REMOTE
 
 The SHA printed by EC2 must equal the pushed `main` SHA. The deployer applies all forward migrations before restarting, including automatic tenant legal-entity roots and internal-user/employee linkage. It deliberately does not rerun `db:seed`; production administrator password rotation remains the explicit procedure in section 6.
 
+#### Install or rotate the AWS demo tenant
+
+Demo installation is an explicit post-deployment step and is never part of recurring deployment. First add a unique password of at least 16 characters to the protected file; do not commit or paste its value into a shell command/history:
+
+```bash
+sudoedit /etc/logistics-management.env
+```
+
+Add or update:
+
+```dotenv
+DEMO_USER_PASSWORD='REPLACE_WITH_A_UNIQUE_PRODUCTION_DEMO_PASSWORD'
+```
+
+Then run the versioned bootstrap without persisting its one-shot production acknowledgements:
+
+```bash
+sudo -u logistics bash -lc '
+  set -euo pipefail
+  cd /opt/logistics-management
+  set -a
+  source /etc/logistics-management.env
+  set +a
+  export DEMO_DATA_ENABLED=true
+  export DEMO_DATA_PRODUCTION_CONFIRM=SEED_PUBLIC_DEMO_DATA
+  corepack pnpm run demo:seed
+'
+```
+
+The command requires the existing production `PLATFORM_ADMIN_EMAIL`, RDS TLS settings, and 32-byte base64 `MFA_ENCRYPTION_KEY`; it prints no password, connection URL, or bank value. It creates the same `DEMO` emails and record codes documented in the local demo section. Verify the manifest and services without reading secrets:
+
+```bash
+sudo -u logistics bash -lc '
+  set -euo pipefail
+  cd /opt/logistics-management
+  set -a
+  source /etc/logistics-management.env
+  set +a
+  export DEMO_DATA_ENABLED=true
+  export DEMO_DATA_PRODUCTION_CONFIRM=SEED_PUBLIC_DEMO_DATA
+  corepack pnpm run demo:seed
+'
+sudo systemctl is-active logistics-backend.service logistics-frontend.service
+curl -fsS https://13.61.27.202/api/v1/health/ready | jq
+```
+
+The second identical invocation must report that no data changes were required. For an intentional password rotation only, set `DEMO_ROTATE_PASSWORD=true` for that invocation after changing `DEMO_USER_PASSWORD`; all demo sessions are revoked. Production credentials are never listed in this repository: the deployment owner supplies the protected password privately to demonstrators and rotates or deactivates `DEMO` after use.
+
 For the one update from a checkout that predates `update-aws-deployment.sh`, bootstrap it with the older SHA-based deployer that is already on EC2. This fetches `main`, deploys that exact commit, and makes the updater available; use the normal command above thereafter:
 
 ```bash
@@ -772,6 +874,7 @@ The skill implements dependency-compatible features/TODOs in rapid batches using
 | `make postgres-up`        | Create/start central PostgreSQL and provision this project's databases/schemas. |
 | `make postgres-provision` | Add or repair only this project's role, databases, and schemas.                 |
 | `make postgres-status`    | Verify the shared container and project database.                               |
+| `make demo-seed`          | Install/reconcile the opt-in versioned local demo tenant and business records.  |
 | `make dev`                | Start frontend and backend in development mode.                                 |
 | `make check`              | Lightweight batch gate: formatting, linting, and type checks only.              |
 | `make test`               | Explicit test phase: run non-browser test suites.                               |

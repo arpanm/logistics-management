@@ -86,6 +86,15 @@ make e2e
 
 Primary routes are documented in the implemented feature table in `README.md` and the delivery map in `FEATURES.md`.
 
+For a ready-made cross-feature walkthrough, install the opt-in versioned dataset after the normal migration/admin seed:
+
+```bash
+make demo-seed
+make refresh-local
+```
+
+This creates only tenant `DEMO`, six tenant personas, and a coherent master → operations → POD → receivables → vendor-payout graph. The local accounts and walkthrough references are listed in `README.md`. An identical rerun is a content-hash-verified no-op. The production password policy and explicit AWS invocation are intentionally different; never copy the published local demo password to a shared environment.
+
 The Platform Admin credential is only for tenant provisioning and platform operations. Tenant Owners and other tenant users authenticate with credentials established from their own invitation links; there is no shared tenant-admin password.
 
 The local adapter does not deliver real email. A missed or expired first-owner link can be replaced from Platform Admin → Tenants → tenant details. The replacement link is shown once, the old token is invalidated, and the action requires a reason and is audited. Tenant-level users are then managed by the activated Tenant Owner at `/app/access/users`.
@@ -107,6 +116,9 @@ pnpm exec playwright test tests/e2e/all-feature-gaps.spec.ts \
 # Tenant foundation or identity/access
 pnpm exec playwright test tests/e2e/fnd-01-tenant-foundation.spec.ts --project=chromium
 pnpm exec playwright test tests/e2e/fnd-02-identity-access.spec.ts --project=chromium
+
+# Reusable demo accounts and stable cross-module records
+pnpm exec playwright test tests/e2e/demo-data.spec.ts --project=chromium
 ```
 
 Do not point Playwright at production. `ENABLE_TEST_HOOKS` must remain `false` for every non-local environment, and production startup rejects an enabled value.

@@ -37,6 +37,9 @@ case "$requested_command" in
   db:migrate)
     pnpm --filter @logistics/db run db:migrate
     ;;
+  demo:seed)
+    pnpm --filter @logistics/db run demo:seed
+    ;;
   *)
     echo "Unsupported application command: $requested_command" >&2
     exit 1

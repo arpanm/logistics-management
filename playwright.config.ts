@@ -17,6 +17,7 @@ export default defineConfig({
     "finance-workbench.spec.ts",
     "control-tower-workbench.spec.ts",
     "platform-tenant-user-admin.spec.ts",
+    "demo-data.spec.ts",
   ],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

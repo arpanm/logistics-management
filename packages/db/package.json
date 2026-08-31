@@ -9,6 +9,7 @@
     "build": "prisma generate && tsc -p tsconfig.json",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx src/seed.ts",
+    "demo:seed": "tsx src/demo-seed.ts",
     "db:reset:test": "tsx src/reset-test.ts",
     "postal:import": "tsx src/import-postal-directory.ts",
     "postal:verify-ownership": "tsx src/verify-postal-ownership.ts",
