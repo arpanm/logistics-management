@@ -133,7 +133,7 @@ The register above records the canonical backend/contract baseline. A browser-le
 | Operations UX (`OPS-01/02/03`)                    | Implemented locally | Planned               | Focused Playwright/contract cases are authored but deeper concurrency, isolation, and reconciliation cases remain planned                                                     |
 | Finance UX (`FIN-01/02/03`)                       | Implemented locally | Planned               | Focused Playwright/contract cases are authored but deeper ledger, concurrency, and reconciliation cases remain planned                                                        |
 | Control-tower UX (`CTL-01`)                       | Implemented locally | Planned               | Focused Playwright/contract cases are authored but deeper KPI reconciliation and authorization cases remain planned                                                           |
-| Reusable demo environment (cross-feature)         | Implemented locally | Focused Passing       | Versioned `DEMO` bootstrap, 11 database checks, and 4 real-browser role/workbench journeys passed locally on 2026-08-31; deeper isolation/reconciliation cases remain planned |
+| Reusable demo environment (cross-feature)         | Implemented locally | Focused Passing       | Versioned `DEMO` bootstrap, 12 database checks, and 4 real-browser role/workbench journeys passed locally on 2026-08-31; deeper isolation/reconciliation cases remain planned |
 
 ### 5.1 Implemented delivery map
 

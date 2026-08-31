@@ -101,4 +101,84 @@ describe.skipIf(!databaseUrl)("demo data bootstrap", () => {
       driver_links: 1,
     });
   });
+
+  it("uses real security time and audits explicit password rotation", async () => {
+    const [clock] = await withPlatform(db!, async (tx) => {
+      await tx.$executeRawUnsafe(
+        "SELECT set_config('app.current_tenant_id','10000000-0000-4000-8000-000000000100',true)",
+      );
+      await tx.$executeRawUnsafe(`
+        INSERT INTO app.sessions(
+          id,token_hash,csrf_hash,user_id,active_tenant_id,context_version,
+          expires_at,user_auth_version,membership_id,membership_auth_version
+        )
+        SELECT '30000000-0000-4000-8000-000000000001'::uuid,'demo-rotation-session','demo-rotation-csrf',
+          u.id,m.tenant_id,1,clock_timestamp()+interval '1 day',u.auth_version,m.id,m.authorization_version
+        FROM app.users u JOIN app.tenant_memberships m ON m.user_id=u.id
+        WHERE u.id='10000000-0000-4000-8000-000000000002'::uuid
+        ON CONFLICT(token_hash) DO UPDATE SET revoked_at=null,revoked_reason=null,
+          expires_at=clock_timestamp()+interval '1 day',updated_at=clock_timestamp()
+      `);
+      return tx.$queryRawUnsafe<Array<{ before: Date }>>(
+        "SELECT clock_timestamp() before",
+      );
+    });
+
+    try {
+      const rotation = await seedDemoData(
+        {
+          ...env,
+          DEMO_USER_PASSWORD: "RotatedDemoAccess!234",
+          DEMO_ROTATE_PASSWORD: "true",
+        },
+        databaseUrl,
+      );
+      const [result] = await withPlatform(db!, (tx) =>
+        tx.$queryRawUnsafe<
+          Array<{
+            changed_users: number;
+            revoked_sessions: number;
+            occurred_at: Date;
+            after_json: Record<string, unknown>;
+          }>
+        >(`
+          SELECT
+            (SELECT count(*)::int FROM app.users WHERE email LIKE 'demo.%@logistics.test' AND credentials_changed_at >= '${clock.before.toISOString()}'::timestamptz) changed_users,
+            (SELECT count(*)::int FROM app.sessions WHERE token_hash='demo-rotation-session' AND revoked_at >= '${clock.before.toISOString()}'::timestamptz AND revoked_reason='DEMO_PASSWORD_ROTATED') revoked_sessions,
+            occurred_at,after_json
+          FROM audit.audit_events
+          WHERE tenant_id='10000000-0000-4000-8000-000000000100'::uuid
+            AND action='demo.credentials.rotated'
+          ORDER BY occurred_at DESC,id DESC LIMIT 1
+        `),
+      );
+      expect(rotation).toEqual({ replayed: true, rotated: true });
+      expect(result.changed_users).toBe(6);
+      expect(result.revoked_sessions).toBe(1);
+      expect(result.occurred_at.getTime()).toBeGreaterThanOrEqual(
+        clock.before.getTime(),
+      );
+      expect(result.after_json).toMatchObject({
+        dataset: "logistics-end-to-end-demo",
+        datasetVersion: DEMO_DATASET_VERSION,
+        affectedUserCount: 6,
+        revokedSessionCount: 1,
+        sessionsRevoked: true,
+      });
+    } finally {
+      await seedDemoData({ ...env, DEMO_ROTATE_PASSWORD: "true" }, databaseUrl);
+      const hashes = await withPlatform(db!, (tx) =>
+        tx.$queryRawUnsafe<Array<{ password_hash: string }>>(`
+          SELECT password_hash FROM app.users
+          WHERE email LIKE 'demo.%@logistics.test' ORDER BY id
+        `),
+      );
+      expect(hashes).toHaveLength(6);
+      for (const row of hashes) {
+        expect(
+          await argon2.verify(row.password_hash, env.DEMO_USER_PASSWORD),
+        ).toBe(true);
+      }
+    }
+  });
 });

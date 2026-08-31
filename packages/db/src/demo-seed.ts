@@ -323,6 +323,8 @@ export async function seedDemoData(
         }
 
         let rotated = false;
+        let revokedSessionCount = 0;
+        let rotationAudited = false;
         for (const [id, email] of users) {
           const existing = await tx.$queryRaw<
             Array<{ id: string; password_hash: string }>
@@ -349,16 +351,41 @@ export async function seedDemoData(
         if (rotated) {
           await tx.$executeRaw`
             UPDATE app.users SET password_hash=${passwordHash},auth_version=auth_version+1,
-              credentials_changed_at=${anchorTime},updated_at=${anchorTime},version=version+1
+              credentials_changed_at=transaction_timestamp(),updated_at=transaction_timestamp(),version=version+1
             WHERE id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid)
           `;
-          await tx.$executeRaw`
-            UPDATE app.sessions SET revoked_at=${anchorTime},
-              revoked_reason='DEMO_PASSWORD_ROTATED',updated_at=${anchorTime},version=version+1
-            WHERE user_id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid)
-              AND revoked_at IS NULL
+          const revoked = await tx.$queryRaw<Array<{ count: number }>>`
+            WITH affected AS (
+              UPDATE app.sessions SET revoked_at=transaction_timestamp(),
+                revoked_reason='DEMO_PASSWORD_ROTATED',updated_at=transaction_timestamp(),version=version+1
+              WHERE user_id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid)
+                AND revoked_at IS NULL
+              RETURNING id
+            ) SELECT count(*)::int count FROM affected
           `;
+          revokedSessionCount = revoked[0]?.count ?? 0;
         }
+        const auditRotation = async () => {
+          if (!rotated || rotationAudited) return;
+          const after = JSON.stringify({
+            dataset: DEMO_DATASET,
+            datasetVersion: DEMO_DATASET_VERSION,
+            affectedUserCount: users.length,
+            revokedSessionCount,
+            sessionsRevoked: revokedSessionCount > 0,
+          });
+          await tx.$executeRaw`
+            INSERT INTO audit.audit_events(
+              tenant_id,actor_id,action,target_type,target_id,source,after_json,reason,correlation_id
+            ) VALUES(
+              ${tenantId}::uuid,${platformAdminId}::uuid,'demo.credentials.rotated',
+              'demo_bootstrap',${tenantId}::uuid,'BOOTSTRAP',${after}::jsonb,
+              'Explicit DEMO_ROTATE_PASSWORD rotation with tenant session revocation',
+              ${`demo-bootstrap-password-rotation:${DEMO_DATASET_VERSION}`}
+            )
+          `;
+          rotationAudited = true;
+        };
 
         if (existingTenant[0]) {
           const markers = await tx.$queryRaw<Array<{ content_hash: string }>>`
@@ -382,6 +409,7 @@ export async function seedDemoData(
                 "Demo bootstrap marker exists but one or more configured demo identities are missing.",
               );
             }
+            await auditRotation();
             return { replayed: true, rotated };
           }
         }
@@ -428,6 +456,7 @@ export async function seedDemoData(
             '{"tenantCode":"DEMO","users":6,"indents":4,"trips":2,"clientInvoices":2,"vendorPayouts":1}'::jsonb)
           ON CONFLICT(tenant_id,dataset,dataset_version) DO NOTHING
         `;
+        await auditRotation();
         return { replayed: false, rotated };
       },
       { maxWait: 10_000, timeout: 120_000 },

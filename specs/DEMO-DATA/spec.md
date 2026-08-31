@@ -1,7 +1,7 @@
 # DEMO-DATA — Deterministic demonstration environment
 
 **Status:** Complete
-**Test status:** Focused Passing — 11 database checks and 4 Chromium journeys passed locally on 2026-08-31; deeper cases remain Planned
+**Test status:** Focused Passing — 12 database checks and 4 Chromium journeys passed locally on 2026-08-31; deeper cases remain Planned
 **Feature source:** User-requested cross-feature demonstration bootstrap
 **Owner:** Primary agent
 
@@ -78,7 +78,7 @@ The bootstrap assigns existing baseline roles and compatible `membership_role_as
 ### Validation, loading, empty, error, retry, and stale states
 
 - Missing opt-in returns a non-zero exit with “demo bootstrap disabled”; no writes occur.
-- Local/test may use the documented local demo password. Production rejects the committed/default password, passwords under 16 characters, and a missing explicit `DEMO_DATA_ALLOW_PRODUCTION=true` acknowledgement.
+- Local/test may use the documented local demo password. Production rejects the committed/default password, passwords under 16 characters, and a missing exact `DEMO_DATA_PRODUCTION_CONFIRM=SEED_PUBLIC_DEMO_DATA` acknowledgement.
 - Unsupported schema version or missing dependency tables fails before mutation.
 - Any row or reconciliation failure rolls back the complete bootstrap transaction and records no successful run.
 - Concurrent invocations serialize on a stable advisory-lock key; the loser waits within a bounded timeout then exits retryably.
@@ -95,10 +95,9 @@ No new application screen is required. Existing screens must render the seeded r
 
 Add an application-owned `app.demo_bootstrap_runs` table through a forward migration:
 
-- `id uuid`, `tenant_id uuid`, `dataset_code text`, `dataset_version integer`, `content_hash text`
-- `anchor_date date`, `state text` (`RUNNING`, `COMPLETE`, `FAILED` if failure is recorded outside the main transaction)
-- `created_by uuid`, `started_at`, `completed_at`, safe `summary jsonb`
-- unique `(tenant_id, dataset_code, dataset_version)` and tenant RLS/policy consistent with other app tables.
+- `id uuid`, `tenant_id uuid`, `dataset text`, `dataset_version text`, `content_hash char(64)`
+- `anchor_date date`, safe `summary jsonb`, and `created_at timestamptz`
+- unique `(tenant_id, dataset, dataset_version)` and tenant RLS/policy consistent with other app tables.
 
 The successful run row is written inside the same transaction as the data graph. `content_hash` covers canonical non-secret fixture definitions, not password values or hashes. Audit entries use source `DEMO_BOOTSTRAP` and dataset version.
 
@@ -106,7 +105,7 @@ The successful run row is written inside the same transaction as the data graph.
 
 Reserved tenant identity:
 
-- code `DEMO`, name `Acme Logistics Demo`, legal name `Acme Logistics Demo Private Limited`
+- code `DEMO`, name `Demo Logistics India`, legal name `Demo Logistics India Private Limited`
 - synthetic tax identifier, telephone numbers, addresses, vehicle registrations, licences, bank last-four and invoice references clearly marked non-real
 - timezone `Asia/Kolkata`, currency `INR`, fiscal year start 1 April
 - one legal entity, South Region, Hyderabad Branch and Bengaluru Branch; closure/scope rows must reconcile
@@ -218,7 +217,7 @@ README and the affected deployment runbook must include:
 | AWS opt-in command produces the same content version and healthy services without automatic recurring reseed | API/jobs; Documentation    | `DEMO-AWS-01`                  |
 | A real browser can follow the documented Owner → Traffic → Finance → Vendor demo story with no mocked API    | UX; Documentation          | `DEMO-E2E-01`                  |
 
-All planned/executable test cases remain `Planned` or `Implemented / Not Run` until an explicitly requested test phase records current evidence. Playwright must never target production.
+The focused database and local Playwright cases carry their recorded `Passing` or `Implemented` status in the test plan. Deeper cases remain `Planned`. Production verification is read-only HTTP/SQL smoke evidence; Playwright must never target production.
 
 ## Failure recovery
 
@@ -230,11 +229,11 @@ All planned/executable test cases remain `Planned` or `Implemented / Not Run` un
 
 ## Open decisions
 
-| Decision                                                    | Safe default                                               | Owner/impact                                                           |
-| ----------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Exact public-facing demo company name/logo                  | Tenant-neutral “Acme Logistics Demo”; no customer branding | Product owner may replace synthetic branding without changing behavior |
-| Whether production demo accounts remain continuously active | Deactivate outside scheduled demos and rotate before reuse | Deployment owner; materially reduces public attack surface             |
-| Anchor date override                                        | Fixed dataset date on first run; persisted thereafter      | Deployment owner may set first-run anchor for fresher dashboard ageing |
+| Decision                                                    | Safe default                                                | Owner/impact                                                           |
+| ----------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Exact public-facing demo company name/logo                  | Tenant-neutral “Demo Logistics India”; no customer branding | Product owner may replace synthetic branding without changing behavior |
+| Whether production demo accounts remain continuously active | Deactivate outside scheduled demos and rotate before reuse  | Deployment owner; materially reduces public attack surface             |
+| Anchor date override                                        | Fixed dataset date on first run; persisted thereafter       | Deployment owner may set first-run anchor for fresher dashboard ageing |
 
 ## Readiness
 

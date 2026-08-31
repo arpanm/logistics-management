@@ -10,7 +10,7 @@ The product requirements and per-feature implementation/test status are maintain
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Agentic SDLC scaffold             | Complete                                                                                                                                                                                          |
 | Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                                                        |
-| Automated feature tests           | Demo bootstrap: 11 focused database checks and 4 real-browser journeys passing locally; deeper cross-feature concurrency, isolation, reconciliation, migration, and recovery cases remain planned |
+| Automated feature tests           | Demo bootstrap: 12 focused database checks and 4 real-browser journeys passing locally; deeper cross-feature concurrency, isolation, reconciliation, migration, and recovery cases remain planned |
 | Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                                                              |
 | Feature implementation            | Canonical/product UX and versioned reusable demo bootstrap complete; SES owner-invitation delivery is deployed with verified sender, while arbitrary-recipient production access remains pending  |
 
@@ -821,7 +821,7 @@ sudo systemctl is-active logistics-backend.service logistics-frontend.service
 curl -fsS https://13.61.27.202/api/v1/health/ready | jq
 ```
 
-The second identical invocation must report that no data changes were required. For an intentional password rotation only, set `DEMO_ROTATE_PASSWORD=true` for that invocation after changing `DEMO_USER_PASSWORD`; all demo sessions are revoked. Production credentials are never listed in this repository: the deployment owner supplies the protected password privately to demonstrators and rotates or deactivates `DEMO` after use.
+The second identical invocation must report that no data changes were required. For an intentional password rotation only, set `DEMO_ROTATE_PASSWORD=true` for that invocation after changing `DEMO_USER_PASSWORD`; all demo sessions are revoked with real security timestamps and a secret-free immutable audit event. Production credentials are never listed in this repository: the deployment owner supplies the protected password privately to demonstrators and rotates or deactivates `DEMO` after use.
 
 For the one update from a checkout that predates `update-aws-deployment.sh`, bootstrap it with the older SHA-based deployer that is already on EC2. This fetches `main`, deploys that exact commit, and makes the updater available; use the normal command above thereafter:
 
