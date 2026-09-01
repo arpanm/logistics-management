@@ -1,4 +1,10 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIResponse,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import {
   expectNoPageOverflow,
@@ -41,6 +47,51 @@ async function seededControlWorld(
 
 const value = (record: Record<string, unknown>, camel: string, snake: string) =>
   String(record[camel] ?? record[snake]);
+
+type ControlScopePayload = {
+  portfolios: Array<{ id: string; name: string }>;
+  locations: Array<{
+    id: string;
+    name: string;
+    recordCount: number;
+    green: number;
+    yellow: number;
+    red: number;
+  }>;
+};
+
+async function controlScopePayload(response: APIResponse) {
+  const text = await response.text();
+  expect(response.status(), text).toBe(200);
+  return JSON.parse(text) as ControlScopePayload;
+}
+
+const locationSnapshot = (payload: ControlScopePayload) =>
+  payload.locations
+    .map(({ id, name, recordCount, green, yellow, red }) => ({
+      id,
+      name,
+      recordCount,
+      green,
+      yellow,
+      red,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+async function expectLocationBoardMatches(
+  page: Page,
+  payload: ControlScopePayload,
+) {
+  const board = page.getByLabel("Location summaries");
+  await expect(board).toBeVisible();
+  await expect(board.locator("article")).toHaveCount(payload.locations.length);
+  const rendered = (await board.locator("article strong").allTextContents())
+    .map((name) => name.trim())
+    .sort();
+  expect(rendered).toEqual(
+    payload.locations.map((location) => location.name).sort(),
+  );
+}
 
 async function expectTopbarChildrenDoNotOverlap(page: Page) {
   const overlaps = await page.locator(".topbar > *").evaluateAll((nodes) => {
@@ -169,6 +220,142 @@ test("OFC-CTL-E2E-025 client-location-record drill reconciles breadcrumbs and co
     ).toBeVisible();
   } finally {
     await world.close();
+  }
+});
+
+test("BUG-CTL-027 non-placement portfolio scope never exposes stale locations and survives refresh and URL restore", async ({
+  page,
+}, testInfo) => {
+  await loginDemoUser(page, testInfo, "owner");
+  const lenses = [
+    ["pod", "POD vs Invoice"],
+    ["collection", "Collection"],
+    ["trip", "Trips"],
+    ["vendor-payable", "Vendor Payable"],
+  ] as const;
+  for (const [slug, label] of lenses) {
+    const unfilteredPromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/api/v1/control-workbench/${slug}?`) &&
+        !response.url().includes("clientId=") &&
+        !response.url().includes("/views"),
+    );
+    await page.goto(`/app/control?lens=${slug}`);
+    const unfiltered = await controlScopePayload(await unfilteredPromise);
+    expect(unfiltered.portfolios.length, `${label} portfolios`).toBeGreaterThan(
+      1,
+    );
+    const portfolio = unfiltered.portfolios[0]!;
+    const panel = page.getByRole("tabpanel");
+    const portfolioButton = panel.getByRole("button").filter({
+      has: panel.getByRole("heading", {
+        level: 3,
+        name: portfolio.name,
+        exact: true,
+      }),
+    });
+    await expect(portfolioButton).toBeVisible();
+
+    const scopedPromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/api/v1/control-workbench/${slug}?`) &&
+        response
+          .url()
+          .includes(`clientId=${encodeURIComponent(portfolio.id)}`) &&
+        !response.url().includes("/views"),
+    );
+    const synchronousLocationNames = await portfolioButton.evaluate(
+      (button) => {
+        (button as HTMLButtonElement).click();
+        return Array.from(
+          document.querySelectorAll(
+            '[aria-label="Location summaries"] article strong',
+          ),
+          (node) => node.textContent?.trim() ?? "",
+        );
+      },
+    );
+    expect(
+      synchronousLocationNames,
+      `${label} hides the unfiltered location board in the click task`,
+    ).toEqual([]);
+    const scoped = await controlScopePayload(await scopedPromise);
+    expect(
+      scoped.locations.length,
+      `${label} scoped locations`,
+    ).toBeGreaterThan(0);
+    const scopedIds = new Set(scoped.locations.map((location) => location.id));
+    const stale = unfiltered.locations.filter(
+      (location) => !scopedIds.has(location.id),
+    );
+    expect(
+      stale.length,
+      `${label} has an out-of-scope location`,
+    ).toBeGreaterThan(0);
+    await expectLocationBoardMatches(page, scoped);
+    const board = page.getByLabel("Location summaries");
+    for (const location of stale)
+      await expect(board).not.toContainText(location.name);
+
+    const scopedUrl = page.url();
+    const parsed = new URL(scopedUrl);
+    expect(parsed.searchParams.get("lens")).toBe(slug);
+    expect(parsed.searchParams.get("clientId")).toBe(portfolio.id);
+
+    const pauseRefreshPromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/api/v1/control-workbench/${slug}?`) &&
+        response
+          .url()
+          .includes(`clientId=${encodeURIComponent(portfolio.id)}`) &&
+        !response.url().includes("/views"),
+    );
+    await page.getByRole("button", { name: "Pause live refresh" }).click();
+    const pausedRefresh = await controlScopePayload(await pauseRefreshPromise);
+    expect(locationSnapshot(pausedRefresh)).toEqual(locationSnapshot(scoped));
+    await expectLocationBoardMatches(page, pausedRefresh);
+    const resume = page.getByRole("button", { name: "Resume live refresh" });
+    await expect(resume).toHaveAttribute("aria-pressed", "true");
+
+    const resumeRefreshPromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/api/v1/control-workbench/${slug}?`) &&
+        response
+          .url()
+          .includes(`clientId=${encodeURIComponent(portfolio.id)}`) &&
+        !response.url().includes("/views"),
+    );
+    await resume.click();
+    const resumedRefresh = await controlScopePayload(
+      await resumeRefreshPromise,
+    );
+    expect(locationSnapshot(resumedRefresh)).toEqual(locationSnapshot(scoped));
+    await expectLocationBoardMatches(page, resumedRefresh);
+    await expect(
+      page.getByRole("button", { name: "Pause live refresh" }),
+    ).toHaveAttribute("aria-pressed", "false");
+
+    await page.goto("/app");
+    const restoredPromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/api/v1/control-workbench/${slug}?`) &&
+        response
+          .url()
+          .includes(`clientId=${encodeURIComponent(portfolio.id)}`) &&
+        !response.url().includes("/views"),
+    );
+    await page.goto(scopedUrl);
+    const restored = await controlScopePayload(await restoredPromise);
+    expect(locationSnapshot(restored)).toEqual(locationSnapshot(scoped));
+    await expectLocationBoardMatches(page, restored);
+    await expect(page).toHaveURL(
+      new RegExp(`(?:\\?|&)clientId=${portfolio.id}(?:&|$)`),
+    );
   }
 });
 

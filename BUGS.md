@@ -44,6 +44,7 @@ This register began with the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`
 | BUG-UI-024  | UIREG-OPS/FIN/DETAIL        | UI-01         | Responsive UX          | P1 / High     | Global table minima, desktop dialog geometry and in-flow details broke compact layouts/discovery                                                          | Resolved locally / Not Run      |
 | BUG-UI-025  | UI02-OPS/FIN/CTL/DETAIL     | UI-02         | Responsive UX/contract | P1 / High     | Desktop flex forms, offset sticky actions, raw details, global mid-word wrapping and unchecked Control response fields reproduced compact-layout failures | Resolved locally / Not Run      |
 | BUG-CTL-026 | CTL-DB-026 / UI02-CTL-010   | CTL-01/UI-02  | Product API contract   | P1 / High     | A PostgreSQL derived-table alias collided with its `vendor` column, serializing vendor names instead of structured allocation totals                      | Resolved; focused tests Passing |
+| BUG-CTL-027 | CTL drill scope             | CTL-01/UI-02  | Product UI state       | P1 / High     | Drill depth changed before the scoped response arrived, briefly rendering prior all-portfolio locations under the selected client/vendor breadcrumb       | Resolved locally; E2E Not Run   |
 
 ## Detailed RCA
 
@@ -54,6 +55,14 @@ This register began with the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`
 - **Resolution:** The backend now constructs every vendor object explicitly with `id`, `vendor`, `allotted`, `placed`, and `ntp`, while retaining tenant/resource authorization and canonical state predicates. No migration or seed repair is required.
 - **Evidence:** Focused backend contract tests passed 6/6, PostgreSQL reconciliation passed 4/4, and real-browser `UI02-CTL-010` passed 1/1 after local production build/restart.
 - **Status:** Resolved locally and ready for the production deployment recorded with this fix.
+
+### BUG-CTL-027 — Client/vendor drill briefly showed unrelated locations
+
+- **Observed:** In POD, Collection, Trips, and Vendor Payable, selecting a portfolio initially displayed multiple locations/accounts and then collapsed to the selected scope.
+- **RCA:** React changed the breadcrumb/drill depth immediately while `data` still held the preceding unfiltered response. The debounced `clientId` request later replaced it with the correct server projection; the final single row was generally correct and the initial rows were stale.
+- **Resolution:** Settled dashboards are now keyed by the exact lens and normalized query. A scope change renders an accessible loading/error state until its matching response settles; aborted, stale-key, and out-of-order responses are ignored. Same-scope background refresh retains the settled board.
+- **Evidence:** Focused request-key tests passed 3/3 and frontend typecheck/build/readiness passed. The first browser revision was blocked in unrelated setup by an expired allocation; the corrected read-only four-lens case is Implemented / Not Run and no passing browser result is claimed.
+- **Status:** Resolved; production release evidence is the deployed Git SHA reported with this change.
 
 ### BUG-CTL-023 — All five Control Tower lens APIs returned HTTP 500
 

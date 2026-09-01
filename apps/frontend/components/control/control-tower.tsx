@@ -81,6 +81,25 @@ type VendorAllocationRow = {
   placed: number;
   ntp: number;
 };
+type SettledDashboard = { requestKey: string; data: Data };
+type ActiveRequest = { requestKey: string; requestId: number };
+
+export function controlDashboardRequestKey(lens: Lens, query: string) {
+  return `${lens}?${query}`;
+}
+
+export function isCurrentControlDashboardRequest(
+  active: ActiveRequest,
+  requestKey: string,
+  requestId: number,
+  aborted = false,
+) {
+  return (
+    !aborted &&
+    active.requestKey === requestKey &&
+    active.requestId === requestId
+  );
+}
 
 const meta: Record<
   Lens,
@@ -309,9 +328,12 @@ function href(lens: Lens, row: Row) {
 export function ControlTower() {
   const [access, setAccess] = useState<Access | null>(null),
     [lens, setLens] = useState<Lens>("placement"),
-    [data, setData] = useState<Data | null>(null),
+    [settledDashboard, setSettledDashboard] = useState<SettledDashboard | null>(
+      null,
+    ),
     [views, setViews] = useState<View[]>([]),
     [error, setError] = useState<ApiError | null>(null),
+    [errorRequestKey, setErrorRequestKey] = useState(""),
     [initialLoading, setInitialLoading] = useState(true),
     [refreshing, setRefreshing] = useState(false),
     [refreshFailure, setRefreshFailure] = useState<{
@@ -337,7 +359,12 @@ export function ControlTower() {
     [direction, setDirection] = useState<"asc" | "desc">("desc"),
     [urlReady, setUrlReady] = useState(false);
   const initializedFromUrl = useRef(false);
-  const hasData = useRef(false);
+  const settledRequestKey = useRef<string | null>(null);
+  const requestSequence = useRef(0);
+  const activeRequest = useRef<ActiveRequest>({
+    requestKey: "",
+    requestId: 0,
+  });
   const query = useMemo(
     () =>
       new URLSearchParams({
@@ -367,6 +394,17 @@ export function ControlTower() {
       direction,
     ],
   );
+  const requestKey = controlDashboardRequestKey(lens, query);
+  const data =
+    settledDashboard?.requestKey === requestKey ? settledDashboard.data : null;
+  const scopeTransition = Boolean(
+    activeRequest.current.requestKey !== requestKey ||
+      (settledDashboard && settledDashboard.requestKey !== requestKey),
+  );
+  const visibleError =
+    error && (errorRequestKey === "access" || errorRequestKey === requestKey)
+      ? error
+      : null;
 
   useEffect(() => {
     if (initializedFromUrl.current) return;
@@ -436,6 +474,7 @@ export function ControlTower() {
       .catch((value) => {
         if (!mounted) return;
         setError(value as ApiError);
+        setErrorRequestKey("access");
         setInitialLoading(false);
       });
     return () => {
@@ -445,45 +484,66 @@ export function ControlTower() {
   const load = useCallback(
     async (signal?: AbortSignal, background = false) => {
       if (!access?.lenses.includes(lens)) return;
-      if (background || hasData.current) setRefreshing(true);
-      else setInitialLoading(true);
+      const loadRequestKey = requestKey;
+      const requestId = ++requestSequence.current;
+      activeRequest.current = { requestKey: loadRequestKey, requestId };
+      const sameKeySettled = settledRequestKey.current === loadRequestKey;
+      if (background && sameKeySettled) setRefreshing(true);
+      else {
+        setInitialLoading(true);
+        setRefreshing(false);
+        setRefreshFailure(null);
+        setError(null);
+        setErrorRequestKey("");
+      }
       try {
         const [payload, saved] = await Promise.all([
           api<unknown>(`/control-workbench/${lens}?${query}`, { signal }),
           api<View[]>(`/control-workbench/${lens}/views`, { signal }),
         ]);
-        if (signal?.aborted) return;
+        if (
+          !isCurrentControlDashboardRequest(
+            activeRequest.current,
+            loadRequestKey,
+            requestId,
+            signal?.aborted,
+          )
+        )
+          return;
         const dashboard = parseDashboard(payload, lens);
-        setData({
-          ...dashboard,
-          kpis:
-            dashboard.kpis && typeof dashboard.kpis === "object"
-              ? dashboard.kpis
-              : {},
-          kpiActions:
-            dashboard.kpiActions && typeof dashboard.kpiActions === "object"
-              ? dashboard.kpiActions
-              : {},
-          rows: Array.isArray(dashboard.rows) ? dashboard.rows : [],
-          portfolios: Array.isArray(dashboard.portfolios)
-            ? dashboard.portfolios.map(normalizeSummary)
-            : [],
-          locations: Array.isArray(dashboard.locations)
-            ? dashboard.locations.map(normalizeSummary)
-            : [],
-          vendors: Array.isArray(dashboard.vendors)
-            ? dashboard.vendors.map(normalizeVendor)
-            : [],
-          ageing: Array.isArray(dashboard.ageing)
-            ? dashboard.ageing.filter(
-                (bucket) =>
-                  ["CURRENT", "31_45", "46_90", "OVER_90"].includes(
-                    bucket.bucket,
-                  ) && Number.isFinite(Number(bucket.count)),
-              )
-            : [],
+        setSettledDashboard({
+          requestKey: loadRequestKey,
+          data: {
+            ...dashboard,
+            kpis:
+              dashboard.kpis && typeof dashboard.kpis === "object"
+                ? dashboard.kpis
+                : {},
+            kpiActions:
+              dashboard.kpiActions && typeof dashboard.kpiActions === "object"
+                ? dashboard.kpiActions
+                : {},
+            rows: Array.isArray(dashboard.rows) ? dashboard.rows : [],
+            portfolios: Array.isArray(dashboard.portfolios)
+              ? dashboard.portfolios.map(normalizeSummary)
+              : [],
+            locations: Array.isArray(dashboard.locations)
+              ? dashboard.locations.map(normalizeSummary)
+              : [],
+            vendors: Array.isArray(dashboard.vendors)
+              ? dashboard.vendors.map(normalizeVendor)
+              : [],
+            ageing: Array.isArray(dashboard.ageing)
+              ? dashboard.ageing.filter(
+                  (bucket) =>
+                    ["CURRENT", "31_45", "46_90", "OVER_90"].includes(
+                      bucket.bucket,
+                    ) && Number.isFinite(Number(bucket.count)),
+                )
+              : [],
+          },
         });
-        hasData.current = true;
+        settledRequestKey.current = loadRequestKey;
         if (kpiPredicate)
           setSelectedKpi(
             Object.entries(dashboard.kpiActions ?? {}).find(
@@ -492,28 +552,50 @@ export function ControlTower() {
           );
         setViews(saved);
         setError(null);
+        setErrorRequestKey("");
         setRefreshFailure(null);
       } catch (value) {
-        if (signal?.aborted) return;
-        if (hasData.current)
+        if (
+          !isCurrentControlDashboardRequest(
+            activeRequest.current,
+            loadRequestKey,
+            requestId,
+            signal?.aborted,
+          )
+        )
+          return;
+        if (sameKeySettled)
           setRefreshFailure({
             error: value as ApiError,
             failedAt: new Date().toISOString(),
           });
-        else setError(value as ApiError);
+        else {
+          setSettledDashboard(null);
+          settledRequestKey.current = null;
+          setError(value as ApiError);
+          setErrorRequestKey(loadRequestKey);
+        }
       } finally {
-        if (!signal?.aborted) {
+        if (
+          isCurrentControlDashboardRequest(
+            activeRequest.current,
+            loadRequestKey,
+            requestId,
+            signal?.aborted,
+          )
+        ) {
           setInitialLoading(false);
           setRefreshing(false);
         }
       }
     },
-    [access, lens, query, kpiPredicate],
+    [access, lens, query, kpiPredicate, requestKey],
   );
   useEffect(() => {
     const controller = new AbortController();
     const debounce = window.setTimeout(
-      () => void load(controller.signal, hasData.current),
+      () =>
+        void load(controller.signal, settledRequestKey.current === requestKey),
       250,
     );
     const interval =
@@ -528,7 +610,7 @@ export function ControlTower() {
       window.clearTimeout(debounce);
       if (interval) window.clearInterval(interval);
     };
-  }, [access, load, paused]);
+  }, [access, load, paused, requestKey]);
 
   const resetDrill = () => {
     setClient(null);
@@ -537,8 +619,6 @@ export function ControlTower() {
   };
   function changeLens(value: Lens) {
     if (value === lens) return;
-    setData(null);
-    hasData.current = false;
     setError(null);
     setInitialLoading(true);
     setLens(value);
@@ -683,7 +763,7 @@ export function ControlTower() {
             active={lens}
             onChange={changeLens}
           />
-        ) : !error ? (
+        ) : !visibleError ? (
           <section className={styles.panel}>
             <p>
               No control-tower lens is enabled for your current role and scope.
@@ -907,9 +987,9 @@ export function ControlTower() {
             </button>
           </div>
         )}
-        {error && (
+        {visibleError && (
           <div className="error" role="alert">
-            <p>{error.message}</p>
+            <p>{visibleError.message}</p>
             <button type="button" onClick={() => void load()}>
               Retry
             </button>
@@ -1018,10 +1098,10 @@ export function ControlTower() {
           id="control-panel"
           role="tabpanel"
           aria-labelledby={`control-tab-${lens}`}
-          aria-busy={initialLoading}
+          aria-busy={initialLoading || scopeTransition}
           aria-live="polite"
         >
-          {initialLoading ? (
+          {initialLoading || scopeTransition ? (
             <LoadingRows />
           ) : !data || data.pagination.total === 0 ? (
             <div className={styles.empty}>

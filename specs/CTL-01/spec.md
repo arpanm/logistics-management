@@ -25,6 +25,7 @@ The current Control Tower has five tabs, basic cards, filters and flat rows, but
 1. Tabs are keyboard-operable and URL-addressable. Switching lens resets incompatible drill dimensions but preserves compatible global filters.
 2. Controls: as-of, tenant timezone, live/paused 30-second refresh, search, hierarchy/client/location/vendor, status/risk, date, saved view select/save/update/default/delete, reset and Download visible view.
 3. Breadcrumbs preserve lens/filter/as-of and allow back navigation. Any KPI/card/table count opens the exact filtered next level; record rows link to their source detail/action page.
+   A drill-depth change never relabels data from the preceding query: only a response matching the exact current lens, filters, scope IDs, sort and page may render beneath the new breadcrumb.
 4. Live refresh preserves lens, drill level, focus, filters, sort and pagination. Paused state visibly freezes `asOf`; freshness distinguishes LIVE, DELAYED, PARTIAL and FAILED per source.
 5. Loading skeletons preserve layout; empty states explain filters/no source data; partial/failed sources identify impact and retry; stale data remains visibly timestamped. Zero denominator renders `0` or `—`, never NaN.
 6. Desktop uses cards and scroll-safe tables; small screens use accessible summaries/cards with equivalent fields/actions. Tables support keyboard drill and labelled sort.
