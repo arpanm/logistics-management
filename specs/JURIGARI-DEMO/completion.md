@@ -1,8 +1,8 @@
 # JURIGARI-DEMO completion evidence
 
-**Implementation:** Complete locally
+**Implementation:** Complete / AWS deployed
 **Focused tests:** Passing
-**Production installation:** Pending release execution
+**Production installation:** Passing
 
 ## Delivered
 
@@ -18,6 +18,10 @@
 - `jurigari-demo.integration.test.ts`: 2/2 passing against migrated PostgreSQL, including first-run/replay/verifier evidence.
 - `pnpm --filter @logistics/db run typecheck`: passing.
 - `tests/e2e/jurigari-demo.spec.ts --project=chromium`: 2/2 passing with real local services and PostgreSQL; no mocks.
+- AWS commit `037743c0a272b0baf1acea8bad2de747be44c8b6`: deployed; first seed and secret-free verifier passed.
+- Identical AWS replay reported no data changes; verifier reported 2 owners, 2 employees, one workbook chain, and exact invoice/receipt reconciliation.
+- EC2 backend/frontend services active; direct and proxied readiness reported database connected and 28 migrations ready.
+- Public HTTPS login and authenticated `/auth/me` returned HTTP 200 for both configured user emails.
 
 ## Explicitly remaining
 

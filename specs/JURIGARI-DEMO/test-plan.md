@@ -36,3 +36,5 @@ Use a migrated disposable PostgreSQL test database, an independent active Platfo
 Critical risks are accidental production execution, a pre-existing JG/email collision, secret exposure, duplicated owners, cross-profile UUID collision, and finance drift. Before a production demonstration, run only after explicit approval, then execute `pnpm run jurigari:verify`; capture the secret-free JSON and never terminal history containing credentials.
 
 Focused evidence: 12 Jurigari unit tests, 2 PostgreSQL integration tests, package typecheck, and 2 real Chromium journeys passed. Collision concurrency, password-rotation recovery, and a dedicated cross-tenant integration remain explicitly planned and are not claimed by this release.
+
+Production release evidence (2026-09-02): first AWS seed and verifier passed, identical replay was a no-op, both services/readiness checks passed with PostgreSQL connected, and both configured users completed real public HTTPS login plus authenticated `/auth/me` checks.

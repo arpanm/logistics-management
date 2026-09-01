@@ -879,6 +879,8 @@ sudo -u logistics bash -lc '
 
 The adoption variables are needed only when reusing an existing `JG` tenant. Resolve every UUID with a platform-context, read-only query; never copy these account-specific examples to another account. Adoption fails unless the code/name and complete provisioned root graph exactly match the supplied IDs and the sole existing membership is Piyana's invitation. Reserved user-email collisions still fail closed.
 
+Production evidence recorded on 2026-09-02: dataset `2026.09.2` installed on AWS, the identical replay made no changes, the secret-free verifier reconciled both owners/employees and the workbook finance chain, backend/frontend readiness reported PostgreSQL connected, and both configured users passed public HTTPS login and `/auth/me`. The password remains only in the protected server environment.
+
 Production normally requires at least 16 characters. If the deployment owner explicitly confirms use of a supplied 12–15 character demonstration password, both additional one-shot controls are required; this narrow profile exception does not weaken any generic authentication policy:
 
 ```bash

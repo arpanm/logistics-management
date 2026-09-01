@@ -1,7 +1,7 @@
 # JURIGARI-DEMO — Dedicated production demonstration profile
 
-**Implementation status:** Implemented locally
-**Test status:** Focused unit, PostgreSQL integration, and Playwright Passing
+**Implementation status:** Complete / AWS deployed
+**Test status:** Focused unit, PostgreSQL integration, Playwright, and production smoke Passing
 
 ## Outcome
 
