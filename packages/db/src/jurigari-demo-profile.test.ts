@@ -34,6 +34,7 @@ const adoption = {
   tenantScopeId: "a22b8bf4-9b96-46d6-bff4-9dbf12673926",
   legalScopeId: "d10ed9f1-ef94-4a31-a334-8d060d12d9ec",
   ownerMembershipId: "d13a6a02-a72f-4c4d-8934-c28673270c61",
+  ownerEmployeeId: "5f060f59-2708-4c57-a593-612d6d37f76e",
 };
 
 describe("Jurigari bootstrap profile", () => {

@@ -273,6 +273,11 @@ export function jurigariStatements(
           adoption.legalScopeId,
         )
         .replaceAll(membershipIds.piyana, adoption.ownerMembershipId)
+        .replaceAll(
+          "30000000-0000-4000-8000-000000000451",
+          adoption.ownerEmployeeId,
+        )
+        .replaceAll("JG-PIYANA", "OWNER-JG")
         .replace("'LEGAL_ENTITY','ORG-JG'", "'LEGAL_ENTITY','JG'");
     }
     return remapped;
@@ -348,6 +353,7 @@ export function jurigariBootstrapProfile(
           tenantScopeId: config.adoption.tenantScopeId,
           legalScopeId: config.adoption.legalScopeId,
           ownerMembershipId: config.adoption.ownerMembershipId,
+          ownerEmployeeId: config.adoption.ownerEmployeeId,
         }
       : undefined,
   };

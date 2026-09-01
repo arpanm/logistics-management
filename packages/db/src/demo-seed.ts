@@ -556,6 +556,7 @@ export type DemoBootstrapProfile = {
     tenantScopeId: string;
     legalScopeId: string;
     ownerMembershipId: string;
+    ownerEmployeeId: string;
   };
 };
 
@@ -751,7 +752,9 @@ export async function seedDemoProfile(
               EXISTS(SELECT 1 FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid AND id=${adoption.tenantScopeId}::uuid AND scope_type='TENANT') AND
               EXISTS(SELECT 1 FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid AND id=${adoption.legalScopeId}::uuid AND scope_type='LEGAL_ENTITY') AND
               (SELECT count(*)=1 FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid) AND
-              EXISTS(SELECT 1 FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid AND id=${adoption.ownerMembershipId}::uuid AND lower(invited_email)='piyana10@gmail.com')
+              EXISTS(SELECT 1 FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid AND id=${adoption.ownerMembershipId}::uuid AND lower(invited_email)='piyana10@gmail.com' AND employee_code='OWNER-JG') AND
+              (SELECT count(*)=1 FROM app.employees WHERE tenant_id=${tenantId}::uuid) AND
+              EXISTS(SELECT 1 FROM app.employees WHERE tenant_id=${tenantId}::uuid AND id=${adoption.ownerEmployeeId}::uuid AND employee_code='OWNER-JG' AND linked_membership_id=${adoption.ownerMembershipId}::uuid)
               AS "exactMatch"
           `;
           assertDemoProfileAdoptionState(

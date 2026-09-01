@@ -97,6 +97,8 @@ describe("Jurigari seed configuration", () => {
         JURIGARI_ADOPT_LEGAL_SCOPE_ID: "d10ed9f1-ef94-4a31-a334-8d060d12d9ec",
         JURIGARI_ADOPT_OWNER_MEMBERSHIP_ID:
           "d13a6a02-a72f-4c4d-8934-c28673270c61",
+        JURIGARI_ADOPT_OWNER_EMPLOYEE_ID:
+          "5f060f59-2708-4c57-a593-612d6d37f76e",
         JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM: JURIGARI_ADOPTION_CONFIRMATION,
       }).adoption?.tenantId,
     ).toBe("415f88a2-675a-476c-8031-87c3ff1ae23b");

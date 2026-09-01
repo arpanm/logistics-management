@@ -22,6 +22,7 @@ export async function verifyJurigariDemo(databaseUrl?: string) {
             tenantScopeId: string;
             legalScopeId: string;
             ownerMembershipId: string;
+            ownerEmployeeId: string;
           }>
         >`
         SELECT tenant.id::text id,
@@ -30,6 +31,7 @@ export async function verifyJurigariDemo(databaseUrl?: string) {
           (SELECT id::text FROM app.authorization_scope_nodes WHERE tenant_id=tenant.id AND scope_type='TENANT' LIMIT 1) "tenantScopeId",
           (SELECT id::text FROM app.authorization_scope_nodes WHERE tenant_id=tenant.id AND scope_type='LEGAL_ENTITY' ORDER BY created_at,id LIMIT 1) "legalScopeId",
           (SELECT id::text FROM app.tenant_memberships WHERE tenant_id=tenant.id AND lower(invited_email)='piyana10@gmail.com' LIMIT 1) "ownerMembershipId"
+          ,(SELECT id::text FROM app.employees WHERE tenant_id=tenant.id AND lower(email)='piyana10@gmail.com' LIMIT 1) "ownerEmployeeId"
         FROM app.tenants tenant WHERE code='JG'
       `,
     );
@@ -43,7 +45,8 @@ export async function verifyJurigariDemo(databaseUrl?: string) {
       !tenant.rootOrganizationId ||
       !tenant.tenantScopeId ||
       !tenant.legalScopeId ||
-      !tenant.ownerMembershipId
+      !tenant.ownerMembershipId ||
+      !tenant.ownerEmployeeId
     ) {
       throw new Error(
         "Jurigari verification could not resolve the adopted root graph",
@@ -59,6 +62,7 @@ export async function verifyJurigariDemo(databaseUrl?: string) {
             tenantScopeId: tenant.tenantScopeId,
             legalScopeId: tenant.legalScopeId,
             ownerMembershipId: tenant.ownerMembershipId,
+            ownerEmployeeId: tenant.ownerEmployeeId,
           });
     const [result] = await withPlatform(db, (tx) =>
       tx.$queryRawUnsafe<

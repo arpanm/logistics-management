@@ -14,6 +14,7 @@ export type JurigariSeedConfig = DemoSeedConfig & {
     tenantScopeId: string;
     legalScopeId: string;
     ownerMembershipId: string;
+    ownerEmployeeId: string;
   };
 };
 
@@ -73,6 +74,7 @@ export function jurigariSeedConfig(
       tenantScopeId: env.JURIGARI_ADOPT_TENANT_SCOPE_ID?.trim() ?? "",
       legalScopeId: env.JURIGARI_ADOPT_LEGAL_SCOPE_ID?.trim() ?? "",
       ownerMembershipId: env.JURIGARI_ADOPT_OWNER_MEMBERSHIP_ID?.trim() ?? "",
+      ownerEmployeeId: env.JURIGARI_ADOPT_OWNER_EMPLOYEE_ID?.trim() ?? "",
     };
     for (const [name, value] of Object.entries(values)) {
       if (
