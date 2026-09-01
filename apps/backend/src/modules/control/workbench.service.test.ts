@@ -33,6 +33,26 @@ describe("UI01-CTL-CONTRACT-001 control query contract", () => {
     );
   });
 
+  it("emits placement vendor metadata as an explicit structured object", () => {
+    const source = readFileSync(
+      new URL("./workbench.service.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("to_jsonb(vendor)");
+    expect(source).toContain(
+      "jsonb_build_object('id',vendor_totals.id,'vendor',vendor_totals.vendor,'allotted',vendor_totals.allotted,'placed',vendor_totals.placed,'ntp',vendor_totals.ntp)",
+    );
+    expect(source).toContain(
+      "ORDER BY vendor_totals.ntp DESC,vendor_totals.vendor,vendor_totals.id",
+    );
+    expect(source).toContain(
+      "coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0)::int allotted",
+    );
+    expect(source).toContain(
+      "app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','allocations',a.id)",
+    );
+  });
+
   it("allow-lists lens-specific KPI predicates for dashboard and export", () => {
     expect(parseControlQuery("collection", { kpi: "part-paid" }).kpi).toBe(
       "part-paid",

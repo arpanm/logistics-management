@@ -584,27 +584,43 @@ test("UI02-CTL-010 placement vendor projection renders real names and numeric qu
     }>;
   };
   expect(payload.vendors.length).toBeGreaterThan(0);
-  expect(
-    payload.vendors.every(
-      (vendor) =>
-        Boolean(vendor.id && vendor.vendor) &&
-        [vendor.allotted, vendor.placed, vendor.ntp].every(Number.isFinite),
-    ),
-  ).toBe(true);
+  for (const vendor of payload.vendors) {
+    expect(vendor).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        vendor: expect.any(String),
+        allotted: expect.any(Number),
+        placed: expect.any(Number),
+        ntp: expect.any(Number),
+      }),
+    );
+    expect(vendor.id).not.toBe("");
+    expect(vendor.vendor).not.toBe("");
+    for (const total of [vendor.allotted, vendor.placed, vendor.ntp]) {
+      expect(Number.isInteger(total)).toBe(true);
+      expect(total).toBeGreaterThanOrEqual(0);
+    }
+    expect(vendor.placed + vendor.ntp).toBeLessThanOrEqual(vendor.allotted);
+  }
   const section = page
     .getByRole("heading", { name: "Vendor allocation" })
-    .locator("..")
-    .locator("..");
+    .locator("xpath=ancestor::section[1]");
   await expect(section).toBeVisible();
-  const vendors = section.locator("article");
-  await expect(vendors.first()).toBeVisible();
-  expect(await vendors.count()).toBeGreaterThan(0);
-  for (const vendor of await vendors.all()) {
-    await expect(vendor.locator("strong").first()).not.toHaveText("");
+  for (const projected of payload.vendors) {
+    const vendor = section
+      .locator("article")
+      .filter({ hasText: projected.vendor });
+    await expect(vendor).toHaveCount(1);
     await expect(vendor).not.toContainText(/undefined|NaN/);
-    const quantities = await vendor.locator("dd").allTextContents();
-    expect(quantities).toHaveLength(3);
-    expect(quantities.every((value) => /^\d+$/.test(value.trim()))).toBe(true);
+    const totals = Object.entries({
+      Allotted: projected.allotted,
+      Placed: projected.placed,
+      NTP: projected.ntp,
+    });
+    for (const [label, expected] of totals) {
+      const field = vendor.locator("dl > div").filter({ hasText: label });
+      await expect(field.locator("dd")).toHaveText(String(expected));
+    }
   }
 });
 

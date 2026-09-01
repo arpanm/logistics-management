@@ -43,8 +43,17 @@ This register began with the 12 failures from `specs/ALL-FEATURES-E2E-STATUS.md`
 | BUG-CTL-023 | UIREG-CTL-API-001..005      | CTL-01        | Product API            | P0 / Critical | Aggregate summary subqueries correlated an ungrouped outer location column, failing every lens                                                            | Resolved; focused smoke Passing |
 | BUG-UI-024  | UIREG-OPS/FIN/DETAIL        | UI-01         | Responsive UX          | P1 / High     | Global table minima, desktop dialog geometry and in-flow details broke compact layouts/discovery                                                          | Resolved locally / Not Run      |
 | BUG-UI-025  | UI02-OPS/FIN/CTL/DETAIL     | UI-02         | Responsive UX/contract | P1 / High     | Desktop flex forms, offset sticky actions, raw details, global mid-word wrapping and unchecked Control response fields reproduced compact-layout failures | Resolved locally / Not Run      |
+| BUG-CTL-026 | CTL-DB-026 / UI02-CTL-010   | CTL-01/UI-02  | Product API contract   | P1 / High     | A PostgreSQL derived-table alias collided with its `vendor` column, serializing vendor names instead of structured allocation totals                      | Resolved; focused tests Passing |
 
 ## Detailed RCA
+
+### BUG-CTL-026 — Placement vendor allocation summaries failed closed
+
+- **Observed:** The production Placement lens returned HTTP 200 but the UI reported `vendor allocation totals were incomplete`.
+- **RCA:** The vendor metadata query used `vendor` for both the derived-table alias and the scalar name column. PostgreSQL resolved `to_jsonb(vendor)` to the scalar, producing `vendors: ["Sahil Roadlines", ...]` instead of structured records.
+- **Resolution:** The backend now constructs every vendor object explicitly with `id`, `vendor`, `allotted`, `placed`, and `ntp`, while retaining tenant/resource authorization and canonical state predicates. No migration or seed repair is required.
+- **Evidence:** Focused backend contract tests passed 6/6, PostgreSQL reconciliation passed 4/4, and real-browser `UI02-CTL-010` passed 1/1 after local production build/restart.
+- **Status:** Resolved locally and ready for the production deployment recorded with this fix.
 
 ### BUG-CTL-023 — All five Control Tower lens APIs returned HTTP 500
 
