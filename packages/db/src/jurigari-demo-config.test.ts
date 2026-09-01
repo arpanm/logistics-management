@@ -85,13 +85,20 @@ describe("Jurigari seed configuration", () => {
         JURIGARI_ADOPT_TENANT_ID: "not-a-uuid",
         JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM: JURIGARI_ADOPTION_CONFIRMATION,
       }),
-    ).toThrow("version-4 UUID");
+    ).toThrow("tenantId must be a version-4 UUID");
     expect(
       jurigariSeedConfig({
         ...base,
         JURIGARI_ADOPT_TENANT_ID: "415f88a2-675a-476c-8031-87c3ff1ae23b",
+        JURIGARI_ADOPT_LEGAL_ENTITY_ID: "8fa9ddab-d6fa-4e31-a9c0-ab5527889b54",
+        JURIGARI_ADOPT_ROOT_ORGANIZATION_ID:
+          "59d8d9fb-9c0b-413f-b7c3-9ff0a2d8cd12",
+        JURIGARI_ADOPT_TENANT_SCOPE_ID: "a22b8bf4-9b96-46d6-bff4-9dbf12673926",
+        JURIGARI_ADOPT_LEGAL_SCOPE_ID: "d10ed9f1-ef94-4a31-a334-8d060d12d9ec",
+        JURIGARI_ADOPT_OWNER_MEMBERSHIP_ID:
+          "d13a6a02-a72f-4c4d-8934-c28673270c61",
         JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM: JURIGARI_ADOPTION_CONFIRMATION,
-      }).adoptTenantId,
+      }).adoption?.tenantId,
     ).toBe("415f88a2-675a-476c-8031-87c3ff1ae23b");
   });
 });

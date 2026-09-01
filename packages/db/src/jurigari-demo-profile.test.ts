@@ -27,6 +27,15 @@ const config = {
   clientEmail: "piyana10@gmail.com",
 };
 
+const adoption = {
+  tenantId: "415f88a2-675a-476c-8031-87c3ff1ae23b",
+  legalEntityId: "8fa9ddab-d6fa-4e31-a9c0-ab5527889b54",
+  rootOrganizationId: "59d8d9fb-9c0-413f-b7c3-9ff0a2d8cd12",
+  tenantScopeId: "a22b8bf4-9b96-46d6-bff4-9dbf12673926",
+  legalScopeId: "d10ed9f1-ef94-4a31-a334-8d060d12d9ec",
+  ownerMembershipId: "d13a6a02-a72f-4c4d-8934-c28673270c61",
+};
+
 describe("Jurigari bootstrap profile", () => {
   it("uses a collision-free namespace and exactly two active INTERNAL owners", () => {
     const sql = jurigariStatements().join("\n");
@@ -115,10 +124,7 @@ describe("Jurigari bootstrap profile", () => {
 
   it("adopts only the explicitly confirmed matching Jurigari tenant", () => {
     const tenantId = "415f88a2-675a-476c-8031-87c3ff1ae23b";
-    const profile = jurigariBootstrapProfile({
-      ...config,
-      adoptTenantId: tenantId,
-    });
+    const profile = jurigariBootstrapProfile({ ...config, adoption });
     expect(profile.tenantId).toBe(tenantId);
     expect(profile.statements.join("\n")).toContain(tenantId);
     expect(profile.statements.join("\n")).not.toContain(JURIGARI_TENANT_ID);
@@ -136,9 +142,9 @@ describe("Jurigari bootstrap profile", () => {
         legal_name: "Unrelated Logistics Private Limited",
       }),
     ).toThrow("already belongs to another tenant");
-    expect(() => assertDemoProfileAdoptionState(profile, 0)).not.toThrow();
-    expect(() => assertDemoProfileAdoptionState(profile, 1)).toThrow(
-      "has 1 dependent row(s)",
+    expect(() => assertDemoProfileAdoptionState(profile, true)).not.toThrow();
+    expect(() => assertDemoProfileAdoptionState(profile, false)).toThrow(
+      "provisioning graph does not match",
     );
   });
 });

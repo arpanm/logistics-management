@@ -551,17 +551,21 @@ export type DemoBootstrapProfile = {
   adoptExistingTenant?: {
     id: string;
     allowedNames: readonly string[];
-    requiresPristine: true;
+    legalEntityId: string;
+    rootOrganizationId: string;
+    tenantScopeId: string;
+    legalScopeId: string;
+    ownerMembershipId: string;
   };
 };
 
 export function assertDemoProfileAdoptionState(
   profile: Pick<DemoBootstrapProfile, "tenantCode" | "adoptExistingTenant">,
-  dependentRowCount: number,
+  exactMatch: boolean,
 ) {
-  if (profile.adoptExistingTenant && dependentRowCount !== 0) {
+  if (profile.adoptExistingTenant && !exactMatch) {
     throw new Error(
-      `Tenant code ${profile.tenantCode} has ${dependentRowCount} dependent row(s) and cannot be adopted by the deterministic demo profile; use a pristine tenant reservation or a different tenant code.`,
+      `Tenant code ${profile.tenantCode} provisioning graph does not match the explicitly configured adoption IDs.`,
     );
   }
 }
@@ -734,19 +738,25 @@ export async function seedDemoProfile(
         );
         assertDemoProfileTenantCollision(profile, existingTenant[0]);
         if (profile.adoptExistingTenant && existingTenant[0]) {
+          const adoption = profile.adoptExistingTenant;
           const [adoptionState] = await tx.$queryRaw<
-            Array<{ dependentRowCount: number }>
+            Array<{ exactMatch: boolean }>
           >`
-            SELECT (
-              (SELECT count(*) FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid) +
-              (SELECT count(*) FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid) +
-              (SELECT count(*) FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid) +
-              (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid)
-            )::int "dependentRowCount"
+            SELECT
+              (SELECT count(*)=1 FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid) AND
+              EXISTS(SELECT 1 FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid AND id=${adoption.legalEntityId}::uuid) AND
+              (SELECT count(*)=1 FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid) AND
+              EXISTS(SELECT 1 FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid AND id=${adoption.rootOrganizationId}::uuid AND node_type='LEGAL_ENTITY') AND
+              (SELECT count(*)=2 FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid) AND
+              EXISTS(SELECT 1 FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid AND id=${adoption.tenantScopeId}::uuid AND scope_type='TENANT') AND
+              EXISTS(SELECT 1 FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid AND id=${adoption.legalScopeId}::uuid AND scope_type='LEGAL_ENTITY') AND
+              (SELECT count(*)=1 FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid) AND
+              EXISTS(SELECT 1 FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid AND id=${adoption.ownerMembershipId}::uuid AND lower(invited_email)='piyana10@gmail.com')
+              AS "exactMatch"
           `;
           assertDemoProfileAdoptionState(
             profile,
-            adoptionState?.dependentRowCount ?? -1,
+            adoptionState?.exactMatch === true,
           );
         }
 

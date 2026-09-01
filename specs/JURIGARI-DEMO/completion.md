@@ -8,7 +8,7 @@
 
 - Versioned opt-in Jurigari profile with exact public company details and workbook exemplar chain.
 - Exactly two active INTERNAL Tenant Owners linked to Employee records.
-- Safe explicit adoption of the verified-pristine production `JG` reservation by exact UUID/name and zero-dependent-row checks; normally provisioned tenants are rejected.
+- Safe explicit adoption of the provisioned production `JG` graph by exact tenant/name and legal-entity/root-organization/scope/Piyana-membership UUID checks.
 - Insert-only posted invoice, reconciled receipt, and receipt-ledger materialization with exact minor-unit reconciliation.
 - Secret-free verifier, local/AWS runbook, package scripts, and local-only real Playwright login/data traversal.
 

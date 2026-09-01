@@ -4,6 +4,7 @@ import {
   JURIGARI_DATASET,
   JURIGARI_DATASET_VERSION,
   JURIGARI_EXEMPLAR,
+  JURIGARI_TENANT_ID,
   jurigariContentHash,
 } from "./jurigari-demo-profile.js";
 
@@ -13,15 +14,52 @@ export async function verifyJurigariDemo(databaseUrl?: string) {
     const tenants = await withPlatform(
       db,
       (tx) =>
-        tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id::text FROM app.tenants WHERE code='JG'
+        tx.$queryRaw<
+          Array<{
+            id: string;
+            legalEntityId: string;
+            rootOrganizationId: string;
+            tenantScopeId: string;
+            legalScopeId: string;
+            ownerMembershipId: string;
+          }>
+        >`
+        SELECT tenant.id::text id,
+          (SELECT id::text FROM app.legal_entities WHERE tenant_id=tenant.id AND code='JG' LIMIT 1) "legalEntityId",
+          (SELECT id::text FROM app.organization_nodes WHERE tenant_id=tenant.id AND node_type='LEGAL_ENTITY' AND code='JG' LIMIT 1) "rootOrganizationId",
+          (SELECT id::text FROM app.authorization_scope_nodes WHERE tenant_id=tenant.id AND scope_type='TENANT' LIMIT 1) "tenantScopeId",
+          (SELECT id::text FROM app.authorization_scope_nodes WHERE tenant_id=tenant.id AND scope_type='LEGAL_ENTITY' ORDER BY created_at,id LIMIT 1) "legalScopeId",
+          (SELECT id::text FROM app.tenant_memberships WHERE tenant_id=tenant.id AND lower(invited_email)='piyana10@gmail.com' LIMIT 1) "ownerMembershipId"
+        FROM app.tenants tenant WHERE code='JG'
       `,
     );
-    const tenantId = tenants[0]?.id;
+    const tenant = tenants[0];
+    const tenantId = tenant?.id;
     if (!tenantId || tenants.length !== 1) {
       throw new Error("Jurigari verification requires exactly one JG tenant");
     }
-    const contentHash = jurigariContentHash(tenantId);
+    if (
+      !tenant.legalEntityId ||
+      !tenant.rootOrganizationId ||
+      !tenant.tenantScopeId ||
+      !tenant.legalScopeId ||
+      !tenant.ownerMembershipId
+    ) {
+      throw new Error(
+        "Jurigari verification could not resolve the adopted root graph",
+      );
+    }
+    const contentHash =
+      tenantId === JURIGARI_TENANT_ID
+        ? jurigariContentHash(tenantId)
+        : jurigariContentHash(tenantId, {
+            tenantId,
+            legalEntityId: tenant.legalEntityId,
+            rootOrganizationId: tenant.rootOrganizationId,
+            tenantScopeId: tenant.tenantScopeId,
+            legalScopeId: tenant.legalScopeId,
+            ownerMembershipId: tenant.ownerMembershipId,
+          });
     const [result] = await withPlatform(db, (tx) =>
       tx.$queryRawUnsafe<
         Array<{

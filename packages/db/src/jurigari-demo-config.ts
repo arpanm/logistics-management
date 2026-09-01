@@ -7,7 +7,14 @@ export const JURIGARI_TWELVE_CHARACTER_CONFIRMATION =
 export const JURIGARI_ADOPTION_CONFIRMATION = "ADOPT_EXISTING_JURIGARI_TENANT";
 
 export type JurigariSeedConfig = DemoSeedConfig & {
-  adoptTenantId?: string;
+  adoption?: {
+    tenantId: string;
+    legalEntityId: string;
+    rootOrganizationId: string;
+    tenantScopeId: string;
+    legalScopeId: string;
+    ownerMembershipId: string;
+  };
 };
 
 export function jurigariSeedConfig(
@@ -49,6 +56,7 @@ export function jurigariSeedConfig(
     );
   }
   const adoptTenantId = env.JURIGARI_ADOPT_TENANT_ID?.trim();
+  let adoption: JurigariSeedConfig["adoption"];
   if (adoptTenantId) {
     if (
       env.JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM !==
@@ -58,13 +66,24 @@ export function jurigariSeedConfig(
         `Existing-tenant adoption requires JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM=${JURIGARI_ADOPTION_CONFIRMATION}.`,
       );
     }
-    if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        adoptTenantId,
-      )
-    ) {
-      throw new Error("JURIGARI_ADOPT_TENANT_ID must be a version-4 UUID");
+    const values = {
+      tenantId: adoptTenantId,
+      legalEntityId: env.JURIGARI_ADOPT_LEGAL_ENTITY_ID?.trim() ?? "",
+      rootOrganizationId: env.JURIGARI_ADOPT_ROOT_ORGANIZATION_ID?.trim() ?? "",
+      tenantScopeId: env.JURIGARI_ADOPT_TENANT_SCOPE_ID?.trim() ?? "",
+      legalScopeId: env.JURIGARI_ADOPT_LEGAL_SCOPE_ID?.trim() ?? "",
+      ownerMembershipId: env.JURIGARI_ADOPT_OWNER_MEMBERSHIP_ID?.trim() ?? "",
+    };
+    for (const [name, value] of Object.entries(values)) {
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          value,
+        )
+      ) {
+        throw new Error(`JURIGARI adoption ${name} must be a version-4 UUID`);
+      }
     }
+    adoption = values;
   }
   return {
     appEnv,
@@ -80,6 +99,6 @@ export function jurigariSeedConfig(
     vendorEmail: "siddhartha09@gmail.com",
     driverEmail: "siddhartha09@gmail.com",
     clientEmail: "piyana10@gmail.com",
-    adoptTenantId,
+    adoption,
   };
 }

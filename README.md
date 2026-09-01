@@ -225,7 +225,7 @@ make jurigari-seed
 make jurigari-verify
 ```
 
-The first command requires the normal seeded Platform Admin. Replay of the same version/hash is a no-op; a code, email, or same-version content collision fails transactionally. Verification prints only secret-free counts and reconciliation. The AWS-only adoption controls support a **pristine `JG` tenant reservation** (a tenant row with no legal entity, organization, scope, or membership children); a normally provisioned tenant is intentionally rejected because its random child IDs cannot be safely seized by a deterministic demo dataset.
+The first command requires the normal seeded Platform Admin. Replay of the same version/hash is a no-op; a code, email, or same-version content collision fails transactionally. Verification prints only secret-free counts and reconciliation. The AWS-only adoption controls can reuse a normally provisioned `JG` tenant only when the operator supplies the exact tenant, legal entity, root organization, tenant scope, legal scope, and Piyana invitation-membership UUIDs; the seed verifies that complete graph before materialization.
 
 In local/test environments, `http://localhost:3000` and `http://127.0.0.1:3000` are treated as equivalent loopback origins on the configured port. Production accepts only the exact HTTPS origin configured in `FRONTEND_URL`.
 
@@ -865,13 +865,18 @@ sudo -u logistics bash -lc '
   export JURIGARI_DATA_ENABLED=true
   export JURIGARI_DATA_PRODUCTION_CONFIRM=SEED_JURIGARI_PRODUCTION_DATA
   export JURIGARI_ADOPT_TENANT_ID=415f88a2-675a-476c-8031-87c3ff1ae23b
+  export JURIGARI_ADOPT_LEGAL_ENTITY_ID=8fa9ddab-d6fa-4e31-a9c0-ab5527889b54
+  export JURIGARI_ADOPT_ROOT_ORGANIZATION_ID=59d8d9fb-9c0b-413f-b7c3-9ff0a2d8cd12
+  export JURIGARI_ADOPT_TENANT_SCOPE_ID=a22b8bf4-9b96-46d6-bff4-9dbf12673926
+  export JURIGARI_ADOPT_LEGAL_SCOPE_ID=d10ed9f1-ef94-4a31-a334-8d060d12d9ec
+  export JURIGARI_ADOPT_OWNER_MEMBERSHIP_ID=d13a6a02-a72f-4c4d-8934-c28673270c61
   export JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM=ADOPT_EXISTING_JURIGARI_TENANT
   corepack pnpm run jurigari:seed
   corepack pnpm run jurigari:verify
 '
 ```
 
-The two adoption variables are needed only for an intentionally retained pristine `JG` reservation. Resolve the UUID and verify zero legal entities, organization nodes, authorization scopes, and memberships with a read-only database query; never copy the example UUID to another account. Adoption fails unless the code resolves to that exact UUID, its display/legal name is an accepted Jurigari name, and all dependent-row counts are zero. Normally provisioned tenants and reserved user-email collisions fail closed.
+The adoption variables are needed only when reusing an existing `JG` tenant. Resolve every UUID with a platform-context, read-only query; never copy these account-specific examples to another account. Adoption fails unless the code/name and complete provisioned root graph exactly match the supplied IDs and the sole existing membership is Piyana's invitation. Reserved user-email collisions still fail closed.
 
 Production normally requires at least 16 characters. If the deployment owner explicitly confirms use of a supplied 12–15 character demonstration password, both additional one-shot controls are required; this narrow profile exception does not weaken any generic authentication policy:
 

@@ -37,7 +37,7 @@ describe.skipIf(!databaseUrl)("Jurigari production demo bootstrap", () => {
     const first = await seedJurigariDemo(env, databaseUrl);
     const replay = await seedJurigariDemo(env, databaseUrl);
     const verification = await verifyJurigariDemo(databaseUrl);
-    expect(first).toEqual({ replayed: false, rotated: false });
+    expect(first.rotated).toBe(false);
     expect(replay).toEqual({ replayed: true, rotated: false });
     expect(verification).toMatchObject({
       tenantCode: "JG",

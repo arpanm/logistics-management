@@ -137,7 +137,10 @@ const exemplarStatements = [
    ON CONFLICT(tenant_id,namespace) DO UPDATE SET value=excluded.value,updated_at=now(),version=tenant_configuration.version+1`,
 ] as const;
 
-export function jurigariStatements(tenantId = JURIGARI_TENANT_ID) {
+export function jurigariStatements(
+  tenantId = JURIGARI_TENANT_ID,
+  adoption?: JurigariSeedConfig["adoption"],
+) {
   const transformed = DEMO_SQL_STATEMENTS.flatMap((statement) => {
     if (statement.startsWith("INSERT INTO app.tenant_memberships(")) {
       return membershipStatement;
@@ -249,9 +252,31 @@ export function jurigariStatements(tenantId = JURIGARI_TENANT_ID) {
     }
     return result;
   });
-  return [...transformed, ...exemplarStatements].map((statement) =>
-    statement.replaceAll(JURIGARI_TENANT_ID, tenantId),
-  );
+  return [...transformed, ...exemplarStatements].map((statement) => {
+    let remapped = statement.replaceAll(JURIGARI_TENANT_ID, tenantId);
+    if (adoption) {
+      remapped = remapped
+        .replaceAll(
+          "30000000-0000-4000-8000-000000000300",
+          adoption.legalEntityId,
+        )
+        .replaceAll(
+          "30000000-0000-4000-8000-000000000301",
+          adoption.rootOrganizationId,
+        )
+        .replaceAll(
+          "30000000-0000-4000-8000-000000000200",
+          adoption.tenantScopeId,
+        )
+        .replaceAll(
+          "30000000-0000-4000-8000-000000000201",
+          adoption.legalScopeId,
+        )
+        .replaceAll(membershipIds.piyana, adoption.ownerMembershipId)
+        .replace("'LEGAL_ENTITY','ORG-JG'", "'LEGAL_ENTITY','JG'");
+    }
+    return remapped;
+  });
 }
 
 export const JURIGARI_SHOWCASE_MANIFEST = {
@@ -259,14 +284,17 @@ export const JURIGARI_SHOWCASE_MANIFEST = {
   internalEmployees: 2,
 } as const;
 
-export function jurigariContentHash(tenantId = JURIGARI_TENANT_ID) {
+export function jurigariContentHash(
+  tenantId = JURIGARI_TENANT_ID,
+  adoption?: JurigariSeedConfig["adoption"],
+) {
   return createHash("sha256")
     .update(
       JSON.stringify({
         dataset: JURIGARI_DATASET,
         version: JURIGARI_DATASET_VERSION,
         anchor: JURIGARI_ANCHOR_DATE,
-        statements: jurigariStatements(tenantId),
+        statements: jurigariStatements(tenantId, adoption),
         users: [JURIGARI_IDS.owner, JURIGARI_IDS.operations],
       }),
     )
@@ -278,8 +306,8 @@ export const JURIGARI_CONTENT_HASH = jurigariContentHash();
 export function jurigariBootstrapProfile(
   config: JurigariSeedConfig,
 ): DemoBootstrapProfile {
-  const tenantId = config.adoptTenantId ?? JURIGARI_TENANT_ID;
-  const statements = jurigariStatements(tenantId);
+  const tenantId = config.adoption?.tenantId ?? JURIGARI_TENANT_ID;
+  const statements = jurigariStatements(tenantId, config.adoption);
   return {
     dataset: JURIGARI_DATASET,
     datasetVersion: JURIGARI_DATASET_VERSION,
@@ -300,7 +328,7 @@ export function jurigariBootstrapProfile(
       [JURIGARI_IDS.operations, config.operationsEmail, "Siddhartha", false],
     ],
     statements,
-    contentHash: jurigariContentHash(tenantId),
+    contentHash: jurigariContentHash(tenantId, config.adoption),
     showcaseManifest: JURIGARI_SHOWCASE_MANIFEST,
     knownRowPrefix: "31000000-0000-4000-8000-",
     bankAccountHolder: "Sahil Roadlines",
@@ -311,11 +339,15 @@ export function jurigariBootstrapProfile(
     rotationAuditAction: "jurigari.credentials.rotated",
     rotationReason:
       "Explicit JURIGARI_ROTATE_PASSWORD rotation with tenant session revocation",
-    adoptExistingTenant: config.adoptTenantId
+    adoptExistingTenant: config.adoption
       ? {
-          id: config.adoptTenantId,
+          id: config.adoption.tenantId,
           allowedNames: ["Juri Gari", "Jurigari", "Jurigari Pvt Limited"],
-          requiresPristine: true,
+          legalEntityId: config.adoption.legalEntityId,
+          rootOrganizationId: config.adoption.rootOrganizationId,
+          tenantScopeId: config.adoption.tenantScopeId,
+          legalScopeId: config.adoption.legalScopeId,
+          ownerMembershipId: config.adoption.ownerMembershipId,
         }
       : undefined,
   };
