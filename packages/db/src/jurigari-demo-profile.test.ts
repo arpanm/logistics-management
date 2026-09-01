@@ -138,7 +138,7 @@ describe("Jurigari bootstrap profile", () => {
     ).toThrow("already belongs to another tenant");
     expect(() => assertDemoProfileAdoptionState(profile, 0)).not.toThrow();
     expect(() => assertDemoProfileAdoptionState(profile, 1)).toThrow(
-      "already provisioned",
+      "has 1 dependent row(s)",
     );
   });
 });

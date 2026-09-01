@@ -561,7 +561,7 @@ export function assertDemoProfileAdoptionState(
 ) {
   if (profile.adoptExistingTenant && dependentRowCount !== 0) {
     throw new Error(
-      `Tenant code ${profile.tenantCode} is already provisioned and cannot be adopted by the deterministic demo profile; use a pristine tenant reservation or a different tenant code.`,
+      `Tenant code ${profile.tenantCode} has ${dependentRowCount} dependent row(s) and cannot be adopted by the deterministic demo profile; use a pristine tenant reservation or a different tenant code.`,
     );
   }
 }
@@ -734,15 +734,20 @@ export async function seedDemoProfile(
         );
         assertDemoProfileTenantCollision(profile, existingTenant[0]);
         if (profile.adoptExistingTenant && existingTenant[0]) {
-          const [adoptionState] = await tx.$queryRaw<Array<{ count: number }>>`
+          const [adoptionState] = await tx.$queryRaw<
+            Array<{ dependentRowCount: number }>
+          >`
             SELECT (
               (SELECT count(*) FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid) +
               (SELECT count(*) FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid) +
               (SELECT count(*) FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid) +
               (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid)
-            )::int count
+            )::int "dependentRowCount"
           `;
-          assertDemoProfileAdoptionState(profile, adoptionState?.count ?? -1);
+          assertDemoProfileAdoptionState(
+            profile,
+            adoptionState?.dependentRowCount ?? -1,
+          );
         }
 
         let rotated = false;
