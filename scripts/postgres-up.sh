@@ -22,7 +22,7 @@ if docker container inspect "$container_name" >/dev/null 2>&1; then
     docker start "$container_name" >/dev/null
   fi
 else
-  if docker ps --format '{{.Ports}}' | rg -q "127\.0\.0\.1:${host_port}->|0\.0\.0\.0:${host_port}->|:::${host_port}->"; then
+  if docker ps --format '{{.Ports}}' | grep -Eq "127\.0\.0\.1:${host_port}->|0\.0\.0\.0:${host_port}->|:::${host_port}->"; then
     echo "Port ${host_port} is already used by another container. Set CENTRAL_POSTGRES_PORT to the existing shared PostgreSQL port or stop the conflicting container." >&2
     exit 1
   fi
@@ -43,6 +43,21 @@ until docker exec "$container_name" pg_isready -U "$admin_user" -d postgres >/de
   attempt=$((attempt + 1))
   if [[ "$attempt" -ge 30 ]]; then
     echo "Shared PostgreSQL container did not become ready: $container_name" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+# The official image can briefly accept connections on its temporary
+# initialization server before restarting the final PostgreSQL process. Wait
+# past that handoff and prove a real SQL round trip before provisioning roles.
+sleep 2
+attempt=0
+until docker exec "$container_name" psql -U "$admin_user" -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT 1" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [[ "$attempt" -ge 30 ]]; then
+    echo "Shared PostgreSQL did not become SQL-ready: $container_name" >&2
+    docker logs --tail 50 "$container_name" >&2 || true
     exit 1
   fi
   sleep 1
