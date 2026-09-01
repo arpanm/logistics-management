@@ -19,6 +19,8 @@
     "verify": "bash scripts/verify.sh",
     "db:seed": "pnpm --filter @logistics/db run db:seed",
     "demo:seed": "bash scripts/run-app-command.sh demo:seed",
+    "jurigari:seed": "bash scripts/run-app-command.sh jurigari:seed",
+    "jurigari:verify": "bash scripts/run-app-command.sh jurigari:verify",
     "db:reset:test": "pnpm --filter @logistics/db run db:reset:test"
   },
   "devDependencies": {

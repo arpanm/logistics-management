@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status demo-seed dev check test policy-check deploy-local refresh-local health e2e verify status
+.PHONY: help bootstrap bootstrap-production postgres-up postgres-provision postgres-status demo-seed jurigari-seed jurigari-verify dev check test policy-check deploy-local refresh-local health e2e verify status
 
 help:
 	@echo "bootstrap           Validate tools, configure hooks, and install dependencies"
@@ -10,6 +10,8 @@ help:
 	@echo "postgres-provision  Add this project's role, databases, and schemas to shared PostgreSQL"
 	@echo "postgres-status     Verify shared PostgreSQL and the project database"
 	@echo "demo-seed          Install the opt-in reusable demo tenant and records"
+	@echo "jurigari-seed      Install the explicitly authorized Jurigari production demo profile"
+	@echo "jurigari-verify    Verify Jurigari users, exemplar chain, and finance without secrets"
 	@echo "dev                 Start frontend and backend development processes"
 	@echo "check               Run lightweight formatting, linting, and type checks"
 	@echo "test                Run non-browser tests when explicitly requested"
@@ -37,6 +39,12 @@ postgres-status:
 
 demo-seed:
 	@DEMO_DATA_ENABLED=true pnpm run demo:seed
+
+jurigari-seed:
+	@JURIGARI_DATA_ENABLED=true pnpm run jurigari:seed
+
+jurigari-verify:
+	@pnpm run jurigari:verify
 
 dev:
 	@pnpm run dev

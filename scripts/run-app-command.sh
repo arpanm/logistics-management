@@ -40,6 +40,12 @@ case "$requested_command" in
   demo:seed)
     pnpm --filter @logistics/db run demo:seed
     ;;
+  jurigari:seed)
+    pnpm --filter @logistics/db run jurigari:seed
+    ;;
+  jurigari:verify)
+    pnpm --filter @logistics/db run jurigari:verify
+    ;;
   *)
     echo "Unsupported application command: $requested_command" >&2
     exit 1

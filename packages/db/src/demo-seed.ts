@@ -2,9 +2,9 @@ import argon2 from "argon2";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createDatabase } from "./index.js";
-import { demoSeedConfig } from "./demo-seed-config.js";
+import { demoSeedConfig, type DemoSeedConfig } from "./demo-seed-config.js";
 
-const ids = {
+export const DEMO_IDS = {
   platform: "10000000-0000-4000-8000-000000000001",
   owner: "10000000-0000-4000-8000-000000000002",
   operations: "10000000-0000-4000-8000-000000000003",
@@ -16,13 +16,13 @@ const ids = {
   analyst: "10000000-0000-4000-8000-000000000009",
   auditor: "10000000-0000-4000-8000-000000000010",
 } as const;
+const ids = DEMO_IDS;
 
-const tenantId = "10000000-0000-4000-8000-000000000100";
+export const DEMO_TENANT_ID = "10000000-0000-4000-8000-000000000100";
+const tenantId = DEMO_TENANT_ID;
 export const DEMO_DATASET = "logistics-end-to-end-demo";
 export const DEMO_DATASET_VERSION = "2026.09.2";
 export const DEMO_ANCHOR_DATE = "2026-08-31";
-const anchorDateSql = `'${DEMO_ANCHOR_DATE}'::date`;
-const anchorTimeSql = `'2026-08-31T12:00:00+05:30'::timestamptz`;
 const anchorTime = new Date("2026-08-31T12:00:00+05:30");
 
 /** Stable presentation baseline. Canonical records are materialized below; projections remain derived. */
@@ -63,11 +63,21 @@ export const DEMO_SHOWCASE_MANIFEST = {
   notificationSuppression: 1,
 } as const;
 type ShowcaseCountKey = keyof Omit<typeof DEMO_SHOWCASE_MANIFEST, "tenant">;
+export type DemoShowcaseManifest = {
+  readonly [K in keyof typeof DEMO_SHOWCASE_MANIFEST]: number;
+};
 
 export function validateDemoShowcaseCounts(
   counts: Record<ShowcaseCountKey, number>,
 ) {
-  for (const [key, minimum] of Object.entries(DEMO_SHOWCASE_MANIFEST)) {
+  validateDemoShowcaseCountsFor(DEMO_SHOWCASE_MANIFEST, counts);
+}
+
+export function validateDemoShowcaseCountsFor(
+  manifest: DemoShowcaseManifest,
+  counts: Record<ShowcaseCountKey, number>,
+) {
+  for (const [key, minimum] of Object.entries(manifest)) {
     if (key === "tenant") continue;
     const count = counts[key as ShowcaseCountKey];
     if (!Number.isSafeInteger(count) || count < minimum) {
@@ -78,7 +88,7 @@ export function validateDemoShowcaseCounts(
   }
 }
 
-const statements = [
+export const DEMO_SQL_STATEMENTS = [
   `INSERT INTO app.tenants(id,code,name,legal_name,tax_identifier,address,timezone,locale,currency,fiscal_month,fiscal_day,support_name,support_email,support_mobile,short_name,primary_color,accent_color,status,lifecycle_actor_id)
    VALUES('${tenantId}','DEMO','Demo Logistics India','Demo Logistics India Private Limited','29AABCD1234E1Z5',
      '{"line1":"42 Demo Logistics Park","city":"Bengaluru","region":"Karnataka","postalCode":"560001","country":"IN"}'::jsonb,
@@ -482,6 +492,7 @@ const statements = [
   `INSERT INTO reporting.tenant_activity_projection(tenant_id,last_activity_at,user_count,config_count,event_count,refreshed_at) VALUES
    ('${tenantId}',now(),9,4,3,now()) ON CONFLICT(tenant_id) DO UPDATE SET last_activity_at=now(),user_count=9,config_count=4,event_count=3,refreshed_at=now(),updated_at=now()`,
 ] as const;
+const statements = DEMO_SQL_STATEMENTS;
 
 export const DEMO_CONTENT_HASH = createHash("sha256")
   .update(
@@ -506,11 +517,164 @@ export const DEMO_CONTENT_HASH = createHash("sha256")
   )
   .digest("hex");
 
+export type DemoBootstrapIds = {
+  readonly [K in keyof typeof DEMO_IDS]: string;
+};
+export type DemoBootstrapUser = readonly [
+  id: string,
+  email: string,
+  displayName: string,
+  platformAdmin: boolean,
+];
+export type DemoBootstrapProfile = {
+  dataset: string;
+  datasetVersion: string;
+  anchorDate: string;
+  anchorTime: Date;
+  tenantId: string;
+  tenantCode: string;
+  displayName: string;
+  lockKey: string;
+  ids: DemoBootstrapIds;
+  users: readonly DemoBootstrapUser[];
+  statements: readonly string[];
+  contentHash: string;
+  showcaseManifest: DemoShowcaseManifest;
+  knownRowPrefix: string;
+  bankAccountHolder: string;
+  bankVersionId: string;
+  bankVendorId: string;
+  passwordVariable: string;
+  rotateVariable: string;
+  rotationAuditAction: string;
+  rotationReason: string;
+  adoptExistingTenant?: {
+    id: string;
+    allowedNames: readonly string[];
+    requiresPristine: true;
+  };
+};
+
+export function assertDemoProfileAdoptionState(
+  profile: Pick<DemoBootstrapProfile, "tenantCode" | "adoptExistingTenant">,
+  dependentRowCount: number,
+) {
+  if (profile.adoptExistingTenant && dependentRowCount !== 0) {
+    throw new Error(
+      `Tenant code ${profile.tenantCode} is already provisioned and cannot be adopted by the deterministic demo profile; use a pristine tenant reservation or a different tenant code.`,
+    );
+  }
+}
+
+export function assertDemoProfileTenantCollision(
+  profile: Pick<
+    DemoBootstrapProfile,
+    "tenantCode" | "tenantId" | "displayName" | "adoptExistingTenant"
+  >,
+  existingTenant?: { id: string; name: string; legal_name: string },
+) {
+  if (!existingTenant) return;
+  if (existingTenant.id === profile.tenantId && !profile.adoptExistingTenant) {
+    return;
+  }
+  const adoption = profile.adoptExistingTenant;
+  const allowedName = adoption?.allowedNames.some(
+    (name) =>
+      name.toLowerCase() === existingTenant.name.toLowerCase() ||
+      name.toLowerCase() === existingTenant.legal_name.toLowerCase(),
+  );
+  if (
+    !adoption ||
+    adoption.id !== existingTenant.id ||
+    profile.tenantId !== existingTenant.id ||
+    !allowedName
+  ) {
+    throw new Error(
+      `Tenant code ${profile.tenantCode} already belongs to another tenant; resolve the collision before bootstrapping ${profile.displayName}.`,
+    );
+  }
+}
+
+export function assertDemoProfileIdentityCollision(
+  profile: Pick<DemoBootstrapProfile, "tenantCode">,
+  email: string,
+  expectedUserId: string,
+  existingUserId?: string,
+) {
+  if (existingUserId && existingUserId !== expectedUserId) {
+    throw new Error(
+      `Reserved ${profile.tenantCode} identity ${email} already exists with a different id; resolve the identity collision before bootstrapping.`,
+    );
+  }
+}
+
+export function demoBootstrapProfile(
+  config: DemoSeedConfig,
+): DemoBootstrapProfile {
+  return {
+    dataset: DEMO_DATASET,
+    datasetVersion: DEMO_DATASET_VERSION,
+    anchorDate: DEMO_ANCHOR_DATE,
+    anchorTime,
+    tenantId,
+    tenantCode: "DEMO",
+    displayName: "Demo tenant",
+    lockKey: "logistics:demo-seed",
+    ids,
+    users: [
+      [ids.owner, config.tenantOwnerEmail, "Demo Tenant Owner", false],
+      [ids.operations, config.operationsEmail, "Demo Operations User", false],
+      [ids.finance, config.financeEmail, "Demo Finance User", false],
+      [ids.vendor, config.vendorEmail, "Demo Vendor User", false],
+      [ids.driver, config.driverEmail, "Demo Driver User", false],
+      [ids.client, config.clientEmail, "Demo Client User", false],
+      [
+        ids.support,
+        "demo.support@logistics.test",
+        "Demo Regional Support",
+        false,
+      ],
+      [
+        ids.analyst,
+        "demo.analyst@logistics.test",
+        "Demo Control Analyst",
+        false,
+      ],
+      [
+        ids.auditor,
+        "demo.auditor@logistics.test",
+        "Demo Internal Auditor",
+        false,
+      ],
+    ],
+    statements,
+    contentHash: DEMO_CONTENT_HASH,
+    showcaseManifest: DEMO_SHOWCASE_MANIFEST,
+    knownRowPrefix: "11000000-0000-4000-8000-",
+    bankAccountHolder: "Demo Fleet Services",
+    bankVersionId: "10000000-0000-4000-8000-000000000701",
+    bankVendorId: "10000000-0000-4000-8000-000000000700",
+    passwordVariable: "DEMO_USER_PASSWORD",
+    rotateVariable: "DEMO_ROTATE_PASSWORD",
+    rotationAuditAction: "demo.credentials.rotated",
+    rotationReason:
+      "Explicit DEMO_ROTATE_PASSWORD rotation with tenant session revocation",
+  };
+}
+
 export async function seedDemoData(
   env: NodeJS.ProcessEnv = process.env,
   databaseUrl?: string,
 ) {
   const config = demoSeedConfig(env);
+  return seedDemoProfile(demoBootstrapProfile(config), config, databaseUrl);
+}
+
+export async function seedDemoProfile(
+  profile: DemoBootstrapProfile,
+  config: DemoSeedConfig,
+  databaseUrl?: string,
+) {
   const db = createDatabase(databaseUrl);
   const passwordHash = await argon2.hash(config.password, {
     type: argon2.argon2id,
@@ -530,27 +694,11 @@ export async function seedDemoData(
     }),
     "utf8",
   );
-  const users = [
-    [ids.owner, config.tenantOwnerEmail, "Demo Tenant Owner", false],
-    [ids.operations, config.operationsEmail, "Demo Operations User", false],
-    [ids.finance, config.financeEmail, "Demo Finance User", false],
-    [ids.vendor, config.vendorEmail, "Demo Vendor User", false],
-    [ids.driver, config.driverEmail, "Demo Driver User", false],
-    [ids.client, config.clientEmail, "Demo Client User", false],
-    [
-      ids.support,
-      "demo.support@logistics.test",
-      "Demo Regional Support",
-      false,
-    ],
-    [ids.analyst, "demo.analyst@logistics.test", "Demo Control Analyst", false],
-    [
-      ids.auditor,
-      "demo.auditor@logistics.test",
-      "Demo Internal Auditor",
-      false,
-    ],
-  ] as const;
+  const { ids, users } = profile;
+  const tenantId = profile.tenantId;
+  const anchorTime = profile.anchorTime;
+  const profileAnchorDateSql = `'${profile.anchorDate}'::date`;
+  const profileAnchorTimeSql = `'${profile.anchorTime.toISOString()}'::timestamptz`;
 
   try {
     const result = await db.$transaction(
@@ -559,7 +707,8 @@ export async function seedDemoData(
           "SELECT set_config('app.platform_context','on',true)",
         );
         await tx.$executeRawUnsafe(
-          "SELECT pg_advisory_xact_lock(hashtextextended('logistics:demo-seed',0))",
+          "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+          profile.lockKey,
         );
         await tx.$executeRawUnsafe(
           "SELECT set_config('app.current_tenant_id',$1,true)",
@@ -577,13 +726,23 @@ export async function seedDemoData(
             `Active platform administrator ${config.platformAdminEmail} was not found. Run db:seed with PLATFORM_ADMIN_EMAIL first; demo bootstrap never creates or changes the platform administrator.`,
           );
         }
-        const existingTenant = await tx.$queryRawUnsafe<Array<{ id: string }>>(
-          "SELECT id::text FROM app.tenants WHERE code='DEMO'",
+        const existingTenant = await tx.$queryRawUnsafe<
+          Array<{ id: string; name: string; legal_name: string }>
+        >(
+          "SELECT id::text,name,legal_name FROM app.tenants WHERE code=$1",
+          profile.tenantCode,
         );
-        if (existingTenant[0] && existingTenant[0].id !== tenantId) {
-          throw new Error(
-            "Tenant code DEMO already belongs to another tenant; choose a non-conflicting database before bootstrapping demo data.",
-          );
+        assertDemoProfileTenantCollision(profile, existingTenant[0]);
+        if (profile.adoptExistingTenant && existingTenant[0]) {
+          const [adoptionState] = await tx.$queryRaw<Array<{ count: number }>>`
+            SELECT (
+              (SELECT count(*) FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid) +
+              (SELECT count(*) FROM app.authorization_scope_nodes WHERE tenant_id=${tenantId}::uuid) +
+              (SELECT count(*) FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid) +
+              (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id=${tenantId}::uuid)
+            )::int count
+          `;
+          assertDemoProfileAdoptionState(profile, adoptionState?.count ?? -1);
         }
 
         let rotated = false;
@@ -595,18 +754,19 @@ export async function seedDemoData(
           >`
             SELECT id::text,password_hash FROM app.users WHERE email=${email}
           `;
-          if (existing[0] && existing[0].id !== id) {
-            throw new Error(
-              `Reserved demo identity ${email} already exists with a different id; change its email or remove it before bootstrapping demo data.`,
-            );
-          }
+          assertDemoProfileIdentityCollision(
+            profile,
+            email,
+            id,
+            existing[0]?.id,
+          );
           if (
             existing[0] &&
             !(await argon2.verify(existing[0].password_hash, config.password))
           ) {
             if (!config.rotatePassword) {
               throw new Error(
-                `Configured DEMO_USER_PASSWORD does not match existing demo identity ${email}. Reuse the original password or set DEMO_ROTATE_PASSWORD=true to rotate all demo users and revoke their sessions.`,
+                `Configured ${profile.passwordVariable} does not match existing ${profile.tenantCode} identity ${email}. Reuse the original password or set ${profile.rotateVariable}=true to rotate the profile users and revoke their sessions.`,
               );
             }
             rotated = true;
@@ -621,7 +781,7 @@ export async function seedDemoData(
           const revoked = await tx.$queryRaw<Array<{ count: number }>>`
             WITH affected AS (
               UPDATE app.sessions SET revoked_at=transaction_timestamp(),
-                revoked_reason='DEMO_PASSWORD_ROTATED',updated_at=transaction_timestamp(),version=version+1
+                revoked_reason=${`${profile.tenantCode}_PASSWORD_ROTATED`},updated_at=transaction_timestamp(),version=version+1
               WHERE user_id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid,${ids.support}::uuid,${ids.analyst}::uuid,${ids.auditor}::uuid)
                 AND revoked_at IS NULL
               RETURNING id
@@ -632,8 +792,8 @@ export async function seedDemoData(
         const auditRotation = async () => {
           if (!rotated || rotationAudited) return;
           const after = JSON.stringify({
-            dataset: DEMO_DATASET,
-            datasetVersion: DEMO_DATASET_VERSION,
+            dataset: profile.dataset,
+            datasetVersion: profile.datasetVersion,
             affectedUserCount: users.length,
             revokedSessionCount,
             sessionsRevoked: revokedSessionCount > 0,
@@ -642,10 +802,10 @@ export async function seedDemoData(
             INSERT INTO audit.audit_events(
               tenant_id,actor_id,action,target_type,target_id,source,after_json,reason,correlation_id
             ) VALUES(
-              ${tenantId}::uuid,${platformAdminId}::uuid,'demo.credentials.rotated',
+              ${tenantId}::uuid,${platformAdminId}::uuid,${profile.rotationAuditAction},
               'demo_bootstrap',${tenantId}::uuid,'BOOTSTRAP',${after}::jsonb,
-              'Explicit DEMO_ROTATE_PASSWORD rotation with tenant session revocation',
-              ${`demo-bootstrap-password-rotation:${DEMO_DATASET_VERSION}`}
+              ${profile.rotationReason},
+              ${`${profile.tenantCode.toLowerCase()}-bootstrap-password-rotation:${profile.datasetVersion}`}
             )
           `;
           rotationAudited = true;
@@ -654,13 +814,13 @@ export async function seedDemoData(
         if (existingTenant[0]) {
           const markers = await tx.$queryRaw<Array<{ content_hash: string }>>`
             SELECT content_hash::text FROM app.demo_bootstrap_runs
-            WHERE tenant_id=${tenantId}::uuid AND dataset=${DEMO_DATASET}
-              AND dataset_version=${DEMO_DATASET_VERSION}
+            WHERE tenant_id=${tenantId}::uuid AND dataset=${profile.dataset}
+              AND dataset_version=${profile.datasetVersion}
             FOR UPDATE
           `;
-          if (markers[0] && markers[0].content_hash !== DEMO_CONTENT_HASH) {
+          if (markers[0] && markers[0].content_hash !== profile.contentHash) {
             throw new Error(
-              `Demo dataset ${DEMO_DATASET_VERSION} already exists with a different content hash. Bump the dataset version before changing seeded content.`,
+              `${profile.tenantCode} dataset ${profile.datasetVersion} already exists with a different content hash. Bump the dataset version before changing seeded content.`,
             );
           }
           if (markers[0]) {
@@ -670,7 +830,7 @@ export async function seedDemoData(
             `;
             if (count[0]?.count !== users.length) {
               throw new Error(
-                "Demo bootstrap marker exists but one or more configured demo identities are missing.",
+                `${profile.tenantCode} bootstrap marker exists but one or more configured identities are missing.`,
               );
             }
             await auditRotation();
@@ -687,29 +847,44 @@ export async function seedDemoData(
           const actual = await tx.$queryRaw<Array<{ id: string }>>`
           SELECT id::text FROM app.users WHERE email=${email}
         `;
-          if (actual[0]?.id !== id) {
+          if (!actual[0]) {
             throw new Error(
-              `Reserved demo identity ${email} already exists with a different id; change its email or remove it before bootstrapping demo data.`,
+              `Configured ${profile.tenantCode} identity ${email} was not materialized.`,
             );
           }
+          assertDemoProfileIdentityCollision(profile, email, id, actual[0]?.id);
         }
         await tx.$executeRawUnsafe(
           "SELECT set_config('app.actor_user_id',$1,true)",
           platformAdminId,
         );
         await tx.$executeRawUnsafe(
-          "SELECT set_config('app.correlation_id','demo-bootstrap',true)",
+          "SELECT set_config('app.correlation_id',$1,true)",
+          `${profile.tenantCode.toLowerCase()}-bootstrap`,
         );
-        for (const statement of statements) {
+        for (const [
+          statementIndex,
+          statement,
+        ] of profile.statements.entries()) {
           const anchored = statement
             .replaceAll(ids.platform, platformAdminId)
-            .replaceAll("current_date", anchorDateSql)
-            .replaceAll("now()", anchorTimeSql);
-          await tx.$executeRawUnsafe(anchored);
+            .replaceAll("current_date", profileAnchorDateSql)
+            .replaceAll("now()", profileAnchorTimeSql);
+          try {
+            await tx.$executeRawUnsafe(anchored);
+          } catch (error) {
+            const target =
+              statement.match(/^(?:INSERT INTO|UPDATE)\s+([^\s(]+)/)?.[1] ??
+              "unknown";
+            throw new Error(
+              `${profile.tenantCode} bootstrap statement ${statementIndex + 1} (${target}) failed`,
+              { cause: error },
+            );
+          }
           if (statement.startsWith("INSERT INTO app.vendors(")) {
             await tx.$executeRaw`
               INSERT INTO app.vendor_bank_versions(id,tenant_id,vendor_id,version,account_holder,account_ciphertext,account_last4,ifsc,state,maker_id,checker_id,verified_at)
-              VALUES('10000000-0000-4000-8000-000000000701'::uuid,${tenantId}::uuid,'10000000-0000-4000-8000-000000000700'::uuid,1,'Demo Fleet Services',${bankEnvelope},'0001','HDFC0000001','VERIFIED',${ids.owner}::uuid,${ids.finance}::uuid,${anchorTime}-interval '20 days')
+              VALUES(${profile.bankVersionId}::uuid,${tenantId}::uuid,${profile.bankVendorId}::uuid,1,${profile.bankAccountHolder},${bankEnvelope},'0001','HDFC0000001','VERIFIED',${ids.owner}::uuid,${ids.finance}::uuid,${anchorTime}-interval '20 days')
               ON CONFLICT(tenant_id,vendor_id,version) DO NOTHING
             `;
           }
@@ -754,7 +929,7 @@ export async function seedDemoData(
         `;
         if (!showcaseCounts)
           throw new Error("Demo showcase reconciliation returned no counts.");
-        validateDemoShowcaseCounts(showcaseCounts);
+        validateDemoShowcaseCountsFor(profile.showcaseManifest, showcaseCounts);
         const [integrity] = await tx.$queryRaw<
           Array<{
             financialMismatchCount: number;
@@ -768,10 +943,10 @@ export async function seedDemoData(
             ((SELECT count(*) FROM app.indents WHERE tenant_id=${tenantId}::uuid AND (requested_vehicles<=0 OR quantity_milli<=0))
               +(SELECT count(*) FROM app.allocations WHERE tenant_id=${tenantId}::uuid AND allotted_vehicles<=0))::int "invalidQuantityCount",
             (SELECT count(*)::int FROM (
-              SELECT tenant_id FROM app.clients WHERE id::text LIKE '11000000-0000-4000-8000-%'
-              UNION ALL SELECT tenant_id FROM app.indents WHERE id::text LIKE '11000000-0000-4000-8000-%'
-              UNION ALL SELECT tenant_id FROM app.client_invoices WHERE id::text LIKE '11000000-0000-4000-8000-%'
-              UNION ALL SELECT tenant_id FROM app.vendor_bills WHERE id::text LIKE '11000000-0000-4000-8000-%'
+              SELECT tenant_id FROM app.clients WHERE id::text LIKE ${`${profile.knownRowPrefix}%`}
+              UNION ALL SELECT tenant_id FROM app.indents WHERE id::text LIKE ${`${profile.knownRowPrefix}%`}
+              UNION ALL SELECT tenant_id FROM app.client_invoices WHERE id::text LIKE ${`${profile.knownRowPrefix}%`}
+              UNION ALL SELECT tenant_id FROM app.vendor_bills WHERE id::text LIKE ${`${profile.knownRowPrefix}%`}
             ) known_demo_rows WHERE tenant_id<>${tenantId}::uuid) "foreignTenantRowCount"
         `;
         if (
@@ -783,12 +958,12 @@ export async function seedDemoData(
           );
         }
         const summary = JSON.stringify({
-          tenantCode: "DEMO",
-          manifest: DEMO_SHOWCASE_MANIFEST,
+          tenantCode: profile.tenantCode,
+          manifest: profile.showcaseManifest,
         });
         await tx.$executeRaw`
           INSERT INTO app.demo_bootstrap_runs(tenant_id,dataset,dataset_version,content_hash,anchor_date,summary)
-          VALUES(${tenantId}::uuid,${DEMO_DATASET},${DEMO_DATASET_VERSION},${DEMO_CONTENT_HASH},${DEMO_ANCHOR_DATE}::date,
+          VALUES(${tenantId}::uuid,${profile.dataset},${profile.datasetVersion},${profile.contentHash},${profile.anchorDate}::date,
             ${summary}::jsonb)
           ON CONFLICT(tenant_id,dataset,dataset_version) DO NOTHING
         `;
@@ -799,8 +974,8 @@ export async function seedDemoData(
     );
     console.log(
       result.replayed
-        ? `Demo tenant DEMO already matches ${DEMO_DATASET_VERSION}; no data changes were required${result.rotated ? " after explicit password rotation" : ""}.`
-        : `Demo tenant DEMO is ready with ${config.tenantOwnerEmail} and role-specific users.`,
+        ? `${profile.displayName} ${profile.tenantCode} already matches ${profile.datasetVersion}; no data changes were required${result.rotated ? " after explicit password rotation" : ""}.`
+        : `${profile.displayName} ${profile.tenantCode} is ready with ${users.length} protected profile users.`,
     );
     return result;
   } finally {

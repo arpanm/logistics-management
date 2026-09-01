@@ -19,6 +19,7 @@ export default defineConfig({
     "ui-responsive-regression.spec.ts",
     "platform-tenant-user-admin.spec.ts",
     "demo-data.spec.ts",
+    "jurigari-demo.spec.ts",
   ],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

@@ -207,6 +207,26 @@ pnpm exec playwright test tests/e2e/demo-data.spec.ts --project=chromium
 
 Do not use a demo tenant for real business data. Normal deployments never seed, reset, or rotate it. To rotate all AWS demo-user passwords, change the protected `DEMO_USER_PASSWORD`, run the production command below with `DEMO_ROTATE_PASSWORD=true`, and clear that one-shot flag afterward; the bootstrap increments authentication versions and revokes existing demo sessions. To take the demo offline without destructive shared-database cleanup, deactivate tenant `DEMO` from the Platform Admin screen.
 
+### Jurigari production demonstration profile
+
+The dedicated `JG` profile reuses the rich canonical demo graph without changing `db:seed`, `demo:seed`, first-time deployment, or recurring deployment. It is an explicit operator action and never stores or prints its password. The only main users are active INTERNAL Tenant Owners linked to Employee records:
+
+| Name                 | Login email              |
+| -------------------- | ------------------------ |
+| Piyana Bandyopadhyay | `piyana10@gmail.com`     |
+| Siddhartha           | `siddhartha09@gmail.com` |
+
+The operator supplies their shared `JURIGARI_USER_PASSWORD` privately. There is no password in Git or this README. The stable chain is Tata Consumer Products Ltd (`TCPL`) → Kunigal (`TCPL-KUN`) → Sahil Roadlines (`VEN-0142`) → indent `IND-4231` → vehicle `KA 25 AB 4471` → LR `JGL/24118` → invoice `INV-26-3427` → receipt `RCP-2026-0881`. Invoice minor units reconcile as `28,400,000 + 1,420,000 = 29,820,000`; receipt is `15,000,000`, deduction `840,000`, and remaining invoice balance `14,820,000`.
+
+For local or test installation, put `JURIGARI_USER_PASSWORD` and the existing `MFA_ENCRYPTION_KEY` in the protected `.env`, then run:
+
+```bash
+make jurigari-seed
+make jurigari-verify
+```
+
+The first command requires the normal seeded Platform Admin. Replay of the same version/hash is a no-op; a code, email, or same-version content collision fails transactionally. Verification prints only secret-free counts and reconciliation. The AWS-only adoption controls support a **pristine `JG` tenant reservation** (a tenant row with no legal entity, organization, scope, or membership children); a normally provisioned tenant is intentionally rejected because its random child IDs cannot be safely seized by a deterministic demo dataset.
+
 In local/test environments, `http://localhost:3000` and `http://127.0.0.1:3000` are treated as equivalent loopback origins on the configured port. Production accepts only the exact HTTPS origin configured in `FRONTEND_URL`.
 
 Tenant primary and accent colors may use any valid six-digit hex value. Tenant-branded surfaces automatically select black or white foreground text for WCAG AA contrast; administrators do not need to alter a valid brand color merely to match a fixed text color.
@@ -826,6 +846,41 @@ curl -fsS https://13.61.27.202/api/v1/health/ready | jq
 ```
 
 The second identical invocation must report that no data changes were required. For an intentional password rotation only, set `DEMO_ROTATE_PASSWORD=true` for that invocation after changing `DEMO_USER_PASSWORD`; all demo sessions are revoked with real security timestamps and a secret-free immutable audit event. Production credentials are never listed in this repository: the deployment owner supplies the protected password privately to demonstrators and rotates or deactivates `DEMO` after use.
+
+#### Install or verify the Jurigari profile on AWS
+
+Add the password only to `/etc/logistics-management.env` with `sudoedit`; do not paste it into a command or commit it:
+
+```dotenv
+JURIGARI_USER_PASSWORD='SUPPLY_PRIVATELY'
+```
+
+Then explicitly authorize the production bootstrap for that invocation:
+
+```bash
+sudo -u logistics bash -lc '
+  set -euo pipefail
+  cd /opt/logistics-management
+  set -a; source /etc/logistics-management.env; set +a
+  export JURIGARI_DATA_ENABLED=true
+  export JURIGARI_DATA_PRODUCTION_CONFIRM=SEED_JURIGARI_PRODUCTION_DATA
+  export JURIGARI_ADOPT_TENANT_ID=415f88a2-675a-476c-8031-87c3ff1ae23b
+  export JURIGARI_ADOPT_EXISTING_TENANT_CONFIRM=ADOPT_EXISTING_JURIGARI_TENANT
+  corepack pnpm run jurigari:seed
+  corepack pnpm run jurigari:verify
+'
+```
+
+The two adoption variables are needed only for an intentionally retained pristine `JG` reservation. Resolve the UUID and verify zero legal entities, organization nodes, authorization scopes, and memberships with a read-only database query; never copy the example UUID to another account. Adoption fails unless the code resolves to that exact UUID, its display/legal name is an accepted Jurigari name, and all dependent-row counts are zero. Normally provisioned tenants and reserved user-email collisions fail closed.
+
+Production normally requires at least 16 characters. If the deployment owner explicitly confirms use of a supplied 12–15 character demonstration password, both additional one-shot controls are required; this narrow profile exception does not weaken any generic authentication policy:
+
+```bash
+export JURIGARI_ALLOW_12_CHAR_PRODUCTION_PASSWORD=true
+export JURIGARI_12_CHAR_PASSWORD_CONFIRM=I_ACCEPT_DEDICATED_12_CHAR_JURIGARI_PASSWORD
+```
+
+Set those variables inside the same protected `sudo -u logistics bash -lc` invocation before `jurigari:seed`, then let them disappear with the shell. For an intentional rotation, change the protected password and set `JURIGARI_ROTATE_PASSWORD=true` only for one invocation; both users' sessions are revoked and the action is audited. Recurring `update-aws-deployment.sh` continues to omit this seed.
 
 For the one update from a checkout that predates `update-aws-deployment.sh`, bootstrap it with the older SHA-based deployer that is already on EC2. This fetches `main`, deploys that exact commit, and makes the updater available; use the normal command above thereafter:
 
