@@ -12,15 +12,71 @@ const ids = {
   vendor: "10000000-0000-4000-8000-000000000005",
   driver: "10000000-0000-4000-8000-000000000006",
   client: "10000000-0000-4000-8000-000000000007",
+  support: "10000000-0000-4000-8000-000000000008",
+  analyst: "10000000-0000-4000-8000-000000000009",
+  auditor: "10000000-0000-4000-8000-000000000010",
 } as const;
 
 const tenantId = "10000000-0000-4000-8000-000000000100";
 export const DEMO_DATASET = "logistics-end-to-end-demo";
-export const DEMO_DATASET_VERSION = "2026.08.1";
+export const DEMO_DATASET_VERSION = "2026.09.2";
 export const DEMO_ANCHOR_DATE = "2026-08-31";
 const anchorDateSql = `'${DEMO_ANCHOR_DATE}'::date`;
 const anchorTimeSql = `'2026-08-31T12:00:00+05:30'::timestamptz`;
 const anchorTime = new Date("2026-08-31T12:00:00+05:30");
+
+/** Stable presentation baseline. Canonical records are materialized below; projections remain derived. */
+export const DEMO_SHOWCASE_MANIFEST = {
+  tenant: 1,
+  regions: 2,
+  branches: 3,
+  internalEmployees: 6,
+  clients: 4,
+  clientLocations: 10,
+  vendors: 5,
+  activeVendors: 4,
+  vehicles: 12,
+  drivers: 10,
+  indents: 36,
+  allocations: 24,
+  trips: 18,
+  podTasks: 14,
+  clientInvoices: 18,
+  receipts: 8,
+  vendorBills: 14,
+  paymentBatches: 5,
+  alerts: 12,
+  lanes: 6,
+  currentCommercialExamples: 2,
+  expiredCommercialExamples: 1,
+  upcomingCommercialExamples: 2,
+  placementLensRows: 10,
+  podLensRows: 10,
+  collectionLensRows: 10,
+  tripLensRows: 10,
+  vendorPayableLensRows: 10,
+  placementPortfolios: 3,
+  podPortfolios: 3,
+  collectionPortfolios: 3,
+  tripPortfolios: 3,
+  vendorPayablePortfolios: 3,
+  notificationSuppression: 1,
+} as const;
+type ShowcaseCountKey = keyof Omit<typeof DEMO_SHOWCASE_MANIFEST, "tenant">;
+
+export function validateDemoShowcaseCounts(
+  counts: Record<ShowcaseCountKey, number>,
+) {
+  for (const [key, minimum] of Object.entries(DEMO_SHOWCASE_MANIFEST)) {
+    if (key === "tenant") continue;
+    const count = counts[key as ShowcaseCountKey];
+    if (!Number.isSafeInteger(count) || count < minimum) {
+      throw new Error(
+        `Demo showcase reconciliation failed for ${key}: expected at least ${minimum}, received ${count}.`,
+      );
+    }
+  }
+}
 
 const statements = [
   `INSERT INTO app.tenants(id,code,name,legal_name,tax_identifier,address,timezone,locale,currency,fiscal_month,fiscal_day,support_name,support_email,support_mobile,short_name,primary_color,accent_color,status,lifecycle_actor_id)
@@ -40,12 +96,26 @@ const statements = [
    ON CONFLICT(tenant_id,scope_type,code) DO UPDATE SET name=excluded.name,status='ACTIVE',updated_at=now()`,
   `INSERT INTO app.organization_nodes(id,tenant_id,code,name,node_type,parent_id,authorization_scope_node_id,timezone,address,latitude,longitude,postal_codes,geofence,active_from,state,created_by) VALUES
    ('10000000-0000-4000-8000-000000000301','${tenantId}','DEMO','Demo Logistics India Private Limited','LEGAL_ENTITY',null,'10000000-0000-4000-8000-000000000201','Asia/Kolkata','42 Demo Logistics Park, Bengaluru',12.971599,77.594566,ARRAY['560001'],'{"type":"RADIUS","radiusKm":25}'::jsonb,current_date,'ACTIVE','${ids.platform}'),
-   ('10000000-0000-4000-8000-000000000302','${tenantId}','BLR-HUB','Bengaluru Operations Hub','BRANCH','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000204','Asia/Kolkata','Peenya Industrial Area, Bengaluru',13.028500,77.519700,ARRAY['560058'],'{"type":"RADIUS","radiusKm":15}'::jsonb,current_date,'ACTIVE','${ids.platform}')
+   ('10000000-0000-4000-8000-000000000302','${tenantId}','BLR-HUB','Bengaluru Operations Hub','BRANCH','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000204','Asia/Kolkata','Peenya Industrial Area, Bengaluru',13.028500,77.519700,ARRAY['560058'],'{"type":"RADIUS","radiusKm":15}'::jsonb,current_date,'ACTIVE','${ids.platform}'),
+   ('10000000-0000-4000-8000-000000000303','${tenantId}','WEST','Demo West Region','REGION','10000000-0000-4000-8000-000000000301',null,'Asia/Kolkata','Mumbai, Maharashtra',19.076000,72.877700,ARRAY['400001'],'{}'::jsonb,current_date,'ACTIVE','${ids.platform}'),
+   ('10000000-0000-4000-8000-000000000304','${tenantId}','NORTH','Demo North Region','REGION','10000000-0000-4000-8000-000000000301',null,'Asia/Kolkata','Delhi NCR',28.613900,77.209000,ARRAY['110001'],'{}'::jsonb,current_date,'ACTIVE','${ids.platform}'),
+   ('10000000-0000-4000-8000-000000000305','${tenantId}','MUM-HUB','Mumbai Operations Hub','BRANCH','10000000-0000-4000-8000-000000000303',null,'Asia/Kolkata','Bhiwandi, Maharashtra',19.281300,73.048300,ARRAY['421302'],'{}'::jsonb,current_date,'ACTIVE','${ids.platform}'),
+   ('10000000-0000-4000-8000-000000000306','${tenantId}','DEL-HUB','Delhi Operations Hub','BRANCH','10000000-0000-4000-8000-000000000304',null,'Asia/Kolkata','Gurugram, Haryana',28.459500,77.026600,ARRAY['122001'],'{}'::jsonb,current_date,'ACTIVE','${ids.platform}')
    ON CONFLICT(tenant_id,code) DO UPDATE SET name=excluded.name,state='ACTIVE',updated_at=now()`,
   `INSERT INTO app.organization_closure(tenant_id,ancestor_id,descendant_id,depth) VALUES
    ('${tenantId}','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000301',0),
    ('${tenantId}','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000302',1),
-   ('${tenantId}','10000000-0000-4000-8000-000000000302','10000000-0000-4000-8000-000000000302',0)
+   ('${tenantId}','10000000-0000-4000-8000-000000000302','10000000-0000-4000-8000-000000000302',0),
+   ('${tenantId}','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000303',1),
+   ('${tenantId}','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000304',1),
+   ('${tenantId}','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000305',2),
+   ('${tenantId}','10000000-0000-4000-8000-000000000301','10000000-0000-4000-8000-000000000306',2),
+   ('${tenantId}','10000000-0000-4000-8000-000000000303','10000000-0000-4000-8000-000000000303',0),
+   ('${tenantId}','10000000-0000-4000-8000-000000000303','10000000-0000-4000-8000-000000000305',1),
+   ('${tenantId}','10000000-0000-4000-8000-000000000304','10000000-0000-4000-8000-000000000304',0),
+   ('${tenantId}','10000000-0000-4000-8000-000000000304','10000000-0000-4000-8000-000000000306',1),
+   ('${tenantId}','10000000-0000-4000-8000-000000000305','10000000-0000-4000-8000-000000000305',0),
+   ('${tenantId}','10000000-0000-4000-8000-000000000306','10000000-0000-4000-8000-000000000306',0)
    ON CONFLICT DO NOTHING`,
   `INSERT INTO app.roles(tenant_id,code,name,description,protected,privilege_level,portal_audiences,status) VALUES
    ('${tenantId}','TENANT_OWNER','Tenant Owner','Complete demo tenant administration',true,'PROTECTED',ARRAY['INTERNAL'],'ACTIVE'),
@@ -71,7 +141,10 @@ const statements = [
    ('10000000-0000-4000-8000-000000000403','${tenantId}','${ids.finance}','Demo Finance User','demo.finance@logistics.test','DEMO-FIN',null,'INTERNAL','ACTIVE'),
    ('10000000-0000-4000-8000-000000000404','${tenantId}','${ids.vendor}','Demo Vendor User','demo.vendor@logistics.test','DEMO-VENDOR',null,'VENDOR','ACTIVE'),
    ('10000000-0000-4000-8000-000000000405','${tenantId}','${ids.driver}','Demo Driver User','demo.driver@logistics.test','DEMO-DRIVER',null,'DRIVER','ACTIVE'),
-   ('10000000-0000-4000-8000-000000000406','${tenantId}','${ids.client}','Demo Client User','demo.client@logistics.test','DEMO-CLIENT',null,'CLIENT','ACTIVE')
+   ('10000000-0000-4000-8000-000000000406','${tenantId}','${ids.client}','Demo Client User','demo.client@logistics.test','DEMO-CLIENT',null,'CLIENT','ACTIVE'),
+   ('10000000-0000-4000-8000-000000000407','${tenantId}','${ids.support}','Demo Regional Support','demo.support@logistics.test','DEMO-SUPPORT',null,'INTERNAL','ACTIVE'),
+   ('10000000-0000-4000-8000-000000000408','${tenantId}','${ids.analyst}','Demo Control Analyst','demo.analyst@logistics.test','DEMO-ANALYST',null,'INTERNAL','ACTIVE'),
+   ('10000000-0000-4000-8000-000000000409','${tenantId}','${ids.auditor}','Demo Internal Auditor','demo.auditor@logistics.test','DEMO-AUDITOR',null,'INTERNAL','ACTIVE')
    ON CONFLICT(tenant_id,invited_email) DO UPDATE SET user_id=excluded.user_id,invited_name=excluded.invited_name,employee_code=excluded.employee_code,role=excluded.role,portal_audience=excluded.portal_audience,status='ACTIVE',updated_at=now()`,
   `INSERT INTO app.membership_role_assignments(tenant_id,membership_id,role_id,status)
    SELECT '${tenantId}',m.id,r.id,'ACTIVE' FROM app.tenant_memberships m JOIN app.roles r ON r.tenant_id=m.tenant_id AND r.code=CASE m.id
@@ -80,8 +153,11 @@ const statements = [
      WHEN '10000000-0000-4000-8000-000000000403' THEN 'FINANCE_EXECUTIVE'
      WHEN '10000000-0000-4000-8000-000000000404' THEN 'VENDOR_OWNER'
      WHEN '10000000-0000-4000-8000-000000000405' THEN 'DRIVER'
-     WHEN '10000000-0000-4000-8000-000000000406' THEN 'CLIENT_VIEWER' END
-   WHERE m.tenant_id='${tenantId}' AND m.id IN ('10000000-0000-4000-8000-000000000401','10000000-0000-4000-8000-000000000402','10000000-0000-4000-8000-000000000403','10000000-0000-4000-8000-000000000404','10000000-0000-4000-8000-000000000405','10000000-0000-4000-8000-000000000406')
+     WHEN '10000000-0000-4000-8000-000000000406' THEN 'CLIENT_VIEWER'
+     WHEN '10000000-0000-4000-8000-000000000407' THEN 'TRAFFIC_PLACEMENT_EXECUTIVE'
+     WHEN '10000000-0000-4000-8000-000000000408' THEN 'FINANCE_EXECUTIVE'
+     WHEN '10000000-0000-4000-8000-000000000409' THEN 'TENANT_OWNER' END
+   WHERE m.tenant_id='${tenantId}' AND m.id IN ('10000000-0000-4000-8000-000000000401','10000000-0000-4000-8000-000000000402','10000000-0000-4000-8000-000000000403','10000000-0000-4000-8000-000000000404','10000000-0000-4000-8000-000000000405','10000000-0000-4000-8000-000000000406','10000000-0000-4000-8000-000000000407','10000000-0000-4000-8000-000000000408','10000000-0000-4000-8000-000000000409')
    ON CONFLICT(tenant_id,membership_id,role_id) DO UPDATE SET status='ACTIVE',effective_to=null,updated_at=now()`,
   `INSERT INTO app.scope_grants(tenant_id,assignment_id,scope_node_id,action,status)
    SELECT '${tenantId}',a.id,CASE m.portal_audience WHEN 'CLIENT' THEN '10000000-0000-4000-8000-000000000202'::uuid WHEN 'VENDOR' THEN '10000000-0000-4000-8000-000000000203'::uuid WHEN 'DRIVER' THEN '10000000-0000-4000-8000-000000000203'::uuid ELSE '10000000-0000-4000-8000-000000000200'::uuid END,'ADMIN','ACTIVE'
@@ -220,11 +296,183 @@ const statements = [
   `INSERT INTO app.operational_alert_actions(id,tenant_id,alert_id,actor_id,action,reason,payload,occurred_at) VALUES
    ('10000000-0000-4000-8000-000000000966','${tenantId}','10000000-0000-4000-8000-000000000965','${ids.operations}','ACKNOWLEDGE','Demo operations user is arranging placement.','{"ownerMembershipId":"10000000-0000-4000-8000-000000000402"}'::jsonb,now()-interval '30 minutes')
    ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.clients(id,tenant_id,code,legal_name,industry,billing_entity_id,credit_days,pod_mode,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((600000+g)::text,12,'0'))::uuid,'${tenantId}',
+     'DEMO-CLIENT-'||lpad(g::text,2,'0'),
+     (ARRAY['Demo Consumer Products Limited','Demo Healthcare Distribution Limited','Demo Industrial Components Limited'])[g],
+     (ARRAY['Consumer goods','Healthcare','Manufacturing'])[g],'10000000-0000-4000-8000-000000000301'::uuid,
+     (ARRAY[30,45,21])[g],'DIGITAL','ACTIVE'
+   FROM generate_series(1,3) g ON CONFLICT(tenant_id,code) DO NOTHING`,
+  `INSERT INTO app.client_locations(id,tenant_id,client_id,code,name,location_type,organization_node_id,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((601000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((600000+((g-1)%3)+1)::text,12,'0'))::uuid,
+     'DEMO-LOC-'||lpad(g::text,2,'0'),
+     (ARRAY['Pune Fulfilment Centre','Chennai Regional Depot','Mumbai Retail Hub','Delhi Distribution Centre','Ahmedabad Cross-dock','Kolkata Regional Store','Jaipur Service Centre','Kochi Customer Warehouse'])[g],
+     CASE WHEN g%3=0 THEN 'STORE' ELSE 'WAREHOUSE' END,
+     (ARRAY['10000000-0000-4000-8000-000000000302'::uuid,'10000000-0000-4000-8000-000000000305'::uuid,'10000000-0000-4000-8000-000000000306'::uuid])[((g-1)%3)+1],'ACTIVE'
+   FROM generate_series(1,8) g ON CONFLICT(tenant_id,client_id,code) DO NOTHING`,
+  `INSERT INTO app.contracts(id,tenant_id,client_id,code,name,state,current_version,effective_from,created_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((610000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((600000+g)::text,12,'0'))::uuid,'DEMO-CONTRACT-'||lpad(g::text,2,'0'),
+     'DEMO showcase contract '||lpad(g::text,2,'0'),'PUBLISHED',1,current_date-60,'${ids.owner}'::uuid
+   FROM generate_series(1,3) g ON CONFLICT(tenant_id,code) DO NOTHING`,
+  `INSERT INTO app.contract_versions(id,tenant_id,contract_id,version,credit_days,pod_mode,document_requirements,terms,snapshot_hash,published_at,created_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((611000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((610000+g)::text,12,'0'))::uuid,1,30,'DIGITAL','["LR","POD"]'::jsonb,
+     '{"currency":"INR","synthetic":true}'::jsonb,'demo-showcase-contract-'||g,now()-interval '60 days','${ids.owner}'::uuid
+   FROM generate_series(1,3) g ON CONFLICT(tenant_id,contract_id,version) DO NOTHING`,
+  `INSERT INTO app.contract_lanes(id,tenant_id,contract_version_id,code,origin_location_id,destination_location_id,truck_type,cargo_type,quantity_min_milli,quantity_max_milli,priority,service_window)
+   SELECT ('11000000-0000-4000-8000-'||lpad((612000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((611000+((g-1)%3)+1)::text,12,'0'))::uuid,'DEMO-LANE-'||lpad(g::text,2,'0'),
+     ('11000000-0000-4000-8000-'||lpad((601000+g)::text,12,'0'))::uuid,
+     ('11000000-0000-4000-8000-'||lpad((601003+g)::text,12,'0'))::uuid,'32 FT SXL','FMCG',1000000,9000000,100,
+     '{"pickupHours":4,"transitHours":18}'::jsonb
+   FROM generate_series(1,5) g ON CONFLICT(tenant_id,contract_version_id,code) DO NOTHING`,
+  `INSERT INTO app.client_rate_lines(id,tenant_id,lane_id,charge_code,basis,amount_minor,tax_basis_points,effective_from,effective_to,priority,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((613000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((612000+g)::text,12,'0'))::uuid,'FREIGHT','PER_TRIP',800000+(g*25000),1800,
+     CASE WHEN g=2 THEN now()-interval '180 days' WHEN g IN (3,5) THEN now()+interval '30 days' ELSE now()-interval '30 days' END,
+     CASE WHEN g=2 THEN now()-interval '30 days' ELSE null END,100,
+     CASE WHEN g=2 THEN 'SUPERSEDED' WHEN g=5 THEN 'APPROVED' ELSE 'PUBLISHED' END
+   FROM generate_series(1,5) g ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.sla_rules(id,tenant_id,lane_id,placement_minutes,transit_minutes,pod_minutes,effective_from,effective_to,priority)
+   SELECT ('11000000-0000-4000-8000-'||lpad((614000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((612000+g)::text,12,'0'))::uuid,240,1080,1440,
+     CASE WHEN g=2 THEN now()-interval '180 days' WHEN g IN (3,5) THEN now()+interval '30 days' ELSE now()-interval '30 days' END,
+     CASE WHEN g=2 THEN now()-interval '30 days' ELSE null END,100
+   FROM generate_series(1,5) g ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.vendors(id,tenant_id,code,legal_name,pan,gstin,tds_basis_points,payment_terms_days,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((700000+g)::text,12,'0'))::uuid,'${tenantId}',
+     'DEMO-VENDOR-'||lpad(g::text,2,'0'),
+     (ARRAY['Demo Express Carriers Private Limited','Demo Southern Roadways Limited','Demo National Freight Services','Demo Expired Compliance Transport'])[g],
+     'DMOPN'||lpad(g::text,4,'0')||'X','29DMOGS'||lpad(g::text,4,'0')||'Z5',200,15,
+     CASE WHEN g=4 THEN 'BLOCKED' ELSE 'ACTIVE' END
+   FROM generate_series(1,4) g ON CONFLICT(tenant_id,code) DO NOTHING`,
+  `INSERT INTO app.vehicles(id,tenant_id,vendor_id,registration_number,vehicle_type,make,model,model_year,capacity_milli,gps_device_id,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((710000+g)::text,12,'0'))::uuid,'${tenantId}',
+     CASE WHEN g<=3 THEN '10000000-0000-4000-8000-000000000700'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((700000+((g-4)%3)+1)::text,12,'0'))::uuid END,
+     'DEMO'||lpad(g::text,6,'0'),'32 FT SXL',CASE WHEN g%2=0 THEN 'Tata' ELSE 'Ashok Leyland' END,
+     CASE WHEN g%2=0 THEN 'LPT' ELSE 'Ecomet' END,2024,9000000,'DEMO-GPS-'||lpad((g+2)::text,2,'0'),
+     CASE WHEN g=10 THEN 'BLOCKED' ELSE 'ACTIVE' END
+   FROM generate_series(1,10) g ON CONFLICT(tenant_id,registration_number) DO NOTHING`,
+  `INSERT INTO app.drivers(id,tenant_id,vendor_id,code,display_name,mobile,licence_number,licence_class,licence_valid_to,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((720000+g)::text,12,'0'))::uuid,'${tenantId}',
+     CASE WHEN g<=2 THEN '10000000-0000-4000-8000-000000000700'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((700000+((g-3)%3)+1)::text,12,'0'))::uuid END,
+     'DRV-DEMO-'||lpad((g+2)::text,2,'0'),'Demo Driver '||lpad((g+2)::text,2,'0'),'+91980000'||lpad(g::text,4,'0'),
+     'DEMO-LIC-'||lpad((g+2)::text,4,'0'),'HMV',(current_date+CASE WHEN g=8 THEN -1 ELSE 730 END)::date,
+     CASE WHEN g=8 THEN 'BLOCKED' ELSE 'ACTIVE' END
+   FROM generate_series(1,8) g ON CONFLICT(tenant_id,code) DO NOTHING`,
+  `INSERT INTO app.indents(id,tenant_id,indent_no,client_id,client_location_id,contract_version_id,lane_id,requested_vehicles,quantity_milli,pickup_window_start,pickup_window_end,committed_placement_at,owner_membership_id,source,source_reference,cargo_type,body_type,commercial_snapshot,state,created_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((800000+g)::text,12,'0'))::uuid,'${tenantId}','DEMO-IND-'||lpad((g+4)::text,3,'0'),
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000600'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((600000+((g-1)%3)+1)::text,12,'0'))::uuid END,
+     CASE WHEN g%4=0 THEN (CASE WHEN g%8=0 THEN '10000000-0000-4000-8000-000000000602' ELSE '10000000-0000-4000-8000-000000000601' END)::uuid ELSE ('11000000-0000-4000-8000-'||lpad((601000+((g-1)%3)+1)::text,12,'0'))::uuid END,
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000611'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((611000+((g-1)%3)+1)::text,12,'0'))::uuid END,
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000612'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((612000+((g-1)%3)+1)::text,12,'0'))::uuid END,1,9000000,
+     now()+((g-20)||' hours')::interval,now()+((g-16)||' hours')::interval,now()+((g-22)||' hours')::interval,
+     '10000000-0000-4000-8000-000000000402'::uuid,'MANUAL','DEMO-SHOWCASE-'||lpad(g::text,3,'0'),'FMCG','CONTAINER',
+     jsonb_build_object('clientRateMinor','1000000','currency','INR','manifest','${DEMO_DATASET_VERSION}'),
+     (ARRAY['OPEN','PARTIALLY_ALLOCATED','FULFILLED','CLOSED','CANCELLED','DRAFT'])[((g-1)%6)+1],'${ids.operations}'::uuid
+   FROM generate_series(1,32) g ON CONFLICT(tenant_id,indent_no) DO NOTHING`,
+  `INSERT INTO app.allocations(id,tenant_id,indent_id,vendor_id,allotted_vehicles,offered_rate_minor,offer_channel,offered_at,expires_at,response_at,state,owner_membership_id,created_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((810000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((800000+g)::text,12,'0'))::uuid,
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000700'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((700000+(g%3)+1)::text,12,'0'))::uuid END,
+     1,650000+(g*5000),'PORTAL',now()-((g+2)||' hours')::interval,now()+interval '2 hours',
+     CASE WHEN g%5=0 THEN null ELSE now()-((g+1)||' hours')::interval END,
+     CASE WHEN g<=16 THEN 'PLACED' ELSE (ARRAY['OFFERED','ACCEPTED','REJECTED','EXPIRED','NTP_RELEASED'])[((g-17)%5)+1] END,
+     '10000000-0000-4000-8000-000000000402'::uuid,'${ids.operations}'::uuid
+   FROM generate_series(1,21) g ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.allocation_assignments(id,tenant_id,allocation_id,vehicle_id,driver_id,assigned_from,assigned_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((820000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((810000+g)::text,12,'0'))::uuid,
+     ('11000000-0000-4000-8000-'||lpad((710000+((g-1)%10)+1)::text,12,'0'))::uuid,
+     ('11000000-0000-4000-8000-'||lpad((720000+((g-1)%8)+1)::text,12,'0'))::uuid,now()-((g+5)||' hours')::interval,'${ids.operations}'::uuid
+   FROM generate_series(1,16) g ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.trips(id,tenant_id,allocation_id,trip_no,lr_no,assigned_driver_id,assigned_vehicle_id,planned_pickup_at,planned_delivery_at,tracking_consent_from,tracking_consent_to,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((830000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((810000+g)::text,12,'0'))::uuid,'DEMO-TRIP-'||lpad((g+2)::text,3,'0'),'DEMO-LR-'||lpad((g+2)::text,3,'0'),
+     ('11000000-0000-4000-8000-'||lpad((720000+((g-1)%8)+1)::text,12,'0'))::uuid,
+     ('11000000-0000-4000-8000-'||lpad((710000+((g-1)%10)+1)::text,12,'0'))::uuid,
+     now()-((g+5)||' hours')::interval,now()+((10-g)||' hours')::interval,now()-((g+6)||' hours')::interval,now()+interval '2 days',
+     (ARRAY['PLANNED','AT_ORIGIN','LOADED','IN_TRANSIT','AT_DESTINATION','DELIVERED','CANCELLED'])[((g-1)%7)+1]
+   FROM generate_series(1,16) g ON CONFLICT(tenant_id,trip_no) DO NOTHING`,
+  `INSERT INTO app.pod_tasks(id,tenant_id,trip_id,delivered_at,receiver_name,receiver_evidence,received_at,submitted_at,contract_snapshot,invoice_value_minor,prior_period,state)
+   SELECT ('11000000-0000-4000-8000-'||lpad((850000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((830000+g)::text,12,'0'))::uuid,now()-((g+1)||' days')::interval,
+     'Demo Receiver '||lpad(g::text,2,'0'),jsonb_build_object('packages',80+g,'manifest','${DEMO_DATASET_VERSION}'),
+     CASE WHEN g%4=0 THEN null ELSE now()-(g||' days')::interval END,
+     CASE WHEN g%3=0 THEN null ELSE now()-((g-1)||' days')::interval END,
+     '{"contract":"DEMO-CONTRACT","version":1}'::jsonb,590000+(g*10000),g>10,
+     (ARRAY['AWAITING_POD','RECEIVED','UNDER_REVIEW','ACCEPTED','SUBMITTED_TO_CLIENT','CLOSED','REJECTED','CORRECTION_REQUIRED'])[((g-1)%8)+1]
+   FROM generate_series(1,13) g ON CONFLICT(tenant_id,trip_id) DO NOTHING`,
+  `INSERT INTO app.client_invoices(id,tenant_id,invoice_no,client_id,client_location_id,invoice_date,currency,credit_days,taxable_minor,tax_minor,total_minor,acknowledged_at,due_date,state,reversal_of,created_by,posted_at)
+   SELECT ('11000000-0000-4000-8000-'||lpad((900000+g)::text,12,'0'))::uuid,'${tenantId}','DEMO-INV-'||lpad((g+2)::text,3,'0'),
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000600'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((600000+((g-1)%3)+1)::text,12,'0'))::uuid END,
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000601'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((601000+((g-1)%3)+1)::text,12,'0'))::uuid END,
+     current_date-(g*7), 'INR',30,
+     500000+((CASE WHEN g%7=6 THEN g-1 ELSE g END)*10000),
+     90000+((CASE WHEN g%7=6 THEN g-1 ELSE g END)*1800),
+     590000+((CASE WHEN g%7=6 THEN g-1 ELSE g END)*11800),
+     CASE WHEN g%6=0 THEN null ELSE now()-(g*7||' days')::interval END,current_date-(g*7)+30,
+     (ARRAY['DRAFT','PENDING_APPROVAL','APPROVED','POSTED','SUBMITTED','REVERSED','REJECTED'])[((g-1)%7)+1],
+     CASE WHEN g%7=6 THEN ('11000000-0000-4000-8000-'||lpad((900000+g-1)::text,12,'0'))::uuid ELSE null END,
+     '${ids.finance}'::uuid,CASE WHEN g%7 IN (1,2) THEN null ELSE now()-(g*7||' days')::interval END
+   FROM generate_series(1,16) g ON CONFLICT(tenant_id,invoice_no) DO NOTHING`,
+  `INSERT INTO app.receipts(id,tenant_id,receipt_ref,client_id,payment_date,amount_minor,mode,instrument_no,bank_reference,state,created_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((920000+g)::text,12,'0'))::uuid,'${tenantId}','DEMO-RCPT-'||lpad((g+1)::text,3,'0'),
+     CASE WHEN g%4=0 THEN ('11000000-0000-4000-8000-'||lpad((600000+((g-2)%3)+1)::text,12,'0'))::uuid ELSE ('11000000-0000-4000-8000-'||lpad((600000+((g-1)%3)+1)::text,12,'0'))::uuid END,
+     current_date-g,250000+((CASE WHEN g%4=0 THEN g-1 ELSE g END)*10000),'NEFT','DEMO-NEFT-'||lpad((g+1)::text,3,'0'),'DEMO-BANK-'||lpad((g+1)::text,3,'0'),
+     (ARRAY['UNRECONCILED','PENDING_APPROVAL','RECONCILED','REVERSED'])[((g-1)%4)+1],'${ids.finance}'::uuid
+   FROM generate_series(1,7) g ON CONFLICT(tenant_id,receipt_ref) DO NOTHING`,
+  `INSERT INTO app.receipt_ledger_entries(id,tenant_id,receipt_id,invoice_id,entry_type,amount_minor,reverses_entry_id,reason,actor_id)
+   SELECT ('11000000-0000-4000-8000-'||lpad((922000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((920000+g)::text,12,'0'))::uuid,
+     ('11000000-0000-4000-8000-'||lpad((900000+(CASE WHEN g%4=0 THEN g-1 ELSE g END))::text,12,'0'))::uuid,
+     (ARRAY['ALLOCATION','DEDUCTION','ON_ACCOUNT','REVERSAL'])[((g-1)%4)+1],
+     CASE WHEN g%4=0 THEN -(250000+((g-1)*10000)) ELSE 250000+(g*10000) END,
+     CASE WHEN g%4=0 THEN ('11000000-0000-4000-8000-'||lpad((922000+g-1)::text,12,'0'))::uuid ELSE null END,
+     'Synthetic DEMO reconciliation example','${ids.finance}'::uuid
+   FROM generate_series(1,7) g ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.vendor_bills(id,tenant_id,vendor_id,vendor_invoice_no,invoice_date,taxable_minor,gst_minor,tds_minor,deduction_minor,advance_minor,payable_minor,state,verified_by,approved_by,created_by)
+   SELECT ('11000000-0000-4000-8000-'||lpad((930000+g)::text,12,'0'))::uuid,'${tenantId}',
+     CASE WHEN g%4=0 THEN '10000000-0000-4000-8000-000000000700'::uuid ELSE ('11000000-0000-4000-8000-'||lpad((700000+(g%3)+1)::text,12,'0'))::uuid END,
+     'DEMO-VBILL-'||lpad((g+1)::text,3,'0'),current_date-(g*8),600000+(g*10000),108000+(g*1800),12000+(g*200),0,0,696000+(g*11600),
+     (ARRAY['DRAFT','VALIDATION_EXCEPTION','PENDING_OPERATIONAL_VERIFICATION','PENDING_FINANCE_APPROVAL','APPROVED','PART_PAID','PAID','DISPUTED','REVERSED'])[((g-1)%9)+1],
+     CASE WHEN g%3=1 THEN null ELSE '${ids.operations}'::uuid END,CASE WHEN g%4<2 THEN null ELSE '${ids.finance}'::uuid END,'${ids.owner}'::uuid
+   FROM generate_series(1,13) g ON CONFLICT(tenant_id,vendor_id,vendor_invoice_no) DO NOTHING`,
+  `INSERT INTO app.payment_batches(id,tenant_id,batch_no,bank_version_id,total_minor,state,maker_id,checker_id,utr)
+   SELECT ('11000000-0000-4000-8000-'||lpad((940000+g)::text,12,'0'))::uuid,'${tenantId}','DEMO-PAYOUT-'||lpad((g+1)::text,3,'0'),
+     '10000000-0000-4000-8000-000000000701'::uuid,696000+((CASE WHEN g=4 THEN 3 ELSE g END)*11600),
+     (ARRAY['DRAFT','PENDING_APPROVAL','FAILED','REVERSED'])[g],'${ids.owner}'::uuid,
+     CASE WHEN g=1 THEN null ELSE '${ids.finance}'::uuid END,CASE WHEN g>=3 THEN 'DEMO-UTR-'||lpad((g+1)::text,6,'0') ELSE null END
+   FROM generate_series(1,4) g ON CONFLICT(tenant_id,batch_no) DO NOTHING`,
+  `INSERT INTO app.payment_allocations(id,tenant_id,payment_batch_id,vendor_bill_id,amount_minor,reversal_of)
+   SELECT ('11000000-0000-4000-8000-'||lpad((942000+g)::text,12,'0'))::uuid,'${tenantId}',
+     ('11000000-0000-4000-8000-'||lpad((940000+g)::text,12,'0'))::uuid,
+     ('11000000-0000-4000-8000-'||lpad((930000+(CASE WHEN g=4 THEN 3 ELSE g END))::text,12,'0'))::uuid,
+     CASE WHEN g=4 THEN -(696000+(3*11600)) ELSE 696000+(g*11600) END,
+     CASE WHEN g=4 THEN '11000000-0000-4000-8000-000000942003'::uuid ELSE null END
+   FROM generate_series(1,4) g ON CONFLICT(tenant_id,id) DO NOTHING`,
+  `INSERT INTO app.operational_alerts(id,tenant_id,rule_id,deduplication_key,source_module,source_record_id,alert_type,severity,state,title,summary,evidence,owner_membership_id,due_at,snoozed_until,first_seen_at,last_seen_at,occurrence_count,resolved_at)
+   SELECT ('11000000-0000-4000-8000-'||lpad((965000+g)::text,12,'0'))::uuid,'${tenantId}','10000000-0000-4000-8000-000000000964'::uuid,
+     'demo:showcase:alert:'||lpad(g::text,2,'0'),'operations',('11000000-0000-4000-8000-'||lpad((800000+g)::text,12,'0'))::uuid,
+     'DEMO_SHOWCASE_RISK',(ARRAY['INFO','WARNING','HIGH','CRITICAL'])[((g-1)%4)+1],
+     (ARRAY['OPEN','ACKNOWLEDGED','SNOOZED','ESCALATED','RESOLVED'])[((g-1)%5)+1],
+     'DEMO portfolio signal '||lpad(g::text,2,'0'),'Synthetic demonstration alert linked to a canonical indent.',
+     jsonb_build_object('synthetic',true,'manifest','${DEMO_DATASET_VERSION}','ordinal',g),'10000000-0000-4000-8000-000000000402'::uuid,
+     now()+(g||' hours')::interval,CASE WHEN g%5=3 THEN now()+interval '1 day' ELSE null END,now()-(g||' hours')::interval,now()-interval '10 minutes',g,
+     CASE WHEN g%5=0 THEN now()-interval '10 minutes' ELSE null END
+   FROM generate_series(1,11) g ON CONFLICT(tenant_id,deduplication_key) DO NOTHING`,
   `INSERT INTO app.tenant_configuration(tenant_id,namespace,schema_version,value) VALUES
    ('${tenantId}','branding',1,'{"shortName":"Demo Logistics","primaryColor":"#16324f","accentColor":"#d97706"}'::jsonb),
    ('${tenantId}','commercial',1,'{"currency":"INR","timezone":"Asia/Kolkata","taxBasisPoints":1800}'::jsonb),
-   ('${tenantId}','demo-bootstrap',1,'{"manifestVersion":"2026.08.1","tenantCode":"DEMO","disposable":true}'::jsonb)
+   ('${tenantId}','notifications',1,'{"suppressOutbound":true,"syntheticDestinationsOnly":true}'::jsonb),
+   ('${tenantId}','demo-bootstrap',1,'{"manifestVersion":"2026.09.2","tenantCode":"DEMO","disposable":true}'::jsonb)
    ON CONFLICT(tenant_id,namespace) DO NOTHING`,
+  `UPDATE app.tenant_configuration
+   SET value=jsonb_set(value,'{manifestVersion}',to_jsonb('${DEMO_DATASET_VERSION}'::text),true),updated_at=now(),version=version+1
+   WHERE tenant_id='${tenantId}' AND namespace='demo-bootstrap'
+     AND value->>'manifestVersion' IN ('2026.08.1','2026.09.1')`,
   `INSERT INTO app.setup_checklist_items(tenant_id,key,label,display_order,state,completed_by,completed_at) VALUES
    ('${tenantId}','organization','Organization',1,'COMPLETE','${ids.owner}',now()),('${tenantId}','users','Users',2,'COMPLETE','${ids.owner}',now()),
    ('${tenantId}','branches','Branches',3,'COMPLETE','${ids.owner}',now()),('${tenantId}','clients','Clients',4,'COMPLETE','${ids.owner}',now()),
@@ -232,7 +480,7 @@ const statements = [
    ('${tenantId}','imports','Imports',7,'COMPLETE','${ids.owner}',now()),('${tenantId}','branding','Branding',8,'COMPLETE','${ids.owner}',now())
    ON CONFLICT(tenant_id,key) DO UPDATE SET state='COMPLETE',completed_by=excluded.completed_by,completed_at=coalesce(app.setup_checklist_items.completed_at,excluded.completed_at),updated_at=now()`,
   `INSERT INTO reporting.tenant_activity_projection(tenant_id,last_activity_at,user_count,config_count,event_count,refreshed_at) VALUES
-   ('${tenantId}',now(),6,3,3,now()) ON CONFLICT(tenant_id) DO UPDATE SET last_activity_at=now(),user_count=6,config_count=3,event_count=3,refreshed_at=now(),updated_at=now()`,
+   ('${tenantId}',now(),9,4,3,now()) ON CONFLICT(tenant_id) DO UPDATE SET last_activity_at=now(),user_count=9,config_count=4,event_count=3,refreshed_at=now(),updated_at=now()`,
 ] as const;
 
 export const DEMO_CONTENT_HASH = createHash("sha256")
@@ -250,6 +498,9 @@ export const DEMO_CONTENT_HASH = createHash("sha256")
         ids.vendor,
         ids.driver,
         ids.client,
+        ids.support,
+        ids.analyst,
+        ids.auditor,
       ],
     }),
   )
@@ -286,6 +537,19 @@ export async function seedDemoData(
     [ids.vendor, config.vendorEmail, "Demo Vendor User", false],
     [ids.driver, config.driverEmail, "Demo Driver User", false],
     [ids.client, config.clientEmail, "Demo Client User", false],
+    [
+      ids.support,
+      "demo.support@logistics.test",
+      "Demo Regional Support",
+      false,
+    ],
+    [ids.analyst, "demo.analyst@logistics.test", "Demo Control Analyst", false],
+    [
+      ids.auditor,
+      "demo.auditor@logistics.test",
+      "Demo Internal Auditor",
+      false,
+    ],
   ] as const;
 
   try {
@@ -352,13 +616,13 @@ export async function seedDemoData(
           await tx.$executeRaw`
             UPDATE app.users SET password_hash=${passwordHash},auth_version=auth_version+1,
               credentials_changed_at=transaction_timestamp(),updated_at=transaction_timestamp(),version=version+1
-            WHERE id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid)
+            WHERE id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid,${ids.support}::uuid,${ids.analyst}::uuid,${ids.auditor}::uuid)
           `;
           const revoked = await tx.$queryRaw<Array<{ count: number }>>`
             WITH affected AS (
               UPDATE app.sessions SET revoked_at=transaction_timestamp(),
                 revoked_reason='DEMO_PASSWORD_ROTATED',updated_at=transaction_timestamp(),version=version+1
-              WHERE user_id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid)
+              WHERE user_id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid,${ids.support}::uuid,${ids.analyst}::uuid,${ids.auditor}::uuid)
                 AND revoked_at IS NULL
               RETURNING id
             ) SELECT count(*)::int count FROM affected
@@ -402,7 +666,7 @@ export async function seedDemoData(
           if (markers[0]) {
             const count = await tx.$queryRaw<Array<{ count: number }>>`
               SELECT count(*)::int count FROM app.users
-              WHERE id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid)
+              WHERE id IN (${ids.owner}::uuid,${ids.operations}::uuid,${ids.finance}::uuid,${ids.vendor}::uuid,${ids.driver}::uuid,${ids.client}::uuid,${ids.support}::uuid,${ids.analyst}::uuid,${ids.auditor}::uuid)
             `;
             if (count[0]?.count !== users.length) {
               throw new Error(
@@ -450,10 +714,82 @@ export async function seedDemoData(
             `;
           }
         }
+        const [showcaseCounts] = await tx.$queryRaw<
+          Array<Record<ShowcaseCountKey, number>>
+        >`
+          SELECT
+            (SELECT count(*)::int FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid AND node_type='REGION') "regions",
+            (SELECT count(*)::int FROM app.organization_nodes WHERE tenant_id=${tenantId}::uuid AND node_type='BRANCH') "branches",
+            (SELECT count(*)::int FROM app.employees e JOIN app.tenant_memberships m ON m.tenant_id=e.tenant_id AND m.id=e.linked_membership_id WHERE e.tenant_id=${tenantId}::uuid AND m.portal_audience='INTERNAL') "internalEmployees",
+            (SELECT count(*)::int FROM app.clients WHERE tenant_id=${tenantId}::uuid) "clients",
+            (SELECT count(*)::int FROM app.client_locations WHERE tenant_id=${tenantId}::uuid) "clientLocations",
+            (SELECT count(*)::int FROM app.vendors WHERE tenant_id=${tenantId}::uuid) "vendors",
+            (SELECT count(*)::int FROM app.vendors WHERE tenant_id=${tenantId}::uuid AND state='ACTIVE') "activeVendors",
+            (SELECT count(*)::int FROM app.vehicles WHERE tenant_id=${tenantId}::uuid) "vehicles",
+            (SELECT count(*)::int FROM app.drivers WHERE tenant_id=${tenantId}::uuid) "drivers",
+            (SELECT count(*)::int FROM app.indents WHERE tenant_id=${tenantId}::uuid) "indents",
+            (SELECT count(*)::int FROM app.allocations WHERE tenant_id=${tenantId}::uuid) "allocations",
+            (SELECT count(*)::int FROM app.trips WHERE tenant_id=${tenantId}::uuid) "trips",
+            (SELECT count(*)::int FROM app.pod_tasks WHERE tenant_id=${tenantId}::uuid) "podTasks",
+            (SELECT count(*)::int FROM app.client_invoices WHERE tenant_id=${tenantId}::uuid) "clientInvoices",
+            (SELECT count(*)::int FROM app.receipts WHERE tenant_id=${tenantId}::uuid) "receipts",
+            (SELECT count(*)::int FROM app.vendor_bills WHERE tenant_id=${tenantId}::uuid) "vendorBills",
+            (SELECT count(*)::int FROM app.payment_batches WHERE tenant_id=${tenantId}::uuid) "paymentBatches",
+            (SELECT count(*)::int FROM app.operational_alerts WHERE tenant_id=${tenantId}::uuid) "alerts",
+            (SELECT count(*)::int FROM app.contract_lanes WHERE tenant_id=${tenantId}::uuid) "lanes",
+            (SELECT count(*)::int FROM app.client_rate_lines WHERE tenant_id=${tenantId}::uuid AND effective_from<=${anchorTime} AND (effective_to IS NULL OR effective_to>${anchorTime})) "currentCommercialExamples",
+            (SELECT count(*)::int FROM app.client_rate_lines WHERE tenant_id=${tenantId}::uuid AND effective_to<=${anchorTime}) "expiredCommercialExamples",
+            (SELECT count(*)::int FROM app.client_rate_lines WHERE tenant_id=${tenantId}::uuid AND effective_from>${anchorTime}) "upcomingCommercialExamples",
+            (SELECT count(*)::int FROM app.indents WHERE tenant_id=${tenantId}::uuid AND state IN ('OPEN','PARTIALLY_ALLOCATED')) "placementLensRows",
+            (SELECT count(*)::int FROM app.pod_tasks WHERE tenant_id=${tenantId}::uuid) "podLensRows",
+            (SELECT count(*)::int FROM app.client_invoices WHERE tenant_id=${tenantId}::uuid) "collectionLensRows",
+            (SELECT count(*)::int FROM app.trips WHERE tenant_id=${tenantId}::uuid) "tripLensRows",
+            (SELECT count(*)::int FROM app.vendor_bills WHERE tenant_id=${tenantId}::uuid) "vendorPayableLensRows",
+            (SELECT count(DISTINCT client_id)::int FROM app.indents WHERE tenant_id=${tenantId}::uuid AND state IN ('OPEN','PARTIALLY_ALLOCATED')) "placementPortfolios",
+            (SELECT count(DISTINCT i.client_id)::int FROM app.pod_tasks p JOIN app.trips t ON t.tenant_id=p.tenant_id AND t.id=p.trip_id JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id WHERE p.tenant_id=${tenantId}::uuid) "podPortfolios",
+            (SELECT count(DISTINCT client_id)::int FROM app.client_invoices WHERE tenant_id=${tenantId}::uuid) "collectionPortfolios",
+            (SELECT count(DISTINCT i.client_id)::int FROM app.trips t JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id WHERE t.tenant_id=${tenantId}::uuid) "tripPortfolios",
+            (SELECT count(DISTINCT vendor_id)::int FROM app.vendor_bills WHERE tenant_id=${tenantId}::uuid) "vendorPayablePortfolios",
+            (SELECT count(*)::int FROM app.tenant_configuration WHERE tenant_id=${tenantId}::uuid AND namespace='notifications' AND value->>'suppressOutbound'='true' AND value->>'syntheticDestinationsOnly'='true') "notificationSuppression"
+        `;
+        if (!showcaseCounts)
+          throw new Error("Demo showcase reconciliation returned no counts.");
+        validateDemoShowcaseCounts(showcaseCounts);
+        const [integrity] = await tx.$queryRaw<
+          Array<{
+            financialMismatchCount: number;
+            invalidQuantityCount: number;
+            foreignTenantRowCount: number;
+          }>
+        >`
+          SELECT
+            ((SELECT count(*) FROM app.client_invoices WHERE tenant_id=${tenantId}::uuid AND total_minor<>taxable_minor+tax_minor)
+              +(SELECT count(*) FROM app.vendor_bills WHERE tenant_id=${tenantId}::uuid AND payable_minor<>taxable_minor+gst_minor-tds_minor-deduction_minor-advance_minor))::int "financialMismatchCount",
+            ((SELECT count(*) FROM app.indents WHERE tenant_id=${tenantId}::uuid AND (requested_vehicles<=0 OR quantity_milli<=0))
+              +(SELECT count(*) FROM app.allocations WHERE tenant_id=${tenantId}::uuid AND allotted_vehicles<=0))::int "invalidQuantityCount",
+            (SELECT count(*)::int FROM (
+              SELECT tenant_id FROM app.clients WHERE id::text LIKE '11000000-0000-4000-8000-%'
+              UNION ALL SELECT tenant_id FROM app.indents WHERE id::text LIKE '11000000-0000-4000-8000-%'
+              UNION ALL SELECT tenant_id FROM app.client_invoices WHERE id::text LIKE '11000000-0000-4000-8000-%'
+              UNION ALL SELECT tenant_id FROM app.vendor_bills WHERE id::text LIKE '11000000-0000-4000-8000-%'
+            ) known_demo_rows WHERE tenant_id<>${tenantId}::uuid) "foreignTenantRowCount"
+        `;
+        if (
+          !integrity ||
+          Object.values(integrity).some((count) => count !== 0)
+        ) {
+          throw new Error(
+            `Demo showcase integrity reconciliation failed: ${JSON.stringify(integrity ?? {})}.`,
+          );
+        }
+        const summary = JSON.stringify({
+          tenantCode: "DEMO",
+          manifest: DEMO_SHOWCASE_MANIFEST,
+        });
         await tx.$executeRaw`
           INSERT INTO app.demo_bootstrap_runs(tenant_id,dataset,dataset_version,content_hash,anchor_date,summary)
           VALUES(${tenantId}::uuid,${DEMO_DATASET},${DEMO_DATASET_VERSION},${DEMO_CONTENT_HASH},${DEMO_ANCHOR_DATE}::date,
-            '{"tenantCode":"DEMO","users":6,"indents":4,"trips":2,"clientInvoices":2,"vendorPayouts":1}'::jsonb)
+            ${summary}::jsonb)
           ON CONFLICT(tenant_id,dataset,dataset_version) DO NOTHING
         `;
         await auditRotation();

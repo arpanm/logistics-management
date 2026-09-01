@@ -46,3 +46,6 @@ pnpm --filter @logistics/backend exec vitest run test/finance-workbench.contract
 pnpm --filter @logistics/db run db:reset:test
 pnpm --filter @logistics/db run db:seed
 pnpm --filter @logistics/backend exec vitest run test/control-governance-workbench.contract.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/db run db:reset:test
+pnpm --filter @logistics/db run db:seed
+pnpm --filter @logistics/backend exec vitest run test/control-workbench.integration.test.ts --maxWorkers=1 --no-file-parallelism

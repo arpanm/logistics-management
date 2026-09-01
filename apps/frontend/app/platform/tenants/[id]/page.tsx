@@ -3,6 +3,7 @@ import { FormEvent, use, useEffect, useState } from "react";
 import { Shell } from "../../../../components/shell";
 import { api, ApiError } from "../../../../components/api";
 import { FormSubmitResult } from "../../../../components/forms/form-submit-result";
+import { Modal } from "../../../../components/modal";
 
 type Role = { code: string; name: string };
 type User = {
@@ -847,10 +848,20 @@ export default function TenantDetail({
             )}
           </section>
           {selected && (
-            <section className="panel">
-              <div className="heading">
+            <Modal
+              titleId="platform-tenant-user-detail"
+              onClose={() => {
+                setSelected(null);
+                setRevealed(null);
+                setResetUrl("");
+                setEditing(false);
+              }}
+            >
+              <div className="panel-title">
                 <div>
-                  <h2>{selected.displayName}</h2>
+                  <h2 id="platform-tenant-user-detail">
+                    {selected.displayName}
+                  </h2>
                   <p>
                     {selected.membershipStatus} · {selected.activationStatus}
                   </p>
@@ -1199,7 +1210,7 @@ export default function TenantDetail({
               ) : (
                 <p>No recorded security activity.</p>
               )}
-            </section>
+            </Modal>
           )}
           <section className="panel">
             <h2>Onboarding and master data</h2>

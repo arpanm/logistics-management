@@ -1,10 +1,11 @@
 "use client";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
 import { SmartField } from "../forms/smart-field";
 import { FormSubmitResult } from "../forms/form-submit-result";
+import { Modal } from "../modal";
 
 type Postal = {
   id: string;
@@ -74,6 +75,7 @@ const parentTypes: Record<string, string[]> = {
 export function OrganizationWorkspace() {
   const [items, setItems] = useState<Node[]>([]),
     [selected, setSelected] = useState<Node | null>(null),
+    [editTarget, setEditTarget] = useState<Node | null>(null),
     [form, setForm] = useState(empty()),
     [postal, setPostal] = useState<Postal[]>([]),
     [error, setError] = useState<ApiError | null>(null),
@@ -101,6 +103,10 @@ export function OrganizationWorkspace() {
       exceptionReason: "",
       reviewBy: "",
     });
+  const editFocus = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) requestAnimationFrame(() => editFocus.current?.focus());
+  }, [editing]);
   const load = async (offset = 0, append = false) => {
     setLoading(true);
     try {
@@ -236,13 +242,13 @@ export function OrganizationWorkspace() {
     setError(null);
     setNotice("");
     try {
-      if (editing && selected)
-        await api(`/domain/masters/organization/${selected.id}`, {
+      if (editing && editTarget)
+        await api(`/domain/masters/organization/${editTarget.id}`, {
           method: "PATCH",
           headers: { "Idempotency-Key": crypto.randomUUID() },
           body: JSON.stringify({
             ...body(),
-            expectedVersion: selected.version,
+            expectedVersion: editTarget.version,
             reason: form.reason,
           }),
         });
@@ -255,36 +261,12 @@ export function OrganizationWorkspace() {
       setNotice(
         editing ? "Organization node updated." : "Organization node created.",
       );
-      const wasEditing = editing;
-      const editedId = selected?.id;
-      if (!wasEditing) {
-        setSelected(null);
-        setEditing(false);
-        setForm(empty());
-        setPostal([]);
-      }
+      setSelected(null);
+      setEditing(false);
+      setEditTarget(null);
+      setForm(empty());
+      setPostal([]);
       await load();
-      if (wasEditing && editedId) {
-        const refreshed = await api<Node>(
-          `/domain/masters/organization/${editedId}`,
-        );
-        setSelected(refreshed);
-        const address = refreshed.address;
-        setForm({
-          ...empty(),
-          code: refreshed.code,
-          name: refreshed.name,
-          nodeType: refreshed.nodeType,
-          parentId: refreshed.parentId ?? "",
-          timezone: refreshed.timezone,
-          activeFrom: refreshed.activeFrom,
-          activeTo: refreshed.activeTo ?? "",
-          line1: address?.line1 ?? "",
-          line2: address?.line2 ?? "",
-          postalCode: address?.postalCode ?? "",
-          postalLocalityId: address?.postalLocalityId ?? "",
-        });
-      }
     } catch (e) {
       setError(e as ApiError);
     }
@@ -292,6 +274,7 @@ export function OrganizationWorkspace() {
   function open(node: Node) {
     setSelected(node);
     setEditing(false);
+    setEditTarget(null);
   }
   function edit() {
     if (!selected) return;
@@ -310,8 +293,9 @@ export function OrganizationWorkspace() {
       postalCode: a?.postalCode ?? "",
       postalLocalityId: a?.postalLocalityId ?? "",
     });
+    setEditTarget(selected);
+    setSelected(null);
     setEditing(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
   return (
     <Shell>
@@ -348,12 +332,13 @@ export function OrganizationWorkspace() {
       {(permissions?.canCreate || (editing && permissions?.canUpdate)) && (
         <section className="panel">
           <h2>
-            {editing ? `Edit ${selected?.name}` : "Create organization node"}
+            {editing ? `Edit ${editTarget?.name}` : "Create organization node"}
           </h2>
           <form className="access-form" onSubmit={submit}>
             <label>
               Code
               <input
+                ref={editFocus}
                 required
                 value={form.code}
                 onChange={(e) => setForm({ ...form, code: e.target.value })}
@@ -708,6 +693,7 @@ export function OrganizationWorkspace() {
                   type="button"
                   onClick={() => {
                     setEditing(false);
+                    setEditTarget(null);
                     setForm(empty());
                   }}
                 >
@@ -773,7 +759,7 @@ export function OrganizationWorkspace() {
         )}
       </section>
       {selected && (
-        <section className="panel" aria-labelledby="node-detail">
+        <Modal titleId="node-detail" onClose={() => setSelected(null)}>
           <div className="panel-title">
             <h2 id="node-detail">{selected.name}</h2>
             <div className="actions">
@@ -986,7 +972,7 @@ export function OrganizationWorkspace() {
                 <button>Deactivate with temporary exception</button>
               </form>
             )}
-        </section>
+        </Modal>
       )}
     </Shell>
   );

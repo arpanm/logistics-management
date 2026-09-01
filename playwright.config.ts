@@ -16,6 +16,7 @@ export default defineConfig({
     "operations-workbench.spec.ts",
     "finance-workbench.spec.ts",
     "control-tower-workbench.spec.ts",
+    "ui-responsive-regression.spec.ts",
     "platform-tenant-user-admin.spec.ts",
     "demo-data.spec.ts",
   ],

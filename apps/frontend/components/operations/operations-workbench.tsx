@@ -1,9 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api, type ApiError } from "../api";
+import { Modal } from "../modal";
 import { Shell } from "../shell";
+import {
+  DialogActions,
+  DialogBody,
+  DialogHeader,
+  FormGrid,
+  Tabs,
+} from "../ui/primitives";
 import styles from "./operations.module.css";
 
 type Mode = "dashboard" | "indents" | "allocations" | "trips";
@@ -79,6 +94,7 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
     [owner, setOwner] = useState("ALL"),
     [risk, setRisk] = useState("");
   const [loading, setLoading] = useState(true),
+    [busy, setBusy] = useState(false),
     [error, setError] = useState<ApiError | null>(null),
     [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<string | null>(null),
@@ -91,6 +107,7 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
   const [allocationTab, setAllocationTab] = useState<"register" | "rules">(
     "register",
   );
+  const busyRef = useRef(false);
   const query = useMemo(
     () =>
       new URLSearchParams({
@@ -151,6 +168,9 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
     setRefs((v) => ({ ...v, ...Object.fromEntries(pairs) }));
   }
   async function mutate(path: string, body: unknown, method = "POST") {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     setError(null);
     setNotice("");
     try {
@@ -166,6 +186,38 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
       await load();
     } catch (v) {
       setError(v as ApiError);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+  async function dialogMutate(
+    path: string,
+    body: unknown,
+    method: string | undefined,
+    idempotencyKey: string,
+  ) {
+    if (busyRef.current)
+      return { message: "An action is already in progress" } as ApiError;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await api(path, {
+        method: method ?? "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(body),
+      });
+      setNotice("Saved. The workbench has been refreshed.");
+      setDialog(null);
+      setSelected(null);
+      setSelectedRule(null);
+      await load();
+      return null;
+    } catch (value) {
+      return value as ApiError;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   }
   const createIndent = () => {
@@ -178,6 +230,9 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
     setDialog("indent-edit");
   };
   const allocate = async (v: Item) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     setSelected(v);
     try {
       setEligible(
@@ -190,9 +245,15 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
       setDialog("allocation-create");
     } catch (e) {
       setError(e as ApiError);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   };
   const assign = async (v: Item) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     setSelected(v);
     try {
       const a = await api<{ vehicles: Ref[]; drivers: Ref[] }>(
@@ -206,6 +267,9 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
       setDialog("assignment");
     } catch (e) {
       setError(e as ApiError);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   };
   const transition = (v: Item, resource: string, target: string) => {
@@ -265,7 +329,7 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
 
   return (
     <Shell>
-      <main className={styles.page}>
+      <div className={styles.page}>
         <header className={styles.head}>
           <div>
             <p className="eyebrow">OPS-01 · OPS-02 · OPS-03</p>
@@ -285,7 +349,7 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
             </p>
           </div>
           {["dashboard", "indents"].includes(mode) && (
-            <button className="primary" onClick={createIndent}>
+            <button className="primary" onClick={createIndent} disabled={busy}>
               Create indent
             </button>
           )}
@@ -310,7 +374,7 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
             {notice}
           </p>
         )}
-        <section className={styles.metrics}>
+        <section className={`${styles.metrics} ui-metric-grid`}>
           {(mode === "dashboard"
             ? [
                 ["Open indents", summary.openIndents],
@@ -332,25 +396,39 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
           ))}
         </section>
         {mode === "allocations" && (
-          <div className={styles.subnav} role="tablist">
-            <button
-              role="tab"
-              aria-selected={allocationTab === "register"}
-              onClick={() => setAllocationTab("register")}
-            >
-              All allocations
-            </button>
-            <button
-              role="tab"
-              aria-selected={allocationTab === "rules"}
-              onClick={() => setAllocationTab("rules")}
-            >
-              Auto-allocation rules
-            </button>
-          </div>
+          <Tabs
+            label="Allocation workspace"
+            idPrefix="operations-allocation-tab"
+            items={[
+              {
+                id: "register",
+                label: "All allocations",
+                panelId: "operations-allocation-register-panel",
+              },
+              {
+                id: "rules",
+                label: "Auto-allocation rules",
+                panelId: "operations-allocation-rules-panel",
+              },
+            ]}
+            active={allocationTab}
+            onChange={setAllocationTab}
+          />
         )}
         {(mode !== "allocations" || allocationTab === "register") && (
-          <>
+          <div
+            id={
+              mode === "allocations"
+                ? "operations-allocation-register-panel"
+                : undefined
+            }
+            role={mode === "allocations" ? "tabpanel" : undefined}
+            aria-labelledby={
+              mode === "allocations"
+                ? "operations-allocation-tab-register"
+                : undefined
+            }
+          >
             <section className={`${styles.panel} ${styles.toolbar}`}>
               <label>
                 Search
@@ -424,6 +502,7 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
               ) : items.length ? (
                 <Queue
                   mode={mode}
+                  busy={busy}
                   items={items}
                   allocate={(v) => void allocate(v)}
                   edit={editIndent}
@@ -439,54 +518,60 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
                 <p className={styles.empty}>Nothing matches this view.</p>
               )}
             </section>
-          </>
+          </div>
         )}
         {mode === "allocations" && allocationTab === "rules" && (
-          <Rules
-            rules={rules}
-            indents={openIndents}
-            edit={editRule}
-            preview={async (r, id) => {
-              try {
-                const v = await api<{
-                  matches: boolean;
-                  reasons: string[];
-                  proposedVendor?: { name: string };
-                }>(`/operations/auto-allocation-rules/${r.id}/preview/${id}`);
-                setNotice(
-                  v.matches
-                    ? `Preview: allocate to ${v.proposedVendor?.name}.`
-                    : `No match: ${v.reasons.join(", ")}`,
-                );
-              } catch (e) {
-                setError(e as ApiError);
+          <div
+            id="operations-allocation-rules-panel"
+            role="tabpanel"
+            aria-labelledby="operations-allocation-tab-rules"
+          >
+            <Rules
+              rules={rules}
+              indents={openIndents}
+              edit={editRule}
+              preview={async (r, id) => {
+                try {
+                  const v = await api<{
+                    matches: boolean;
+                    reasons: string[];
+                    proposedVendor?: { name: string };
+                  }>(`/operations/auto-allocation-rules/${r.id}/preview/${id}`);
+                  setNotice(
+                    v.matches
+                      ? `Preview: allocate to ${v.proposedVendor?.name}.`
+                      : `No match: ${v.reasons.join(", ")}`,
+                  );
+                } catch (e) {
+                  setError(e as ApiError);
+                }
+              }}
+              execute={(r, id) =>
+                void mutate(
+                  `/operations/auto-allocation-rules/${r.id}/execute/${id}`,
+                  {},
+                )
               }
-            }}
-            execute={(r, id) =>
-              void mutate(
-                `/operations/auto-allocation-rules/${r.id}/execute/${id}`,
-                {},
-              )
-            }
-            toggle={(r) =>
-              void mutate(
-                `/operations/auto-allocation-rules/${r.id}`,
-                {
-                  name: r.name,
-                  priority: r.priority,
-                  clientId: r.clientId ?? null,
-                  laneId: r.laneId ?? null,
-                  vendorId: r.vendorId ?? null,
-                  maxVehicles: r.maxVehicles,
-                  offerRateMinor: String(r.offerRateMinor),
-                  offerValidMinutes: r.offerValidMinutes,
-                  active: !r.active,
-                  expectedVersion: r.version,
-                },
-                "PATCH",
-              )
-            }
-          />
+              toggle={(r) =>
+                void mutate(
+                  `/operations/auto-allocation-rules/${r.id}`,
+                  {
+                    name: r.name,
+                    priority: r.priority,
+                    clientId: r.clientId ?? null,
+                    laneId: r.laneId ?? null,
+                    vendorId: r.vendorId ?? null,
+                    maxVehicles: r.maxVehicles,
+                    offerRateMinor: String(r.offerRateMinor),
+                    offerValidMinutes: r.offerValidMinutes,
+                    active: !r.active,
+                    expectedVersion: r.version,
+                  },
+                  "PATCH",
+                )
+              }
+            />
+          </div>
         )}
         {dialog && (
           <ActionDialog
@@ -501,16 +586,18 @@ export function OperationsWorkbench({ mode }: { mode: Mode }) {
               setSelected(null);
               setSelectedRule(null);
             }}
-            submit={(p, b, m) => void mutate(p, b, m)}
+            busy={busy}
+            submit={dialogMutate}
           />
         )}
-      </main>
+      </div>
     </Shell>
   );
 }
 
 function Queue({
   mode,
+  busy,
   items,
   allocate,
   edit,
@@ -520,6 +607,7 @@ function Queue({
   quick,
 }: {
   mode: Mode;
+  busy: boolean;
   items: Item[];
   allocate: (v: Item) => void;
   edit: (v: Item) => void;
@@ -529,144 +617,232 @@ function Queue({
   quick: (v: Item, r: string, s: string) => void;
 }) {
   return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>Reference</th>
-            <th>Client / vendor</th>
-            <th>Supply / asset</th>
-            <th>Status</th>
-            <th>Commitment</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((v) => (
-            <tr key={v.id}>
-              <td>
-                <strong>{String(v.indentNo ?? v.tripNo ?? v.id)}</strong>
-                {Boolean(v.lrNo) && <small>LR {String(v.lrNo)}</small>}
-                {Boolean(v.lane) && <small>Lane {String(v.lane)}</small>}
-              </td>
-              <td>
-                {String(v.client ?? v.vendor ?? "—")}
-                <small>{String(v.location ?? v.ownerName ?? "")}</small>
-              </td>
-              <td>
-                {v.requestedVehicles != null ? (
-                  <>
-                    {Number(v.requestedVehicles) - Number(v.remaining)} /{" "}
-                    {String(v.requestedVehicles)} allocated
-                    <small>{String(v.remaining)} truck(s) awaiting</small>
-                  </>
-                ) : (
-                  <>
-                    {String(
-                      v.vehicle ?? `${v.allottedVehicles ?? "—"} truck(s)`,
-                    )}
-                    <small>{String(v.driver ?? "")}</small>
-                  </>
-                )}
-              </td>
-              <td>
-                <span
-                  className={`${styles.pill} ${styles[String(v.risk ?? "").toLowerCase()] ?? ""}`}
-                >
-                  {pretty(v.state)}
-                  {v.risk ? ` · ${String(v.risk)}` : ""}
-                </span>
-              </td>
-              <td>
-                {v.committedPlacementAt
-                  ? new Date(String(v.committedPlacementAt)).toLocaleString()
-                  : v.plannedDeliveryAt
-                    ? new Date(String(v.plannedDeliveryAt)).toLocaleString()
-                    : v.expiresAt
-                      ? new Date(String(v.expiresAt)).toLocaleString()
-                      : "—"}
-              </td>
-              <td>
-                <div className={styles.actions}>
-                  {mode === "dashboard" && (
-                    <>
-                      <button onClick={() => edit(v)}>Edit indent</button>
-                      <button
-                        className="primary"
-                        disabled={Number(v.remaining) < 1}
-                        onClick={() => allocate(v)}
-                      >
-                        Allocate truck
-                      </button>
-                      <button
-                        onClick={() => transition(v, "indents", "CANCELLED")}
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  )}
-                  {mode === "indents" && (
-                    <>
-                      {["DRAFT", "OPEN", "PARTIALLY_ALLOCATED"].includes(
-                        v.state,
-                      ) && <button onClick={() => edit(v)}>Edit</button>}
-                      {v.state === "DRAFT" && (
-                        <button
-                          className="primary"
-                          onClick={() => quick(v, "indents", "OPEN")}
-                        >
-                          Submit
-                        </button>
-                      )}
-                      {["DRAFT", "OPEN", "PARTIALLY_ALLOCATED"].includes(
-                        v.state,
-                      ) && (
-                        <button
-                          onClick={() => transition(v, "indents", "CANCELLED")}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {mode === "allocations" && (
-                    <AllocationButtons
-                      v={v}
-                      assign={assign}
-                      dialog={dialog}
-                      transition={transition}
-                      quick={quick}
-                    />
-                  )}
-                  {mode === "trips" && (
-                    <>
-                      {tripActions(v).map((a) => (
-                        <button
-                          className={
-                            ["START", "END"].includes(a) ? "primary" : ""
-                          }
-                          key={a}
-                          onClick={() => dialog(v, `trip-action-${a}`)}
-                        >
-                          {tripLabel(a)}
-                        </button>
-                      ))}
-                      {["PLANNED", "AT_ORIGIN"].includes(v.state) && (
-                        <button
-                          onClick={() => transition(v, "trips", "CANCELLED")}
-                        >
-                          Cancel trip
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </td>
+    <>
+      <div className={`${styles.tableWrap} ${styles.desktopTable}`}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Client / vendor</th>
+              <th>Supply / asset</th>
+              <th>Status</th>
+              <th>Commitment</th>
+              <th>Actions</th>
             </tr>
+          </thead>
+          <tbody>
+            {items.map((v) => (
+              <tr key={v.id}>
+                <td>
+                  <strong>{String(v.indentNo ?? v.tripNo ?? v.id)}</strong>
+                  {Boolean(v.lrNo) && <small>LR {String(v.lrNo)}</small>}
+                  {Boolean(v.lane) && <small>Lane {String(v.lane)}</small>}
+                </td>
+                <td>
+                  {String(v.client ?? v.vendor ?? "—")}
+                  <small>{String(v.location ?? v.ownerName ?? "")}</small>
+                </td>
+                <td>
+                  {v.requestedVehicles != null ? (
+                    <>
+                      {Number(v.requestedVehicles) - Number(v.remaining)} /{" "}
+                      {String(v.requestedVehicles)} allocated
+                      <small>{String(v.remaining)} truck(s) awaiting</small>
+                    </>
+                  ) : (
+                    <>
+                      {String(
+                        v.vehicle ?? `${v.allottedVehicles ?? "—"} truck(s)`,
+                      )}
+                      <small>{String(v.driver ?? "")}</small>
+                    </>
+                  )}
+                </td>
+                <td>
+                  <span
+                    className={`${styles.pill} ${styles[String(v.risk ?? "").toLowerCase()] ?? ""}`}
+                  >
+                    {pretty(v.state)}
+                    {v.risk ? ` · ${String(v.risk)}` : ""}
+                  </span>
+                </td>
+                <td>
+                  {v.committedPlacementAt
+                    ? new Date(String(v.committedPlacementAt)).toLocaleString()
+                    : v.plannedDeliveryAt
+                      ? new Date(String(v.plannedDeliveryAt)).toLocaleString()
+                      : v.expiresAt
+                        ? new Date(String(v.expiresAt)).toLocaleString()
+                        : "—"}
+                </td>
+                <td>
+                  <QueueActions
+                    busy={busy}
+                    mode={mode}
+                    v={v}
+                    allocate={allocate}
+                    edit={edit}
+                    assign={assign}
+                    dialog={dialog}
+                    transition={transition}
+                    quick={quick}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className={styles.mobileCards} aria-label="Operations records">
+        {items.map((v) => (
+          <article className={styles.recordCard} key={v.id}>
+            <div className={styles.cardTitle}>
+              <strong>{String(v.indentNo ?? v.tripNo ?? v.id)}</strong>
+              <span
+                className={`${styles.pill} ${styles[String(v.risk ?? "").toLowerCase()] ?? ""}`}
+              >
+                {pretty(v.state)}
+                {v.risk ? ` · ${String(v.risk)}` : ""}
+              </span>
+            </div>
+            <dl>
+              <div>
+                <dt>Client / vendor</dt>
+                <dd>{String(v.client ?? v.vendor ?? "—")}</dd>
+              </div>
+              <div>
+                <dt>Location / owner</dt>
+                <dd>{String(v.location ?? v.ownerName ?? "—")}</dd>
+              </div>
+              <div>
+                <dt>Supply / asset</dt>
+                <dd>
+                  {v.requestedVehicles != null
+                    ? `${Number(v.requestedVehicles) - Number(v.remaining)} / ${String(v.requestedVehicles)} allocated`
+                    : String(
+                        v.vehicle ?? `${v.allottedVehicles ?? "—"} truck(s)`,
+                      )}
+                </dd>
+              </div>
+              <div>
+                <dt>Commitment</dt>
+                <dd>
+                  {v.committedPlacementAt
+                    ? new Date(String(v.committedPlacementAt)).toLocaleString()
+                    : v.plannedDeliveryAt
+                      ? new Date(String(v.plannedDeliveryAt)).toLocaleString()
+                      : v.expiresAt
+                        ? new Date(String(v.expiresAt)).toLocaleString()
+                        : "—"}
+                </dd>
+              </div>
+            </dl>
+            <QueueActions
+              busy={busy}
+              mode={mode}
+              v={v}
+              allocate={allocate}
+              edit={edit}
+              assign={assign}
+              dialog={dialog}
+              transition={transition}
+              quick={quick}
+            />
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+function QueueActions({
+  busy,
+  mode,
+  v,
+  allocate,
+  edit,
+  assign,
+  dialog,
+  transition,
+  quick,
+}: {
+  busy: boolean;
+  mode: Mode;
+  v: Item;
+  allocate: (v: Item) => void;
+  edit: (v: Item) => void;
+  assign: (v: Item) => void;
+  dialog: (v: Item, k: string) => void;
+  transition: (v: Item, r: string, s: string) => void;
+  quick: (v: Item, r: string, s: string) => void;
+}) {
+  return (
+    <fieldset
+      className={`${styles.actions} ${styles.actionFieldset}`}
+      disabled={busy}
+    >
+      {mode === "dashboard" && (
+        <>
+          <button onClick={() => edit(v)}>Edit indent</button>
+          <button
+            className="primary"
+            disabled={Number(v.remaining) < 1}
+            onClick={() => allocate(v)}
+          >
+            Allocate truck
+          </button>
+          <button onClick={() => transition(v, "indents", "CANCELLED")}>
+            Cancel
+          </button>
+        </>
+      )}
+      {mode === "indents" && (
+        <>
+          {["DRAFT", "OPEN", "PARTIALLY_ALLOCATED"].includes(v.state) && (
+            <button onClick={() => edit(v)}>Edit</button>
+          )}
+          {v.state === "DRAFT" && (
+            <button
+              className="primary"
+              onClick={() => quick(v, "indents", "OPEN")}
+            >
+              Submit
+            </button>
+          )}
+          {["DRAFT", "OPEN", "PARTIALLY_ALLOCATED"].includes(v.state) && (
+            <button onClick={() => transition(v, "indents", "CANCELLED")}>
+              Cancel
+            </button>
+          )}
+        </>
+      )}
+      {mode === "allocations" && (
+        <AllocationButtons
+          v={v}
+          assign={assign}
+          dialog={dialog}
+          transition={transition}
+          quick={quick}
+        />
+      )}
+      {mode === "trips" && (
+        <>
+          {tripActions(v).map((action) => (
+            <button
+              className={["START", "END"].includes(action) ? "primary" : ""}
+              key={action}
+              onClick={() => dialog(v, `trip-action-${action}`)}
+            >
+              {tripLabel(action)}
+            </button>
           ))}
-        </tbody>
-      </table>
-    </div>
+          {["PLANNED", "AT_ORIGIN"].includes(v.state) && (
+            <button onClick={() => transition(v, "trips", "CANCELLED")}>
+              Cancel trip
+            </button>
+          )}
+        </>
+      )}
+    </fieldset>
   );
 }
 function AllocationButtons({
@@ -863,6 +1039,7 @@ function ActionDialog({
   refs,
   eligible,
   close,
+  busy,
   submit,
 }: {
   kind: string;
@@ -871,7 +1048,13 @@ function ActionDialog({
   refs: Record<string, Ref[]>;
   eligible: Eligible[];
   close: () => void;
-  submit: (p: string, b: unknown, m?: string) => void;
+  busy: boolean;
+  submit: (
+    p: string,
+    b: unknown,
+    m: string | undefined,
+    idempotencyKey: string,
+  ) => Promise<ApiError | null>;
 }) {
   const [f, setF] = useState<Record<string, string>>({
     requestedVehicles: String(selected?.requestedVehicles ?? 1),
@@ -899,6 +1082,11 @@ function ActionDialog({
     vendorId: rule?.vendorId ?? "",
   });
   const [refSearch, setRefSearch] = useState<Record<string, string>>({});
+  const [dialogError, setDialogError] = useState<ApiError | null>(null);
+  const [pending, setPending] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const idempotencyKey = useRef(crypto.randomUUID());
+  const pendingRef = useRef(false);
   const action = kind.startsWith("trip-action-") ? kind.slice(12) : "",
     target = kind.includes("-transition-") ? kind.split("-transition-")[1] : "";
   const field = (
@@ -969,10 +1157,26 @@ function ActionDialog({
       </label>
     );
   };
+  async function run(path: string, body: unknown, method?: string) {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setDialogError(null);
+    try {
+      const failure = await submit(path, body, method, idempotencyKey.current);
+      if (failure) {
+        setDialogError(failure);
+        requestAnimationFrame(() => errorRef.current?.focus());
+      }
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  }
   function save(e: FormEvent) {
     e.preventDefault();
     if (kind === "indent-create")
-      return submit("/operations/indents", {
+      return void run("/operations/indents", {
         indentNo: f.indentNo,
         clientId: f.clientId,
         clientLocationId: f.clientLocationId,
@@ -986,7 +1190,7 @@ function ActionDialog({
         bodyType: f.bodyType || undefined,
       });
     if (kind === "indent-edit")
-      return submit(
+      return void run(
         `/operations/indents/${selected?.id}`,
         {
           expectedVersion: selected?.version,
@@ -1003,7 +1207,7 @@ function ActionDialog({
         "PATCH",
       );
     if (kind === "allocation-create")
-      return submit("/operations/allocations/manual", {
+      return void run("/operations/allocations/manual", {
         indentId: selected?.id,
         vendorId: f.vendorId,
         allottedVehicles: +f.allottedVehicles,
@@ -1013,14 +1217,14 @@ function ActionDialog({
         expiresAt: iso(f.expiresAt),
       });
     if (kind === "assignment")
-      return submit(`/operations/allocations/${selected?.id}/assign`, {
+      return void run(`/operations/allocations/${selected?.id}/assign`, {
         vehicleId: f.vehicleId,
         driverId: f.driverId,
         expectedVersion: selected?.version,
         ...(selected?.vehicle ? { reason: f.reason } : {}),
       });
     if (kind === "trip-create")
-      return submit("/operations/trips", {
+      return void run("/operations/trips", {
         allocationId: selected?.id,
         tripNo: f.tripNo,
         lrNo: f.lrNo,
@@ -1034,7 +1238,7 @@ function ActionDialog({
           : null,
       });
     if (action)
-      return submit(`/operations/trips/${selected?.id}/action`, {
+      return void run(`/operations/trips/${selected?.id}/action`, {
         action,
         expectedVersion: selected?.version,
         occurredAt: iso(f.occurredAt),
@@ -1053,13 +1257,13 @@ function ActionDialog({
         : kind.startsWith("allocations-")
           ? "allocations"
           : "trips";
-      return submit(`/operations/${resource}/${selected?.id}/transition`, {
+      return void run(`/operations/${resource}/${selected?.id}/transition`, {
         expectedVersion: selected?.version,
         toState: target,
         reason: f.reason,
       });
     }
-    return submit(
+    return void run(
       rule
         ? `/operations/auto-allocation-rules/${rule.id}`
         : "/operations/auto-allocation-rules",
@@ -1099,172 +1303,196 @@ function ActionDialog({
                     ? "Edit auto-allocation rule"
                     : "New auto-allocation rule";
   return (
-    <div className={styles.backdrop} onMouseDown={close}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ops-dialog"
-        className={styles.dialog}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className={styles.dialogHead}>
-          <div>
-            <p className="eyebrow">Operations action</p>
-            <h2 id="ops-dialog">{title}</h2>
-          </div>
-          <button onClick={close}>Close</button>
-        </div>
-        <form className={styles.form} onSubmit={save}>
-          {kind === "indent-create" && (
-            <>
-              {field("indentNo", "Indent number")}
-              {select("clientId", "Client", refs.clients ?? [])}
-              {select(
-                "clientLocationId",
-                "Client location",
-                refs["client-locations"] ?? [],
+    <Modal
+      titleId="ops-dialog"
+      onClose={() => {
+        if (!busy && !pending) close();
+      }}
+      className={styles.dialog}
+    >
+      <form className={`${styles.form} ui-dialog-layout`} onSubmit={save}>
+        <DialogHeader
+          titleId="ops-dialog"
+          eyebrow="Operations action"
+          title={title}
+          onClose={close}
+          closeDisabled={busy || pending}
+        />
+        <DialogBody>
+          <FormGrid>
+            {kind === "indent-create" && (
+              <>
+                {field("indentNo", "Indent number")}
+                {select("clientId", "Client", refs.clients ?? [])}
+                {select(
+                  "clientLocationId",
+                  "Client location",
+                  refs["client-locations"] ?? [],
+                )}
+                {select("laneId", "Contract lane", refs.lanes ?? [])}
+              </>
+            )}
+            {["indent-create", "indent-edit"].includes(kind) && (
+              <>
+                {field("requestedVehicles", "Requested vehicles", "number")}
+                {field(
+                  "quantityMilli",
+                  "Quantity (thousandths)",
+                  "number",
+                  true,
+                  "1000 is one whole unit",
+                )}
+                {field("pickupWindowStart", "Pickup starts", "datetime-local")}
+                {field("pickupWindowEnd", "Pickup ends", "datetime-local")}
+                {kind === "indent-edit" && (
+                  <>
+                    {field(
+                      "committedPlacementAt",
+                      "Committed placement",
+                      "datetime-local",
+                    )}
+                    {area(
+                      "commitmentOverrideReason",
+                      "Commitment override reason",
+                    )}
+                  </>
+                )}
+                {field("cargoType", "Cargo type", "text", false)}
+                {field("bodyType", "Body type", "text", false)}
+              </>
+            )}
+            {kind === "allocation-create" && (
+              <>
+                {select(
+                  "vendorId",
+                  "Eligible vendor",
+                  eligible.filter((v) => v.eligible),
+                )}
+                {field("allottedVehicles", "Truck quantity", "number")}
+                {field(
+                  "offeredRateMinor",
+                  "Offer rate (minor units)",
+                  "number",
+                  true,
+                  "For INR, enter paise",
+                )}
+                {field("offeredAt", "Offered at", "datetime-local")}
+                {field("expiresAt", "Offer expires", "datetime-local")}
+                {eligible
+                  .filter((v) => !v.eligible)
+                  .map((v) => (
+                    <p className={styles.reason} key={v.id}>
+                      <strong>{v.name} excluded:</strong> {v.reasons.join(", ")}
+                    </p>
+                  ))}
+              </>
+            )}
+            {kind === "assignment" && (
+              <>
+                {select("vehicleId", "Eligible vehicle", refs.vehicles ?? [])}
+                {select("driverId", "Eligible driver", refs.drivers ?? [])}
+                {selected?.vehicle &&
+                  area("reason", "Replacement reason", true)}
+              </>
+            )}
+            {kind === "trip-create" && (
+              <>
+                {field("tripNo", "Trip number")}
+                {field("lrNo", "LR number")}
+                {field("plannedPickupAt", "Planned pickup", "datetime-local")}
+                {field(
+                  "plannedDeliveryAt",
+                  "Planned delivery",
+                  "datetime-local",
+                )}
+                {field(
+                  "trackingConsentFrom",
+                  "Location consent starts",
+                  "datetime-local",
+                  false,
+                )}
+                {field(
+                  "trackingConsentTo",
+                  "Location consent ends",
+                  "datetime-local",
+                  false,
+                )}
+              </>
+            )}
+            {action && (
+              <>
+                {field("occurredAt", "Event date and time", "datetime-local")}
+                {["START", "TRANSIT", "UNLOAD", "END"].includes(action) &&
+                  field("odometerKm", "Odometer km", "number", false)}
+                {["START", "UNLOAD"].includes(action) && (
+                  <>
+                    {field("latitude", "Latitude", "number", false)}
+                    {field("longitude", "Longitude", "number", false)}
+                  </>
+                )}
+                {action === "LOAD" && (
+                  <>
+                    {field(
+                      "loadQuantityMilli",
+                      "Loaded quantity (thousandths)",
+                      "number",
+                      false,
+                    )}
+                    {field("sealNumber", "Seal number", "text", false)}
+                  </>
+                )}
+                {action === "TRANSIT" &&
+                  field("delayReason", "Delay / exception", "text", false)}
+                {action === "END" && field("receiverName", "Receiver name")}
+                {area("notes", "Operational notes")}
+              </>
+            )}
+            {target && area("reason", "Reason", true)}
+            {kind === "rule" && (
+              <>
+                {field("name", "Rule name")}
+                {field("priority", "Priority", "number")}
+                {select("clientId", "Client", refs.clients ?? [], false)}
+                {select("laneId", "Lane", refs.lanes ?? [], false)}
+                {select(
+                  "vendorId",
+                  "Preferred vendor",
+                  refs.vendors ?? [],
+                  false,
+                )}
+                {field("maxVehicles", "Maximum trucks", "number")}
+                {field(
+                  "offeredRateMinor",
+                  "Offer rate (minor units)",
+                  "number",
+                )}
+                {field("offerValidMinutes", "Offer validity minutes", "number")}
+              </>
+            )}
+          </FormGrid>
+          {dialogError && (
+            <div ref={errorRef} tabIndex={-1} role="alert" className="error">
+              <strong>{dialogError.message}</strong>
+              {dialogError.correlationId && (
+                <small>Reference {dialogError.correlationId}</small>
               )}
-              {select("laneId", "Contract lane", refs.lanes ?? [])}
-            </>
+            </div>
           )}
-          {["indent-create", "indent-edit"].includes(kind) && (
-            <>
-              {field("requestedVehicles", "Requested vehicles", "number")}
-              {field(
-                "quantityMilli",
-                "Quantity (thousandths)",
-                "number",
-                true,
-                "1000 is one whole unit",
-              )}
-              {field("pickupWindowStart", "Pickup starts", "datetime-local")}
-              {field("pickupWindowEnd", "Pickup ends", "datetime-local")}
-              {kind === "indent-edit" && (
-                <>
-                  {field(
-                    "committedPlacementAt",
-                    "Committed placement",
-                    "datetime-local",
-                  )}
-                  {area(
-                    "commitmentOverrideReason",
-                    "Commitment override reason",
-                  )}
-                </>
-              )}
-              {field("cargoType", "Cargo type", "text", false)}
-              {field("bodyType", "Body type", "text", false)}
-            </>
+          {pending && (
+            <p role="status" className="muted">
+              Saving this action…
+            </p>
           )}
-          {kind === "allocation-create" && (
-            <>
-              {select(
-                "vendorId",
-                "Eligible vendor",
-                eligible.filter((v) => v.eligible),
-              )}
-              {field("allottedVehicles", "Truck quantity", "number")}
-              {field(
-                "offeredRateMinor",
-                "Offer rate (minor units)",
-                "number",
-                true,
-                "For INR, enter paise",
-              )}
-              {field("offeredAt", "Offered at", "datetime-local")}
-              {field("expiresAt", "Offer expires", "datetime-local")}
-              {eligible
-                .filter((v) => !v.eligible)
-                .map((v) => (
-                  <p className={styles.reason} key={v.id}>
-                    <strong>{v.name} excluded:</strong> {v.reasons.join(", ")}
-                  </p>
-                ))}
-            </>
-          )}
-          {kind === "assignment" && (
-            <>
-              {select("vehicleId", "Eligible vehicle", refs.vehicles ?? [])}
-              {select("driverId", "Eligible driver", refs.drivers ?? [])}
-              {selected?.vehicle && area("reason", "Replacement reason", true)}
-            </>
-          )}
-          {kind === "trip-create" && (
-            <>
-              {field("tripNo", "Trip number")}
-              {field("lrNo", "LR number")}
-              {field("plannedPickupAt", "Planned pickup", "datetime-local")}
-              {field("plannedDeliveryAt", "Planned delivery", "datetime-local")}
-              {field(
-                "trackingConsentFrom",
-                "Location consent starts",
-                "datetime-local",
-                false,
-              )}
-              {field(
-                "trackingConsentTo",
-                "Location consent ends",
-                "datetime-local",
-                false,
-              )}
-            </>
-          )}
-          {action && (
-            <>
-              {field("occurredAt", "Event date and time", "datetime-local")}
-              {["START", "TRANSIT", "UNLOAD", "END"].includes(action) &&
-                field("odometerKm", "Odometer km", "number", false)}
-              {["START", "UNLOAD"].includes(action) && (
-                <>
-                  {field("latitude", "Latitude", "number", false)}
-                  {field("longitude", "Longitude", "number", false)}
-                </>
-              )}
-              {action === "LOAD" && (
-                <>
-                  {field(
-                    "loadQuantityMilli",
-                    "Loaded quantity (thousandths)",
-                    "number",
-                    false,
-                  )}
-                  {field("sealNumber", "Seal number", "text", false)}
-                </>
-              )}
-              {action === "TRANSIT" &&
-                field("delayReason", "Delay / exception", "text", false)}
-              {action === "END" && field("receiverName", "Receiver name")}
-              {area("notes", "Operational notes")}
-            </>
-          )}
-          {target && area("reason", "Reason", true)}
-          {kind === "rule" && (
-            <>
-              {field("name", "Rule name")}
-              {field("priority", "Priority", "number")}
-              {select("clientId", "Client", refs.clients ?? [], false)}
-              {select("laneId", "Lane", refs.lanes ?? [], false)}
-              {select(
-                "vendorId",
-                "Preferred vendor",
-                refs.vendors ?? [],
-                false,
-              )}
-              {field("maxVehicles", "Maximum trucks", "number")}
-              {field("offeredRateMinor", "Offer rate (minor units)", "number")}
-              {field("offerValidMinutes", "Offer validity minutes", "number")}
-            </>
-          )}
-          <div className={styles.dialogActions}>
-            <button type="button" onClick={close}>
-              Back
-            </button>
-            <button className="primary" type="submit">
-              Confirm action
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+        </DialogBody>
+        <DialogActions>
+          <button type="button" onClick={close} disabled={busy || pending}>
+            Back
+          </button>
+          <button className="primary" type="submit" disabled={busy || pending}>
+            {busy || pending ? "Saving…" : "Confirm action"}
+          </button>
+        </DialogActions>
+      </form>
+    </Modal>
   );
 }

@@ -3,7 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type ApiError } from "../../../../components/api";
 import { FormSubmitResult } from "../../../../components/forms/form-submit-result";
+import { Modal } from "../../../../components/modal";
 import { Shell } from "../../../../components/shell";
+import { DetailList } from "../../../../components/ui/primitives";
+import { useTenantFormat } from "../../../../components/use-tenant-format";
 
 export type WorkspaceField = {
   key: string;
@@ -42,6 +45,7 @@ export function TransactionWorkspace({
   queues: readonly string[];
   reports: readonly string[];
 }) {
+  const tenantFormat = useTenantFormat();
   const [items, setItems] = useState<KernelRecord[]>([]);
   const [selected, setSelected] = useState<KernelRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -220,18 +224,24 @@ export function TransactionWorkspace({
         )}
       </section>
       {selected && (
-        <section
-          className="panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={`${resource}-detail`}
-        >
+        <Modal titleId={`${resource}-detail`} onClose={() => setSelected(null)}>
           <div className="panel-title">
             <h2 id={`${resource}-detail`}>{selected.name}</h2>
             <button onClick={() => setSelected(null)}>Close</button>
           </div>
-          <pre className="safe-json">{JSON.stringify(selected, null, 2)}</pre>
-        </section>
+          <DetailList
+            value={selected}
+            locale={tenantFormat.locale}
+            timezone={tenantFormat.timezone}
+            labels={{
+              code: "Reference code",
+              name: "Record name",
+              status: "Workflow status",
+              version: "Record version",
+              updatedAt: "Last updated",
+            }}
+          />
+        </Modal>
       )}
       <section className="panel">
         <h2>Reports</h2>

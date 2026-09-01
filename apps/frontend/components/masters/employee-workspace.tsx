@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
 import { FormSubmitResult } from "../forms/form-submit-result";
 import { SmartField } from "../forms/smart-field";
+import { Modal } from "../modal";
 import { Shell } from "../shell";
 
 type Node = {
@@ -92,6 +93,7 @@ export function EmployeeWorkspace() {
   const [items, setItems] = useState<Employee[]>([]),
     [nodes, setNodes] = useState<Node[]>([]),
     [selected, setSelected] = useState<Employee | null>(null),
+    [editTarget, setEditTarget] = useState<Employee | null>(null),
     [form, setForm] = useState(fresh());
   const [editing, setEditing] = useState(false),
     [error, setError] = useState<ApiError | null>(null),
@@ -109,6 +111,10 @@ export function EmployeeWorkspace() {
     } | null>(null),
     [nodeSearch, setNodeSearch] = useState(""),
     [command, setCommand] = useState<Record<string, string>>({});
+  const editFocus = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) requestAnimationFrame(() => editFocus.current?.focus());
+  }, [editing]);
   const load = async (offset = 0, append = false) => {
     setLoading(true);
     try {
@@ -168,7 +174,7 @@ export function EmployeeWorkspace() {
     }
   }
   const contactsMasked =
-    editing && (selected?.email === "••••" || selected?.mobile === "••••");
+    editing && (editTarget?.email === "••••" || editTarget?.mobile === "••••");
   const body = () => ({
     employeeCode: form.employeeCode,
     displayName: form.displayName,
@@ -179,7 +185,8 @@ export function EmployeeWorkspace() {
     managerId: form.managerId || null,
     homeNodeId: form.homeNodeId,
     regionIds: form.regionIds,
-    ...(!editing || (selected && Object.hasOwn(selected, "linkedMembershipId"))
+    ...(!editing ||
+    (editTarget && Object.hasOwn(editTarget, "linkedMembershipId"))
       ? { linkedMembershipId: form.linkedMembershipId || null }
       : {}),
     activeFrom: form.activeFrom,
@@ -190,13 +197,13 @@ export function EmployeeWorkspace() {
     setError(null);
     setNotice("");
     try {
-      if (editing && selected)
-        await api(`/domain/masters/employees/${selected.id}`, {
+      if (editing && editTarget)
+        await api(`/domain/masters/employees/${editTarget.id}`, {
           method: "PATCH",
           headers: { "Idempotency-Key": crypto.randomUUID() },
           body: JSON.stringify({
             ...body(),
-            expectedVersion: selected.version,
+            expectedVersion: editTarget.version,
             reason: form.reason,
           }),
         });
@@ -206,34 +213,12 @@ export function EmployeeWorkspace() {
           headers: { "Idempotency-Key": crypto.randomUUID() },
           body: JSON.stringify(body()),
         });
-      const wasEditing = editing;
-      setNotice(wasEditing ? "Employee updated." : "Employee created.");
-      if (!wasEditing) {
-        setForm(fresh());
-        setEditing(false);
-        setSelected(null);
-      }
+      setNotice(editing ? "Employee updated." : "Employee created.");
+      setForm(fresh());
+      setEditing(false);
+      setEditTarget(null);
+      setSelected(null);
       await load();
-      if (wasEditing && selected) {
-        const refreshed = await api<Employee>(
-          `/domain/masters/employees/${selected.id}`,
-        );
-        setSelected(refreshed);
-        setForm({
-          employeeCode: refreshed.employeeCode,
-          displayName: refreshed.displayName,
-          designation: refreshed.designation ?? "",
-          email: refreshed.email === "••••" ? "" : (refreshed.email ?? ""),
-          mobile: refreshed.mobile === "••••" ? "" : (refreshed.mobile ?? ""),
-          managerId: refreshed.managerId ?? "",
-          homeNodeId: refreshed.homeNodeId,
-          regionIds: refreshed.regions.map((region) => region.id),
-          linkedMembershipId: refreshed.linkedMembershipId ?? "",
-          activeFrom: refreshed.activeFrom,
-          activeTo: refreshed.activeTo ?? "",
-          reason: "",
-        });
-      }
     } catch (value) {
       setError(value as ApiError);
     }
@@ -254,8 +239,9 @@ export function EmployeeWorkspace() {
       activeTo: selected.activeTo ?? "",
       reason: "",
     });
+    setEditTarget(selected);
+    setSelected(null);
     setEditing(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
   const filtered = items;
   return (
@@ -434,15 +420,16 @@ export function EmployeeWorkspace() {
         )}
       </section>
       {(permissions?.canCreate ||
-        (editing && selected?.permissions.update)) && (
+        (editing && editTarget?.permissions.update)) && (
         <section className="panel">
           <h2>
-            {editing ? `Edit ${selected?.displayName}` : "Create employee"}
+            {editing ? `Edit ${editTarget?.displayName}` : "Create employee"}
           </h2>
           <form className="access-form" onSubmit={submit}>
             <label>
               Employee code
               <input
+                ref={editFocus}
                 required
                 value={form.employeeCode}
                 onChange={(e) =>
@@ -552,13 +539,13 @@ export function EmployeeWorkspace() {
               </select>
               <small>Hold Ctrl/Command to select multiple.</small>
             </label>
-            {editing && selected?.linkedMembershipId ? (
+            {editing && editTarget?.linkedMembershipId ? (
               <label>
                 Linked user membership
                 <input
                   readOnly
                   value={
-                    selected.linkedUserEmail ?? selected.linkedMembershipId
+                    editTarget.linkedUserEmail ?? editTarget.linkedMembershipId
                   }
                 />
                 <small>
@@ -621,6 +608,7 @@ export function EmployeeWorkspace() {
                   type="button"
                   onClick={() => {
                     setEditing(false);
+                    setEditTarget(null);
                     setForm(fresh());
                   }}
                 >
@@ -682,7 +670,13 @@ export function EmployeeWorkspace() {
                     <td>{employee.managerName || "—"}</td>
                     <td>{employee.state}</td>
                     <td>
-                      <button onClick={() => setSelected(employee)}>
+                      <button
+                        onClick={() => {
+                          setEditing(false);
+                          setEditTarget(null);
+                          setSelected(employee);
+                        }}
+                      >
                         View
                       </button>
                     </td>
@@ -699,7 +693,7 @@ export function EmployeeWorkspace() {
         )}
       </section>
       {selected && (
-        <section className="panel" aria-labelledby="employee-detail">
+        <Modal titleId="employee-detail" onClose={() => setSelected(null)}>
           <div className="panel-title">
             <h2 id="employee-detail">{selected.displayName}</h2>
             <div className="actions">
@@ -954,7 +948,7 @@ export function EmployeeWorkspace() {
               <button>Add assignment</button>
             </form>
           )}
-        </section>
+        </Modal>
       )}
     </Shell>
   );

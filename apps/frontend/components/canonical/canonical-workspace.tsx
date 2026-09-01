@@ -4,6 +4,9 @@ import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
 import { SmartField } from "../forms/smart-field";
 import { FormSubmitResult } from "../forms/form-submit-result";
+import { Modal } from "../modal";
+import { DetailList, FilterChip, MetricCard } from "../ui/primitives";
+import { useTenantFormat } from "../use-tenant-format";
 import type { CanonicalField, CanonicalManifest } from "./manifests";
 
 type Row = Record<string, unknown> & {
@@ -132,6 +135,7 @@ export function CanonicalWorkspace({
   portal?: boolean;
   portalTitle?: string;
 }) {
+  const tenantFormat = useTenantFormat();
   const [items, setItems] = useState<Row[]>([]),
     [selected, setSelected] = useState<Row | null>(null),
     [values, setValues] = useState<Record<string, string>>(() => ({
@@ -147,15 +151,29 @@ export function CanonicalWorkspace({
     }> | null>(null),
     [reason, setReason] = useState(""),
     [banks, setBanks] = useState<Array<Row>>([]),
-    [compliance, setCompliance] = useState<Array<Row>>([]);
+    [compliance, setCompliance] = useState<Array<Row>>([]),
+    [reportState, setReportState] = useState(""),
+    [page, setPage] = useState(1),
+    [total, setTotal] = useState(0);
   const [command, setCommand] = useState<Record<string, string>>({});
   const errorRef = useRef<HTMLDivElement>(null),
     base = `/domain/${manifest.resource}`;
   async function load(signal?: AbortSignal) {
     setLoading(true);
     try {
-      const result = await api<{ items: Row[] }>(base, { signal });
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: "50",
+        ...(reportState ? { state: reportState } : {}),
+      });
+      const result = await api<{
+        items: Row[];
+        total: number;
+        page: number;
+        pageSize: number;
+      }>(`${base}?${query.toString()}`, { signal });
       setItems(result.items);
+      setTotal(result.total);
       setError(null);
     } catch (value) {
       if ((value as Error).name !== "AbortError") setError(value as ApiError);
@@ -167,7 +185,7 @@ export function CanonicalWorkspace({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [base]);
+  }, [base, page, reportState]);
   async function create(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -325,14 +343,43 @@ export function CanonicalWorkspace({
       {report && (
         <section className="panel" aria-labelledby="canonical-report">
           <h2 id="canonical-report">Current-state reconciliation</h2>
-          <div className="stats">
+          <p className="muted">
+            Select a status metric to filter the scoped work queue below.
+          </p>
+          <div
+            className="ui-metric-grid"
+            aria-label="Reconciliation status filters"
+          >
             {report.map((row) => (
-              <article key={row.state}>
-                <strong>{row.count}</strong>
-                <span>{row.state}</span>
-              </article>
+              <MetricCard
+                key={row.state}
+                label={row.state.replaceAll("_", " ")}
+                value={row.count}
+                help="Filter matching records"
+                selected={reportState === row.state}
+                onClick={() => {
+                  setPage(1);
+                  setReportState((current) =>
+                    current === row.state ? "" : row.state,
+                  );
+                }}
+              />
             ))}
           </div>
+          {reportState && (
+            <FilterChip
+              label={`Status: ${reportState.replaceAll("_", " ")}`}
+              onRemove={() => {
+                setPage(1);
+                setReportState("");
+              }}
+            />
+          )}
+          <p role="status" aria-live="polite">
+            {reportState
+              ? `${total} ${reportState.replaceAll("_", " ").toLowerCase()} records selected.`
+              : `${total} records in the current authorized queue.`}
+          </p>
         </section>
       )}
       {!portal && manifest.fields.length > 0 && (
@@ -657,7 +704,7 @@ export function CanonicalWorkspace({
       >
         <div className="panel-title">
           <h2 id="canonical-queue">Scoped work queue</h2>
-          <span className="count">{items.length}</span>
+          <span className="count">{total}</span>
         </div>
         {loading ? (
           <p role="status">Loading queue…</p>
@@ -685,34 +732,44 @@ export function CanonicalWorkspace({
             ))}
           </div>
         )}
+        {total > 50 && (
+          <nav className="pagination" aria-label="Canonical queue pages">
+            <span>
+              Page {page} · showing {items.length} of {total}
+            </span>
+            <div className="actions">
+              <button
+                type="button"
+                disabled={page === 1 || loading}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={page * 50 >= total || loading}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </nav>
+        )}
       </section>
       {selected && (
-        <section
-          className="panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="canonical-detail"
-        >
+        <Modal titleId="canonical-detail" onClose={() => setSelected(null)}>
           <div className="panel-title">
             <h2 id="canonical-detail">{titleOf(selected)}</h2>
             <button type="button" onClick={() => setSelected(null)}>
               Close
             </button>
           </div>
-          <dl className="details-grid">
-            {Object.entries(selected)
-              .filter(([key]) => !["tenant_id"].includes(key))
-              .map(([key, value]) => (
-                <div key={key}>
-                  <dt>{key.replaceAll("_", " ")}</dt>
-                  <dd>
-                    {typeof value === "object"
-                      ? JSON.stringify(value)
-                      : String(value ?? "—")}
-                  </dd>
-                </div>
-              ))}
-          </dl>
+          <DetailList
+            value={selected}
+            omit={["tenant_id"]}
+            locale={tenantFormat.locale}
+            timezone={tenantFormat.timezone}
+          />
           {(manifest.transitions[stateOf(selected)] ?? []).length > 0 && (
             <div className="access-form">
               <label htmlFor="transition-reason">
@@ -1589,7 +1646,7 @@ export function CanonicalWorkspace({
               </div>
             </div>
           )}
-        </section>
+        </Modal>
       )}
     </Shell>
   );

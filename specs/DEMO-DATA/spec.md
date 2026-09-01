@@ -1,7 +1,7 @@
 # DEMO-DATA — Deterministic demonstration environment
 
 **Status:** Complete
-**Test status:** Focused Passing — 12 database checks and 4 Chromium journeys passed locally on 2026-08-31; deeper cases remain Planned
+**Test status:** Expanded `2026.09.2` checks Implemented / Not Run; the preceding `2026.08.1` bootstrap had 12 database checks and 4 Chromium journeys passing locally on 2026-08-31
 **Feature source:** User-requested cross-feature demonstration bootstrap
 **Owner:** Primary agent
 
@@ -111,19 +111,19 @@ Reserved tenant identity:
 - one legal entity, South Region, Hyderabad Branch and Bengaluru Branch; closure/scope rows must reconcile
 - completed setup checklist corresponding to actually seeded sections
 
-Dataset version `2026.08.1` contains:
+Dataset version `2026.09.2` additively expands the original stable walkthrough to:
 
-| Area                    | Required records and lifecycle coverage                                                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity                | 6 active tenant memberships/roles; 3 INTERNAL Employees and Vendor/Driver/Client portal links                                                                 |
-| Client masters          | 1 client, 2 locations, 1 published contract/version, 1 lane, SLA and published rate                                                                           |
-| Supply masters          | 1 active vendor, runtime-encrypted verified synthetic bank version, 2 vehicles, 2 drivers and valid compliance                                                |
-| Operations              | 4 indents covering open, partially allocated, live/fulfilled and delivered/closed; offered/placed allocations, 2 assignments, and live/delivered trips/events |
-| Exceptions/dispositions | 1 acknowledged operational alert/action, 1 collection follow-up, and import row dispositions `CREATE`, `UPDATE`, and `REJECT`                                 |
-| POD                     | 1 closed delivered-trip POD with invoice eligibility                                                                                                          |
-| Client finance          | 1 draft invoice, 1 submitted/part-collected invoice, and 1 reconciled partial receipt/allocation                                                              |
-| Vendor finance          | 1 paid vendor bill, exact trip line, verified-bank paid batch/allocation and synthetic UTR                                                                    |
-| Control tower           | Seeded saved view plus canonical placement, trip, POD/invoice, collection and vendor-payable records                                                          |
+| Area                    | Required records and lifecycle coverage                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity/organization   | 6 representative memberships, 6 linked INTERNAL Employees, external portal links, at least 2 regions and 3 branches                  |
+| Client masters          | 4 clients, 10 locations, at least 6 lanes, and published plus temporal commercial examples                                           |
+| Supply masters          | 5 vendors (4 active), runtime-encrypted verified synthetic bank data, 12 vehicles, 10 drivers and compliance variation               |
+| Operations              | 36 indents, 24 allocations and 18 trips spanning open, placed, active, delivered, exception and historical scenarios                 |
+| Exceptions/dispositions | 12 alerts across severity/lifecycle, collection follow-ups, and import row dispositions `CREATE`, `UPDATE`, and `REJECT`             |
+| POD                     | 14 POD tasks spanning received, current-pending and prior-pending states                                                             |
+| Client finance          | 18 invoices and 8 receipts spanning draft, open, part-paid, paid, hold, ageing and reversal examples                                 |
+| Vendor finance          | 14 vendor bills and 5 payment runs spanning approval, due, overdue, blocked, disputed, part-paid, paid, failed and reversed outcomes |
+| Control tower           | Seeded saved views plus at least 10 scoped records in each placement, trip, POD/invoice, collection and vendor-payable lens          |
 
 ### Invariants, indexes, and tenant isolation
 

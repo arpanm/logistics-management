@@ -1,6 +1,8 @@
 .page {
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
+  min-width: 0;
+  container-type: inline-size;
 }
 .head,
 .toolbar,
@@ -15,23 +17,46 @@
   justify-content: space-between;
   align-items: start;
 }
+.head h1 {
+  margin-block: 0.2rem;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  letter-spacing: -0.035em;
+}
 .tabs {
   display: flex;
-  gap: 0.35rem;
-  overflow: auto;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-inline: contain;
+}
+.tabs button {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  white-space: nowrap;
+  scroll-snap-align: center;
 }
 .tabs button[aria-selected="true"] {
   background: var(--primary);
   color: white;
+  box-shadow: var(--shadow-1);
 }
 .panel,
-.metric,
 .client,
 .vendor {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 0.85rem;
+  border-radius: var(--radius-lg);
   padding: 1rem;
+  min-width: 0;
+  box-shadow: var(--shadow-1);
 }
 .lensIntro,
 .freshness,
@@ -67,17 +92,6 @@
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: 0.7rem;
 }
-.metric strong {
-  display: block;
-  font-size: 1.65rem;
-  margin-top: 0.3rem;
-}
-.metric {
-  text-align: left;
-  cursor: pointer;
-}
-.metric:hover,
-.metric:focus-visible,
 .client:hover,
 .client:focus-visible,
 .ageing button:hover,
@@ -153,6 +167,15 @@
     border-color 120ms ease,
     transform 120ms ease;
 }
+.client h3,
+.sectionHead h2,
+.crumbs button,
+.crumbs strong {
+  min-width: 0;
+  max-width: min(100%, 36rem);
+  overflow-wrap: normal;
+  word-break: normal;
+}
 .cardHead {
   align-items: flex-start;
 }
@@ -176,7 +199,12 @@
   );
 }
 .tableWrap {
+  width: 100%;
+  max-width: 100%;
   overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overscroll-behavior-inline: contain;
 }
 .table {
   border-collapse: collapse;
@@ -193,9 +221,15 @@
 .table th {
   color: var(--muted);
   font-size: 0.8rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-muted);
 }
 .table td {
   font-variant-numeric: tabular-nums;
+  max-width: 22rem;
+  overflow-wrap: anywhere;
 }
 .actionLink {
   white-space: nowrap;
@@ -249,6 +283,107 @@
 }
 .money {
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.activeFilters {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.activeFilters span {
+  max-width: 100%;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.activeFilters button {
+  min-height: 2.5rem;
+  padding-block: 0.35rem;
+}
+.recordCards {
+  display: none;
+  gap: 0.75rem;
+}
+.recordCard {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+.recordCard header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.recordCard header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.recordCard dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 1rem 0;
+}
+.recordCard dl div {
+  min-width: 0;
+}
+.recordCard dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.recordCard dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+}
+.scrollHint {
+  display: none;
+  margin: 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.staleNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.8rem 1rem;
+  border: 1px solid #e0a100;
+  border-radius: var(--radius-md);
+  background: #fff7d6;
+  color: #5f4200;
+}
+.staleNotice div {
+  min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.staleNotice small {
+  display: block;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.pagination div {
+  display: flex;
+  gap: 0.5rem;
 }
 .loading {
   display: grid;
@@ -272,7 +407,10 @@
   color: var(--muted);
   padding: 2rem;
 }
-@media (max-width: 640px) {
+@media (max-width: 767px) {
+  .head {
+    display: grid;
+  }
   .actions button,
   .actions a {
     width: 100%;
@@ -285,10 +423,89 @@
   .freshness span {
     width: 100%;
   }
+  .tabs {
+    margin-inline: -0.25rem;
+    border-radius: 0.75rem;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metrics :global(.ui-metric-card) {
+    padding: 0.8rem;
+  }
+  .clients,
+  .vendors,
+  .ageing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cardHead,
+  .cardStats {
+    min-width: 0;
+  }
+  .cardHead > * {
+    min-width: 0;
+  }
+  .cardStats span:last-child {
+    width: 100%;
+    margin-left: 0;
+  }
+  .recordCards {
+    display: grid;
+  }
+  .recordCards + .scrollHint,
+  .scrollHint {
+    display: block;
+  }
+  .recordCards ~ .tableWrap {
+    display: none;
+  }
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .toolbar label {
+    min-width: 0;
+    width: 100%;
+  }
+  .crumbs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+  .crumbs > * {
+    flex: 0 0 auto;
+    max-width: min(16rem, 72vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .vendor dl,
+  .recordCard dl {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .pagination,
+  .pagination div {
+    align-items: stretch;
+  }
+  .pagination div {
+    width: 100%;
+  }
+  .pagination button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 380px) {
+  .metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .recordCard dl,
+  .vendor dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .metric,
   .client,
   .ageing button,
   .loading span {

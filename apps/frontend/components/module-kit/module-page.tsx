@@ -2,7 +2,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
 import { FormSubmitResult } from "../forms/form-submit-result";
+import { Modal } from "../modal";
 import { Shell } from "../shell";
+import { DetailList } from "../ui/primitives";
+import { useTenantFormat } from "../use-tenant-format";
 import type { UiField, UiManifest } from "./manifests";
 
 type RecordRow = {
@@ -105,6 +108,7 @@ function Field({
 }
 
 export function ModulePage({ manifest }: { manifest: UiManifest }) {
+  const tenantFormat = useTenantFormat();
   const base = `/modules/${manifest.module}/${manifest.resource}`;
   const [items, setItems] = useState<RecordRow[]>([]),
     [selected, setSelected] = useState<RecordRow | null>(null);
@@ -398,8 +402,8 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
         )}
       </section>
       {selected && (
-        <section className="panel" aria-labelledby="detail-heading">
-          <div className="heading">
+        <Modal titleId="detail-heading" onClose={() => setSelected(null)}>
+          <div className="panel-title">
             <h2 id="detail-heading">{selected.name}</h2>
             <button type="button" onClick={() => setSelected(null)}>
               Close
@@ -447,7 +451,11 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
           )}
           <details>
             <summary>Record data</summary>
-            <pre>{JSON.stringify(selected.data, null, 2)}</pre>
+            <DetailList
+              value={selected.data}
+              locale={tenantFormat.locale}
+              timezone={tenantFormat.timezone}
+            />
           </details>
           <h3>Comments</h3>
           <form onSubmit={(event) => void addComment(event)}>
@@ -475,7 +483,7 @@ export function ModulePage({ manifest }: { manifest: UiManifest }) {
             {selected.events?.length ?? 0} · Documents:{" "}
             {selected.documents?.length ?? 0}
           </p>
-        </section>
+        </Modal>
       )}
     </Shell>
   );

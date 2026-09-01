@@ -1,7 +1,7 @@
 # CTL-01 — Full Control Tower prototype parity and actionable drill-down
 
 **Status:** Implemented
-**Evidence reviewed:** `FEATURES.md`, current five-lens Control Tower UI/API/service, and all behavior/fields in `backup/dashboard.html`. The prototype is requirements evidence, not production architecture. No tests were run.
+**Evidence reviewed:** `FEATURES.md`, current five-lens Control Tower UI/API/service, and all behavior/fields in `backup/dashboard.html`. The prototype is requirements evidence, not production architecture. The UI-01 batch adds responsive desktop/mobile representations, exact actionable KPI predicates, stable bounded server pagination/sorting, URL-backed keyboard tabs, and retained stale/error refresh states. Focused tests were authored but not run.
 
 ## Problem and outcome
 

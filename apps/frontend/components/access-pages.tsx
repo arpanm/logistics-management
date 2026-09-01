@@ -1,9 +1,16 @@
 "use client";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, type ApiError } from "./api";
 import { Shell } from "./shell";
 import { FormSubmitResult } from "./forms/form-submit-result";
+import { Modal } from "./modal";
+import {
+  DialogActions,
+  DialogBody,
+  DialogHeader,
+  FormGrid,
+} from "./ui/primitives";
 
 type Role = {
   id: string;
@@ -176,7 +183,9 @@ export function UsersPage() {
     [passwordResetStatus, setPasswordResetStatus] = useState(""),
     [accessReason, setAccessReason] = useState(
       "Access updated after administrator review",
-    );
+    ),
+    [createOpen, setCreateOpen] = useState(false),
+    [createError, setCreateError] = useState<ApiError | null>(null);
   const [form, setForm] = useState({
     displayName: "",
     employeeCode: "",
@@ -188,7 +197,8 @@ export function UsersPage() {
     actions: ["READ"],
   });
   const key = useRequestKey(form),
-    errorRef = useRef<HTMLDivElement>(null);
+    errorRef = useRef<HTMLDivElement>(null),
+    createErrorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!activationLink) return;
     const timer = window.setTimeout(
@@ -211,7 +221,7 @@ export function UsersPage() {
     );
     return () => window.clearTimeout(timer);
   }, [passwordResetLink]);
-  function closeUser() {
+  const closeUser = useCallback(() => {
     setActivationLink("");
     setCopyStatus("");
     setPasswordResetLink("");
@@ -219,7 +229,7 @@ export function UsersPage() {
     setPreview(null);
     setDetail(null);
     setDossier(null);
-  }
+  }, []);
   async function load(signal?: AbortSignal) {
     setLoading(true);
     setError(null);
@@ -292,9 +302,20 @@ export function UsersPage() {
   const canResetSessions = availableActions.canResetTenantSessions;
   const canResetMfa = availableActions.canResetMfa;
   const canEditAccess = canAdminUsers && roles.length > 0 && scopes.length > 0;
+  useEffect(() => {
+    if (!canEditAccess) return;
+    setForm((current) => ({
+      ...current,
+      roleId:
+        current.roleId ||
+        roles.find((role) => role.status === "ACTIVE")?.id ||
+        "",
+      scopeNodeId: current.scopeNodeId || scopes[0]?.id || "",
+    }));
+  }, [canEditAccess, roles, scopes]);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    setError(null);
+    setCreateError(null);
     setSuccess("");
     const payload = {
       displayName: form.displayName,
@@ -326,16 +347,21 @@ export function UsersPage() {
           ? "Invitation created. Open the pending user to generate and copy an activation link."
           : "Invitation created and queued for delivery.",
       );
-      setForm((value) => ({
-        ...value,
+      setForm({
         displayName: "",
         employeeCode: "",
         email: "",
         mobile: "",
-      }));
+        portalAudience: "INTERNAL",
+        roleId: roles.find((role) => role.status === "ACTIVE")?.id ?? "",
+        scopeNodeId: scopes[0]?.id ?? "",
+        actions: ["READ"],
+      });
+      setCreateOpen(false);
       await load();
     } catch (value) {
-      setError(value as ApiError);
+      setCreateError(value as ApiError);
+      requestAnimationFrame(() => createErrorRef.current?.focus());
     }
   }
   async function openUser(user: User) {
@@ -546,6 +572,19 @@ export function UsersPage() {
           <h1>User directory</h1>
           <p className="muted">Invite users and manage tenant-scoped access.</p>
         </div>
+        {canEditAccess && (
+          <button
+            className="primary"
+            type="button"
+            onClick={() => {
+              setCreateError(null);
+              setSuccess("");
+              setCreateOpen(true);
+            }}
+          >
+            Create user
+          </button>
+        )}
       </div>
       {error && (
         <div ref={errorRef} tabIndex={-1} role="alert" className="error">
@@ -568,132 +607,179 @@ export function UsersPage() {
           {supportNotice}
         </p>
       )}
-      {canEditAccess && (
-        <section className="panel" aria-labelledby="invite-heading">
-          <h2 id="invite-heading">Invite user</h2>
+      {canEditAccess && createOpen && (
+        <Modal titleId="invite-heading" onClose={() => setCreateOpen(false)}>
           <form
-            className="access-form"
+            className="ui-dialog-layout"
             noValidate
             onSubmit={(e) => void submit(e)}
           >
-            <label>
-              Display name
-              <input
-                required
-                minLength={2}
-                value={form.displayName}
-                onChange={(e) =>
-                  setForm({ ...form, displayName: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Employee code
-              <input
-                required
-                pattern="[A-Z0-9-]{2,30}"
-                value={form.employeeCode}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    employeeCode: e.target.value.toUpperCase(),
-                  })
-                }
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                autoComplete="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </label>
-            <label>
-              Mobile (E.164)
-              <input
-                autoComplete="tel"
-                placeholder="+919876543210"
-                value={form.mobile}
-                onChange={(e) => setForm({ ...form, mobile: e.target.value })}
-              />
-            </label>
-            <label>
-              Portal audience
-              <select
-                value={form.portalAudience}
-                onChange={(e) =>
-                  setForm({ ...form, portalAudience: e.target.value })
-                }
-              >
-                <option>INTERNAL</option>
-                <option>VENDOR</option>
-                <option>DRIVER</option>
-                <option>CLIENT</option>
-              </select>
-            </label>
-            <label>
-              Role
-              <select
-                required
-                value={form.roleId}
-                onChange={(e) => setForm({ ...form, roleId: e.target.value })}
-              >
-                {roles
-                  .filter((r) => r.status === "ACTIVE")
-                  .map((role) => (
-                    <option key={role.id} value={role.id}>
-                      {role.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Scope
-              <select
-                required
-                value={form.scopeNodeId}
-                onChange={(e) =>
-                  setForm({ ...form, scopeNodeId: e.target.value })
-                }
-              >
-                {scopes.map((scope) => (
-                  <option key={scope.id} value={scope.id}>
-                    {scope.path}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <fieldset>
-              <legend>Actions</legend>
-              {["READ", "CREATE", "UPDATE", "APPROVE", "EXPORT", "ADMIN"].map(
-                (action) => (
-                  <label className="check" key={action}>
-                    <input
-                      type="checkbox"
-                      checked={form.actions.includes(action)}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          actions: e.target.checked
-                            ? [...form.actions, action]
-                            : form.actions.filter((a) => a !== action),
-                        })
-                      }
-                    />
-                    {action}
-                  </label>
-                ),
+            <DialogHeader
+              titleId="invite-heading"
+              eyebrow="Tenant access"
+              title="Create user invitation"
+              onClose={() => setCreateOpen(false)}
+            />
+            <DialogBody>
+              {createError && (
+                <div
+                  ref={createErrorRef}
+                  tabIndex={-1}
+                  role="alert"
+                  className="error"
+                >
+                  <strong>{createError.message}</strong>
+                  {createError.fields &&
+                    Object.entries(createError.fields).map(
+                      ([field, messages]) => (
+                        <small key={field}>
+                          {field}: {messages.join(", ")}
+                        </small>
+                      ),
+                    )}
+                  {createError.correlationId && (
+                    <small>Reference {createError.correlationId}</small>
+                  )}
+                </div>
               )}
-            </fieldset>
-            <FormSubmitResult error={error} success={success}>
+              <FormGrid>
+                <label>
+                  Display name
+                  <input
+                    required
+                    minLength={2}
+                    value={form.displayName}
+                    onChange={(e) =>
+                      setForm({ ...form, displayName: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Employee code
+                  <input
+                    required
+                    pattern="[A-Z0-9-]{2,30}"
+                    value={form.employeeCode}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        employeeCode: e.target.value.toUpperCase(),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={form.email}
+                    onChange={(e) =>
+                      setForm({ ...form, email: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Mobile (E.164)
+                  <input
+                    autoComplete="tel"
+                    placeholder="+919876543210"
+                    value={form.mobile}
+                    onChange={(e) =>
+                      setForm({ ...form, mobile: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Portal audience
+                  <select
+                    value={form.portalAudience}
+                    onChange={(e) =>
+                      setForm({ ...form, portalAudience: e.target.value })
+                    }
+                  >
+                    <option>INTERNAL</option>
+                    <option>VENDOR</option>
+                    <option>DRIVER</option>
+                    <option>CLIENT</option>
+                  </select>
+                </label>
+                <label>
+                  Role
+                  <select
+                    required
+                    value={form.roleId}
+                    onChange={(e) =>
+                      setForm({ ...form, roleId: e.target.value })
+                    }
+                  >
+                    {roles
+                      .filter((r) => r.status === "ACTIVE")
+                      .map((role) => (
+                        <option key={role.id} value={role.id}>
+                          {role.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Scope
+                  <select
+                    required
+                    value={form.scopeNodeId}
+                    onChange={(e) =>
+                      setForm({ ...form, scopeNodeId: e.target.value })
+                    }
+                  >
+                    {scopes.map((scope) => (
+                      <option key={scope.id} value={scope.id}>
+                        {scope.path}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset>
+                  <legend>Actions</legend>
+                  {[
+                    "READ",
+                    "CREATE",
+                    "UPDATE",
+                    "APPROVE",
+                    "EXPORT",
+                    "ADMIN",
+                  ].map((action) => (
+                    <label className="check" key={action}>
+                      <input
+                        type="checkbox"
+                        checked={form.actions.includes(action)}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            actions: e.target.checked
+                              ? [...form.actions, action]
+                              : form.actions.filter((a) => a !== action),
+                          })
+                        }
+                      />
+                      {action}
+                    </label>
+                  ))}
+                </fieldset>
+              </FormGrid>
+              <FormSubmitResult success={null}>
+                <></>
+              </FormSubmitResult>
+            </DialogBody>
+            <DialogActions>
+              <button type="button" onClick={() => setCreateOpen(false)}>
+                Cancel
+              </button>
               <button className="primary" type="submit">
                 Review and send invitation
               </button>
-            </FormSubmitResult>
+            </DialogActions>
           </form>
-        </section>
+        </Modal>
       )}
       <section className="panel" aria-busy={loading}>
         <div className="panel-title">
@@ -868,12 +954,7 @@ export function UsersPage() {
         </div>
       </section>
       {detail && (
-        <section
-          className="panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="user-detail-title"
-        >
+        <Modal titleId="user-detail-title" onClose={closeUser}>
           <div className="panel-title">
             <div>
               <h2 id="user-detail-title">User access details</h2>
@@ -1480,7 +1561,7 @@ export function UsersPage() {
               )}
             </section>
           )}
-        </section>
+        </Modal>
       )}
     </Shell>
   );

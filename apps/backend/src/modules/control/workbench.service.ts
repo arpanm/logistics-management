@@ -15,7 +15,35 @@ export const controlLens = z.enum([
   "vendor-payable",
 ]);
 type Lens = z.infer<typeof controlLens>;
-const filterSchema = z.object({
+export const controlKpiPredicate = z.enum([
+  "all",
+  "green",
+  "yellow",
+  "red",
+  "received",
+  "pending-current",
+  "pending-prior",
+  "open-invoices",
+  "part-paid",
+  "on-hold",
+  "over-45",
+  "active-trips",
+  "at-risk-trips",
+  "delayed-trips",
+  "gps-silent",
+  "loading-detention",
+  "unloading-detention",
+  "delivery-exception",
+  "draft-bills",
+  "approval-pending",
+  "due-bills",
+  "overdue-bills",
+  "payment-blocked",
+  "disputed",
+  "paid",
+]);
+export type ControlKpiPredicate = z.infer<typeof controlKpiPredicate>;
+export const controlFiltersSchema = z.object({
   search: z.string().trim().max(120).default(""),
   colour: z.enum(["GREEN", "YELLOW", "RED"]).optional(),
   clientId: z.string().uuid().optional(),
@@ -23,7 +51,225 @@ const filterSchema = z.object({
   vendorId: z.string().uuid().optional(),
   state: z.string().trim().max(60).optional(),
   ageingBucket: z.enum(["CURRENT", "31_45", "46_90", "OVER_90"]).optional(),
+  kpi: controlKpiPredicate.optional(),
 });
+export const controlQuerySchema = controlFiltersSchema.extend({
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(10).max(100).default(25),
+  sort: z
+    .enum([
+      "reference",
+      "client",
+      "state",
+      "risk",
+      "dueAt",
+      "updatedAt",
+      "value",
+      "balance",
+    ])
+    .default("updatedAt"),
+  direction: z.enum(["asc", "desc"]).default("desc"),
+});
+export type ControlQuery = z.infer<typeof controlQuerySchema>;
+
+type PredicateDefinition = {
+  sql: string;
+  matches: (row: Row, asOf: Date) => boolean;
+};
+const activeTrip = (row: Row) =>
+  !["DELIVERED", "CANCELLED"].includes(String(row.state));
+const age = (row: Row) => Number(row.ageDays ?? 0);
+const money = (row: Row, key: string) => BigInt(String(row[key] ?? 0));
+export const kpiPredicateDefinitions: Record<
+  ControlKpiPredicate,
+  PredicateDefinition
+> = {
+  all: { sql: "TRUE", matches: () => true },
+  green: { sql: `f.colour='GREEN'`, matches: (row) => row.colour === "GREEN" },
+  yellow: {
+    sql: `f.colour='YELLOW'`,
+    matches: (row) => row.colour === "YELLOW",
+  },
+  red: { sql: `f.colour='RED'`, matches: (row) => row.colour === "RED" },
+  received: {
+    sql: `f."completedAt" IS NOT NULL`,
+    matches: (row) => Boolean(row.completedAt),
+  },
+  "pending-current": {
+    sql: `f."completedAt" IS NULL AND NOT f."priorPeriod"`,
+    matches: (row) => !row.completedAt && !row.priorPeriod,
+  },
+  "pending-prior": {
+    sql: `f."completedAt" IS NULL AND f."priorPeriod"`,
+    matches: (row) => !row.completedAt && Boolean(row.priorPeriod),
+  },
+  "open-invoices": {
+    sql: `f."balanceMinor">0`,
+    matches: (row) => money(row, "balanceMinor") > 0n,
+  },
+  "part-paid": {
+    sql: `f."receivedMinor">0 AND f."balanceMinor">0`,
+    matches: (row) =>
+      money(row, "receivedMinor") > 0n && money(row, "balanceMinor") > 0n,
+  },
+  "on-hold": { sql: `f.hold IS NOT NULL`, matches: (row) => Boolean(row.hold) },
+  "over-45": {
+    sql: `f."ageDays">45 AND f."balanceMinor">0`,
+    matches: (row) => age(row) > 45 && money(row, "balanceMinor") > 0n,
+  },
+  "active-trips": {
+    sql: `f.state NOT IN ('DELIVERED','CANCELLED')`,
+    matches: activeTrip,
+  },
+  "at-risk-trips": {
+    sql: `f.state NOT IN ('DELIVERED','CANCELLED') AND f.colour<>'GREEN'`,
+    matches: (row) => activeTrip(row) && row.colour !== "GREEN",
+  },
+  "delayed-trips": {
+    sql: `f.state NOT IN ('DELIVERED','CANCELLED') AND f.colour='RED'`,
+    matches: (row) => activeTrip(row) && row.colour === "RED",
+  },
+  "gps-silent": {
+    sql: `f.state NOT IN ('DELIVERED','CANCELLED') AND (f."lastGpsAt" IS NULL OR f."lastGpsAt"<$4::timestamptz-interval '30 minutes')`,
+    matches: (row, asOf) =>
+      activeTrip(row) &&
+      (!row.lastGpsAt ||
+        asOf.getTime() - new Date(String(row.lastGpsAt)).getTime() > 1_800_000),
+  },
+  "loading-detention": {
+    sql: `f.state='AT_ORIGIN' AND f."updatedAt"<$4::timestamptz-interval '2 hours'`,
+    matches: (row, asOf) =>
+      row.state === "AT_ORIGIN" &&
+      asOf.getTime() - new Date(String(row.updatedAt)).getTime() > 7_200_000,
+  },
+  "unloading-detention": {
+    sql: `f.state='AT_DESTINATION' AND f."updatedAt"<$4::timestamptz-interval '2 hours'`,
+    matches: (row, asOf) =>
+      row.state === "AT_DESTINATION" &&
+      asOf.getTime() - new Date(String(row.updatedAt)).getTime() > 7_200_000,
+  },
+  "delivery-exception": {
+    sql: `f.colour='RED'`,
+    matches: (row) => row.colour === "RED",
+  },
+  "draft-bills": {
+    sql: `f.state='DRAFT'`,
+    matches: (row) => row.state === "DRAFT",
+  },
+  "approval-pending": {
+    sql: `f.state IN ('PENDING_OPERATIONAL_VERIFICATION','PENDING_FINANCE_APPROVAL')`,
+    matches: (row) =>
+      ["PENDING_OPERATIONAL_VERIFICATION", "PENDING_FINANCE_APPROVAL"].includes(
+        String(row.state),
+      ),
+  },
+  "due-bills": {
+    sql: `f.colour='YELLOW'`,
+    matches: (row) => row.colour === "YELLOW",
+  },
+  "overdue-bills": {
+    sql: `f.colour='RED'`,
+    matches: (row) => row.colour === "RED",
+  },
+  "payment-blocked": {
+    sql: `f.state IN ('VALIDATION_EXCEPTION','DISPUTED')`,
+    matches: (row) =>
+      ["VALIDATION_EXCEPTION", "DISPUTED"].includes(String(row.state)),
+  },
+  disputed: {
+    sql: `f.state='DISPUTED'`,
+    matches: (row) => row.state === "DISPUTED",
+  },
+  paid: { sql: `f.state='PAID'`, matches: (row) => row.state === "PAID" },
+};
+
+export const kpiActionsByLens: Record<
+  Lens,
+  Record<string, ControlKpiPredicate>
+> = {
+  placement: {
+    liveIndents: "all",
+    green: "green",
+    yellow: "yellow",
+    red: "red",
+  },
+  pod: {
+    deliveryRecords: "all",
+    received: "received",
+    pendingCurrent: "pending-current",
+    pendingPrior: "pending-prior",
+  },
+  collection: {
+    openInvoices: "open-invoices",
+    partPaid: "part-paid",
+    onHold: "on-hold",
+    over45Count: "over-45",
+    over45Minor: "over-45",
+  },
+  trip: {
+    active: "active-trips",
+    delayed: "delayed-trips",
+    gpsSilent: "gps-silent",
+    loadingDetention: "loading-detention",
+    unloadingDetention: "unloading-detention",
+  },
+  "vendor-payable": {
+    unbilled: "draft-bills",
+    approvalPending: "approval-pending",
+    paymentBlocked: "payment-blocked",
+    disputed: "disputed",
+    paid: "paid",
+  },
+};
+
+export function parseControlQuery(lens: Lens, raw: unknown) {
+  const query = controlQuerySchema.parse(raw);
+  if (query.kpi && !Object.values(kpiActionsByLens[lens]).includes(query.kpi))
+    throw new AppError(
+      400,
+      "INVALID_KPI_PREDICATE",
+      "The KPI predicate is not available for this lens",
+    );
+  return query;
+}
+export function actionableKpiMeasure(
+  lens: Lens,
+  key: string,
+  rows: Row[],
+  asOf: Date,
+) {
+  const predicate = kpiActionsByLens[lens][key];
+  if (!predicate) return undefined;
+  const matched = rows.filter((row) =>
+    kpiPredicateDefinitions[predicate].matches(row, asOf),
+  );
+  return key === "over45Minor"
+    ? matched.reduce((total, row) => total + money(row, "balanceMinor"), 0n)
+    : matched.length;
+}
+export function controlStableOrder(lens: Lens, input: ControlQuery) {
+  const moneySort = ["pod", "collection", "vendor-payable"].includes(lens);
+  const balanceSort = ["collection", "vendor-payable"].includes(lens);
+  const sortColumns: Record<ControlQuery["sort"], string | null> = {
+    reference: "f.reference",
+    client: "f.client",
+    state: "f.state",
+    risk: "f.colour",
+    dueAt: `f."dueAt"`,
+    updatedAt: `f."updatedAt"`,
+    value: moneySort ? `f."valueMinor"` : null,
+    balance: balanceSort ? `f."balanceMinor"` : null,
+  };
+  const sortColumn = sortColumns[input.sort];
+  if (!sortColumn)
+    throw new AppError(
+      400,
+      "INVALID_SORT",
+      "The sort field is not available for this lens",
+    );
+  const direction = input.direction.toUpperCase();
+  return `${sortColumn} ${direction} NULLS LAST,f.id ${direction}`;
+}
 
 const lensCapability: Record<Lens, string> = {
   placement: "operations.read",
@@ -35,16 +281,28 @@ const lensCapability: Record<Lens, string> = {
 
 const queries: Record<Lens, string> = {
   placement: `SELECT i.id,i.indent_no AS reference,c.id AS "clientId",c.legal_name AS client,cl.id AS "locationId",cl.name AS location,i.state,i.body_type AS "truckType",i.requested_vehicles AS demand,
-    coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0)::int AS allotted,
-    coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state='PLACED'),0)::int AS placed,
-    string_agg(DISTINCT v.legal_name,', ') AS vendors,string_agg(DISTINCT vh.registration_number,', ') AS vehicles,string_agg(DISTINCT d.display_name,', ') AS drivers,
-    max(aa.assigned_from) FILTER(WHERE a.state='PLACED') AS "placedAt",
-    i.committed_placement_at AS "dueAt",i.updated_at AS "updatedAt",greatest(floor(extract(epoch FROM (coalesce(max(aa.assigned_from) FILTER(WHERE a.state='PLACED'),$4::timestamptz)-i.committed_placement_at))/3600),0)::int AS "ageHours",
-    CASE WHEN coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state='PLACED'),0)>=i.requested_vehicles THEN 'GREEN' WHEN $4::timestamptz>=i.committed_placement_at THEN 'RED' WHEN $4::timestamptz>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END colour
+    supply.allotted,supply.placed,supply.vendors,assets.vehicles,assets.drivers,assets."placedAt",
+    i.committed_placement_at AS "dueAt",i.updated_at AS "updatedAt",greatest(floor(extract(epoch FROM (coalesce(assets."placedAt",$4::timestamptz)-i.committed_placement_at))/3600),0)::int AS "ageHours",
+    CASE WHEN supply.placed>=i.requested_vehicles THEN 'GREEN' WHEN $4::timestamptz>=i.committed_placement_at THEN 'RED' WHEN $4::timestamptz>=i.committed_placement_at-interval '24 hours' THEN 'YELLOW' ELSE 'GREEN' END colour
     FROM app.indents i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id JOIN app.client_locations cl ON cl.tenant_id=i.tenant_id AND cl.id=i.client_location_id
-    LEFT JOIN app.allocations a ON a.tenant_id=i.tenant_id AND a.indent_id=i.id LEFT JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id
-    LEFT JOIN app.allocation_assignments aa ON aa.tenant_id=a.tenant_id AND aa.allocation_id=a.id AND aa.assigned_to IS NULL LEFT JOIN app.vehicles vh ON vh.tenant_id=aa.tenant_id AND vh.id=aa.vehicle_id LEFT JOIN app.drivers d ON d.tenant_id=aa.tenant_id AND d.id=aa.driver_id
-    WHERE i.tenant_id=$1::uuid AND i.state IN ('OPEN','PARTIALLY_ALLOCATED') AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','indents',i.id) GROUP BY i.id,c.id,c.legal_name,cl.id,cl.name`,
+    LEFT JOIN LATERAL (
+      SELECT coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state NOT IN ('REJECTED','EXPIRED','CANCELLED')),0)::int allotted,
+        coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state='PLACED'),0)::int placed,
+        string_agg(DISTINCT v.legal_name,', ') vendors
+      FROM app.allocations a LEFT JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id
+      WHERE a.tenant_id=i.tenant_id AND a.indent_id=i.id
+    ) supply ON true
+    LEFT JOIN LATERAL (
+      SELECT string_agg(DISTINCT vh.registration_number,', ') vehicles,
+        string_agg(DISTINCT d.display_name,', ') drivers,
+        max(aa.assigned_from) FILTER(WHERE a.state='PLACED') AS "placedAt"
+      FROM app.allocations a
+      JOIN app.allocation_assignments aa ON aa.tenant_id=a.tenant_id AND aa.allocation_id=a.id AND aa.assigned_to IS NULL
+      LEFT JOIN app.vehicles vh ON vh.tenant_id=aa.tenant_id AND vh.id=aa.vehicle_id
+      LEFT JOIN app.drivers d ON d.tenant_id=aa.tenant_id AND d.id=aa.driver_id
+      WHERE a.tenant_id=i.tenant_id AND a.indent_id=i.id
+    ) assets ON true
+    WHERE i.tenant_id=$1::uuid AND i.state IN ('OPEN','PARTIALLY_ALLOCATED') AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','indents',i.id)`,
   pod: `SELECT p.id,t.trip_no AS reference,t.lr_no AS "secondaryReference",
     (SELECT string_agg(DISTINCT x.invoice_reference,', ') FROM app.pod_invoice_links x WHERE x.tenant_id=p.tenant_id AND x.pod_task_id=p.id) AS "invoiceReferences",
     (SELECT coalesce(jsonb_agg(jsonb_build_object('identity',coalesce(ci.id::text,'REFERENCE:'||x.invoice_reference),'valueMinor',coalesce(ci.total_minor,x.value_minor))), '[]'::jsonb) FROM app.pod_invoice_links x LEFT JOIN app.client_invoices ci ON ci.tenant_id=x.tenant_id AND ci.invoice_no=x.invoice_reference WHERE x.tenant_id=p.tenant_id AND x.pod_task_id=p.id) AS "invoiceValues",
@@ -132,75 +390,171 @@ export class ControlWorkbenchService {
       return { lenses, ...tenant, refreshSeconds: 30 };
     });
   }
-  private async rows(
-    tx: Tx,
+  private queryParts(lens: Lens, input: ControlQuery) {
+    const values: unknown[] = [];
+    const conditions: string[] = [];
+    const parameter = (value: unknown, cast = "") => {
+      values.push(value);
+      const baseCount = ["collection", "vendor-payable"].includes(lens) ? 5 : 4;
+      return `$${baseCount + values.length}${cast}`;
+    };
+    if (input.search)
+      conditions.push(
+        `lower(concat_ws(' ',f.reference,f.client,f.location,f.state)) LIKE ${parameter(`%${input.search.toLocaleLowerCase()}%`)}`,
+      );
+    if (input.colour) conditions.push(`f.colour=${parameter(input.colour)}`);
+    if (input.clientId)
+      conditions.push(`f."clientId"=${parameter(input.clientId, "::uuid")}`);
+    if (input.locationId)
+      conditions.push(
+        `f."locationId"=${parameter(input.locationId, "::uuid")}`,
+      );
+    if (input.vendorId) {
+      if (lens !== "vendor-payable")
+        throw new AppError(
+          400,
+          "INVALID_FILTER",
+          "Vendor filtering is only available for vendor payable",
+        );
+      conditions.push(`f."vendorId"=${parameter(input.vendorId, "::uuid")}`);
+    }
+    if (input.state) conditions.push(`f.state=${parameter(input.state)}`);
+    if (input.ageingBucket) {
+      if (!["collection", "vendor-payable"].includes(lens))
+        throw new AppError(
+          400,
+          "INVALID_FILTER",
+          "Ageing filtering is only available for financial lenses",
+        );
+      const bucketSql = `CASE WHEN f."ageDays"<=30 THEN 'CURRENT' WHEN f."ageDays"<=45 THEN '31_45' WHEN f."ageDays"<=90 THEN '46_90' ELSE 'OVER_90' END`;
+      conditions.push(`${bucketSql}=${parameter(input.ageingBucket)}`);
+    }
+    if (input.kpi) conditions.push(kpiPredicateDefinitions[input.kpi].sql);
+    return {
+      where: conditions.length ? conditions.join(" AND ") : "TRUE",
+      values,
+      order: controlStableOrder(lens, input),
+    };
+  }
+  private kpiSql(lens: Lens) {
+    const count = (predicate: ControlKpiPredicate) =>
+      `count(*) FILTER(WHERE ${kpiPredicateDefinitions[predicate].sql})::int`;
+    if (lens === "placement")
+      return `jsonb_build_object('liveIndents',count(*)::int,'green',${count("green")},'yellow',${count("yellow")},'red',${count("red")},'placed',coalesce(sum(f.placed),0)::int,'awaiting',greatest(coalesce(sum(f.demand),0)-coalesce(sum(f.placed),0),0)::int,'fillRate',CASE WHEN coalesce(sum(f.demand),0)>0 THEN round(coalesce(sum(f.placed),0)::numeric*100/coalesce(sum(f.demand),0),2) ELSE 0 END)`;
+    if (lens === "pod")
+      return `jsonb_build_object('deliveryRecords',count(*)::int,'received',${count("received")},'pendingCurrent',${count("pending-current")},'pendingPrior',${count("pending-prior")},'valueAtRiskMinor',(SELECT coalesce(sum((item->>'valueMinor')::bigint),0)::text FROM (SELECT DISTINCT ON (item->>'identity') item FROM filtered pending CROSS JOIN LATERAL jsonb_array_elements(pending."invoiceValues") item WHERE pending."completedAt" IS NULL ORDER BY item->>'identity') unique_invoices),'closureRate',CASE WHEN count(*)>0 THEN round(${count("received")}::numeric*100/count(*),2) ELSE 0 END)`;
+    if (lens === "collection")
+      return `jsonb_build_object('submitted',count(*)::int,'billedMinor',coalesce(sum(f."valueMinor"),0)::text,'receivedMinor',coalesce(sum(f."receivedMinor"),0)::text,'outstandingMinor',coalesce(sum(f."balanceMinor"),0)::text,'openInvoices',${count("open-invoices")},'partPaid',${count("part-paid")},'onHold',${count("on-hold")},'over45Count',${count("over-45")},'over45Minor',coalesce(sum(f."balanceMinor") FILTER(WHERE ${kpiPredicateDefinitions["over-45"].sql}),0)::text,'oldestDays',coalesce(max(f."ageDays") FILTER(WHERE f."balanceMinor">0),0))`;
+    if (lens === "trip")
+      return `jsonb_build_object('active',${count("active-trips")},'atRisk',${count("at-risk-trips")},'delayed',${count("delayed-trips")},'gpsSilent',${count("gps-silent")},'loadingDetention',${count("loading-detention")},'unloadingDetention',${count("unloading-detention")},'deliveryExceptions',${count("delivery-exception")})`;
+    return `jsonb_build_object('unbilled',${count("draft-bills")},'approvalPending',${count("approval-pending")},'due',${count("due-bills")},'overdue',${count("overdue-bills")},'paymentBlocked',${count("payment-blocked")},'disputed',${count("disputed")},'paid',${count("paid")},'outstandingMinor',coalesce(sum(f."balanceMinor"),0)::text)`;
+  }
+  private baseParameters(
     actor: SessionActor,
     lens: Lens,
-    raw: unknown,
     asOf: Date,
     timezone: string,
   ) {
-    const filters = filterSchema.parse(raw);
-    const available = await this.available(tx, actor);
-    if (!available.includes(lens))
-      throw new AppError(
-        403,
-        "FORBIDDEN",
-        "This control-tower lens is not available for your role",
-      );
-    const parameters = [
+    return [
       this.tenant(actor),
       actor.membershipId,
       actor.userId,
       asOf.toISOString(),
       ...(["collection", "vendor-payable"].includes(lens) ? [timezone] : []),
     ];
-    const rows = await tx.$queryRawUnsafe<Array<Row>>(
-      queries[lens],
+  }
+  private async records(
+    tx: Tx,
+    actor: SessionActor,
+    lens: Lens,
+    input: ControlQuery,
+    asOf: Date,
+    timezone: string,
+    paginate: boolean,
+  ) {
+    if (!(await this.available(tx, actor)).includes(lens))
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "This control-tower lens is not available for your role",
+      );
+    const parts = this.queryParts(lens, input);
+    const parameters = [
+      ...this.baseParameters(actor, lens, asOf, timezone),
+      ...parts.values,
+    ];
+    let limit = "";
+    if (paginate) {
+      parameters.push(input.pageSize, (input.page - 1) * input.pageSize);
+      limit = `LIMIT $${parameters.length - 1} OFFSET $${parameters.length}`;
+    }
+    return tx.$queryRawUnsafe<Array<Row>>(
+      `WITH base AS (${queries[lens]}),filtered AS (SELECT * FROM base f WHERE ${parts.where}) SELECT * FROM filtered f ORDER BY ${parts.order} ${limit}`,
       ...parameters,
     );
-    const needle = filters.search.toLocaleLowerCase();
-    return {
-      filters,
-      rows: rows.filter(
-        (row) =>
-          (!filters.colour || row.colour === filters.colour) &&
-          (!filters.clientId || row.clientId === filters.clientId) &&
-          (!filters.locationId || row.locationId === filters.locationId) &&
-          (!filters.vendorId || row.vendorId === filters.vendorId) &&
-          (!filters.state || row.state === filters.state) &&
-          (!filters.ageingBucket ||
-            this.ageingBucket(row) === filters.ageingBucket) &&
-          (!needle ||
-            [
-              row.reference,
-              row.client,
-              row.location,
-              row.state,
-              row.vehicle,
-              row.vendors,
-              row.driver,
-              row.invoiceReferences,
-            ].some((v) =>
-              String(v ?? "")
-                .toLocaleLowerCase()
-                .includes(needle),
-            )),
-      ),
-    };
   }
-  private ageingBucket(row: Row) {
-    const age = Number(row.ageDays ?? 0);
-    return age <= 30
-      ? "CURRENT"
-      : age <= 45
-        ? "31_45"
-        : age <= 90
-          ? "46_90"
-          : "OVER_90";
+  private async metadata(
+    tx: Tx,
+    actor: SessionActor,
+    lens: Lens,
+    input: ControlQuery,
+    asOf: Date,
+    timezone: string,
+  ) {
+    if (!(await this.available(tx, actor)).includes(lens))
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "This control-tower lens is not available for your role",
+      );
+    const parts = this.queryParts(lens, input);
+    const parameters = [
+      ...this.baseParameters(actor, lens, asOf, timezone),
+      ...parts.values,
+    ];
+    const moneyVisible = ["pod", "collection", "vendor-payable"].includes(lens)
+      ? `coalesce(bool_and(f."moneyVisible"),true)`
+      : "true";
+    const demand =
+      lens === "placement" ? "coalesce(sum(f.demand),0)::int" : "0";
+    const placed =
+      lens === "placement" ? "coalesce(sum(f.placed),0)::int" : "0";
+    const value = ["pod", "collection", "vendor-payable"].includes(lens)
+      ? `coalesce(sum(f."valueMinor"),0)::text`
+      : "'0'::text";
+    const balance = ["collection", "vendor-payable"].includes(lens)
+      ? `coalesce(sum(f."balanceMinor"),0)::text`
+      : "'0'::text";
+    const portfolios = `(SELECT coalesce(jsonb_agg(to_jsonb(portfolio) ORDER BY portfolio.name),'[]'::jsonb) FROM (SELECT f."clientId" id,max(f.client) name,count(*)::int "recordCount",count(DISTINCT f."locationId")::int "locationCount",count(*) FILTER(WHERE f.colour='GREEN')::int green,count(*) FILTER(WHERE f.colour='YELLOW')::int yellow,count(*) FILTER(WHERE f.colour='RED')::int red,${demand} demand,${placed} placed,${value} "valueMinor",${balance} "balanceMinor" FROM filtered f GROUP BY f."clientId") portfolio)`;
+    const locations = `(SELECT coalesce(jsonb_agg(to_jsonb(location) ORDER BY location.name),'[]'::jsonb) FROM (SELECT f."locationId" id,max(f.location) name,count(*)::int "recordCount",count(*) FILTER(WHERE f.colour='GREEN')::int green,count(*) FILTER(WHERE f.colour='YELLOW')::int yellow,count(*) FILTER(WHERE f.colour='RED')::int red,${demand} demand,${placed} placed,${value} "valueMinor",${balance} "balanceMinor" FROM filtered f GROUP BY f."locationId") location)`;
+    const ageing =
+      lens === "collection"
+        ? `(SELECT coalesce(jsonb_agg(to_jsonb(bucket) ORDER BY bucket.position),'[]'::jsonb) FROM (SELECT CASE WHEN f."ageDays"<=30 THEN 'CURRENT' WHEN f."ageDays"<=45 THEN '31_45' WHEN f."ageDays"<=90 THEN '46_90' ELSE 'OVER_90' END bucket,min(f."ageDays") position,count(*) FILTER(WHERE f."balanceMinor">0)::int count,coalesce(sum(f."balanceMinor"),0)::text "amountMinor" FROM filtered f GROUP BY 1) bucket)`
+        : `'[]'::jsonb`;
+    const vendors =
+      lens === "placement"
+        ? `(SELECT coalesce(jsonb_agg(to_jsonb(vendor) ORDER BY vendor.ntp DESC,vendor.vendor),'[]'::jsonb) FROM (SELECT v.id,v.legal_name vendor,sum(a.allotted_vehicles)::int allotted,coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state='PLACED'),0)::int placed,coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state IN ('OFFERED','ACCEPTED','VEHICLE_ASSIGNED','NTP_RELEASED')),0)::int ntp FROM filtered f JOIN app.allocations a ON a.tenant_id=$1::uuid AND a.indent_id=f.id JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id WHERE app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','allocations',a.id) GROUP BY v.id,v.legal_name) vendor)`
+        : `'[]'::jsonb`;
+    return (
+      await tx.$queryRawUnsafe<Array<Row>>(
+        `WITH base AS (${queries[lens]}),
+          filtered AS (SELECT * FROM base f WHERE ${parts.where}),
+          summary AS (
+            SELECT count(*)::int total,
+              max(f."updatedAt") "lastCanonicalChange",
+              ${moneyVisible} "moneyVisible",
+              ${this.kpiSql(lens)} kpis
+            FROM filtered f
+          )
+        SELECT summary.*,${portfolios} portfolios,${locations} locations,${ageing} ageing,${vendors} vendors
+        FROM summary`,
+        ...parameters,
+      )
+    )[0]!;
   }
   async dashboard(actor: SessionActor, lens: Lens, raw: unknown) {
     return withTenant(this.app.db, this.tenant(actor), async (tx) => {
+      const input = parseControlQuery(lens, raw);
       const asOf = new Date();
       const tenant = (
         await tx.$queryRawUnsafe<Array<{ timezone: string }>>(
@@ -208,200 +562,24 @@ export class ControlWorkbenchService {
           this.tenant(actor),
         )
       )[0]!;
-      const { filters, rows } = await this.rows(
+      const metadata = await this.metadata(
         tx,
         actor,
         lens,
-        raw,
+        input,
         asOf,
         tenant.timezone,
       );
-      const count = (colour: string) =>
-        rows.filter((r) => r.colour === colour).length;
-      const sum = (key: string) =>
-        rows
-          .reduce((total, row) => total + BigInt(String(row[key] ?? 0)), 0n)
-          .toString();
-      const placementDemand = rows.reduce(
-          (n, r) => n + Number(r.demand ?? 0),
-          0,
-        ),
-        placementPlaced = rows.reduce((n, r) => n + Number(r.placed ?? 0), 0);
-      const latest = rows.reduce<string | null>(
-        (v, r) => (!v || String(r.updatedAt) > v ? String(r.updatedAt) : v),
-        null,
-      );
-      const now = asOf;
-      const invoiceValueAtRisk = new Map<string, bigint>();
-      for (const row of rows.filter((item) => !item.completedAt)) {
-        const values = Array.isArray(row.invoiceValues)
-          ? (row.invoiceValues as Array<Record<string, unknown>>)
-          : [];
-        for (const value of values) {
-          const identity = String(value.identity ?? "");
-          if (identity && !invoiceValueAtRisk.has(identity))
-            invoiceValueAtRisk.set(
-              identity,
-              BigInt(String(value.valueMinor ?? 0)),
-            );
-        }
-      }
-      const moneyVisible = !["pod", "collection", "vendor-payable"].includes(
+      const rows = await this.records(
+        tx,
+        actor,
         lens,
-      )
-        ? true
-        : rows.every((row) => row.moneyVisible === true);
-      const kpis =
-        lens === "placement"
-          ? {
-              liveIndents: rows.length,
-              green: count("GREEN"),
-              yellow: count("YELLOW"),
-              red: count("RED"),
-              placed: placementPlaced,
-              awaiting: Math.max(placementDemand - placementPlaced, 0),
-              fillRate: placementDemand
-                ? Math.round((placementPlaced * 10000) / placementDemand) / 100
-                : 0,
-            }
-          : lens === "pod"
-            ? {
-                deliveryRecords: rows.length,
-                received: rows.filter((r) => r.completedAt).length,
-                pendingCurrent: rows.filter(
-                  (r) => !r.completedAt && !r.priorPeriod,
-                ).length,
-                pendingPrior: rows.filter(
-                  (r) => !r.completedAt && r.priorPeriod,
-                ).length,
-                valueAtRiskMinor: [...invoiceValueAtRisk.values()]
-                  .reduce((total, value) => total + value, 0n)
-                  .toString(),
-                closureRate: rows.length
-                  ? Math.round(
-                      (rows.filter((r) => r.completedAt).length * 10000) /
-                        rows.length,
-                    ) / 100
-                  : 0,
-              }
-            : lens === "collection"
-              ? {
-                  submitted: rows.length,
-                  billedMinor: sum("valueMinor"),
-                  receivedMinor: sum("receivedMinor"),
-                  outstandingMinor: sum("balanceMinor"),
-                  openInvoices: rows.filter(
-                    (r) => BigInt(String(r.balanceMinor ?? 0)) > 0n,
-                  ).length,
-                  partPaid: rows.filter(
-                    (r) =>
-                      BigInt(String(r.receivedMinor ?? 0)) > 0n &&
-                      BigInt(String(r.balanceMinor ?? 0)) > 0n,
-                  ).length,
-                  onHold: rows.filter((r) => r.hold).length,
-                  over45Count: rows.filter(
-                    (r) =>
-                      Number(r.ageDays ?? 0) > 45 &&
-                      BigInt(String(r.balanceMinor ?? 0)) > 0n,
-                  ).length,
-                  over45Minor: rows
-                    .filter((r) => r.colour === "RED")
-                    .reduce(
-                      (n, r) => n + BigInt(String(r.balanceMinor ?? 0)),
-                      0n,
-                    )
-                    .toString(),
-                  oldestDays: rows.reduce(
-                    (oldest, row) =>
-                      BigInt(String(row.balanceMinor ?? 0)) > 0n
-                        ? Math.max(oldest, Number(row.ageDays ?? 0))
-                        : oldest,
-                    0,
-                  ),
-                }
-              : {
-                  ...(lens === "trip"
-                    ? {
-                        active: rows.filter(
-                          (r) =>
-                            !["DELIVERED", "CANCELLED"].includes(
-                              String(r.state),
-                            ),
-                        ).length,
-                        atRisk: rows.filter(
-                          (r) =>
-                            r.colour !== "GREEN" &&
-                            !["DELIVERED", "CANCELLED"].includes(
-                              String(r.state),
-                            ),
-                        ).length,
-                        delayed: rows.filter(
-                          (r) =>
-                            r.colour === "RED" &&
-                            !["DELIVERED", "CANCELLED"].includes(
-                              String(r.state),
-                            ),
-                        ).length,
-                        gpsSilent: rows.filter(
-                          (r) =>
-                            !["DELIVERED", "CANCELLED"].includes(
-                              String(r.state),
-                            ) &&
-                            (!r.lastGpsAt ||
-                              now.getTime() -
-                                new Date(String(r.lastGpsAt)).getTime() >
-                                30 * 60 * 1000),
-                        ).length,
-                        loadingDetention: rows.filter(
-                          (r) =>
-                            r.state === "AT_ORIGIN" &&
-                            now.getTime() -
-                              new Date(String(r.updatedAt)).getTime() >
-                              2 * 60 * 60 * 1000,
-                        ).length,
-                        unloadingDetention: rows.filter(
-                          (r) =>
-                            r.state === "AT_DESTINATION" &&
-                            now.getTime() -
-                              new Date(String(r.updatedAt)).getTime() >
-                              2 * 60 * 60 * 1000,
-                        ).length,
-                        deliveryExceptions: rows.filter(
-                          (r) => r.colour === "RED",
-                        ).length,
-                      }
-                    : {
-                        unbilled: rows.filter((r) => r.state === "DRAFT")
-                          .length,
-                        approvalPending: rows.filter((r) =>
-                          [
-                            "PENDING_OPERATIONAL_VERIFICATION",
-                            "PENDING_FINANCE_APPROVAL",
-                          ].includes(String(r.state)),
-                        ).length,
-                        due: rows.filter((r) => r.colour === "YELLOW").length,
-                        overdue: rows.filter((r) => r.colour === "RED").length,
-                        paymentBlocked: rows.filter((r) =>
-                          ["VALIDATION_EXCEPTION", "DISPUTED"].includes(
-                            String(r.state),
-                          ),
-                        ).length,
-                        disputed: rows.filter((r) => r.state === "DISPUTED")
-                          .length,
-                        paid: rows.filter((r) => r.state === "PAID").length,
-                        outstandingMinor: sum("balanceMinor"),
-                      }),
-                };
-      const vendors =
-        lens === "placement"
-          ? await tx.$queryRawUnsafe<Array<Row>>(
-              `SELECT v.id,v.legal_name AS vendor,sum(a.allotted_vehicles)::int allotted,coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state='PLACED'),0)::int placed,coalesce(sum(a.allotted_vehicles) FILTER(WHERE a.state IN ('OFFERED','ACCEPTED','VEHICLE_ASSIGNED','NTP_RELEASED')),0)::int ntp FROM app.allocations a JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id WHERE a.tenant_id=$1::uuid AND a.indent_id=ANY($4::uuid[]) AND app.domain_resource_authorized($1::uuid,$2::uuid,$3::uuid,'operations.read','READ','allocations',a.id) GROUP BY v.id,v.legal_name ORDER BY ntp DESC,v.legal_name`,
-              this.tenant(actor),
-              actor.membershipId,
-              actor.userId,
-              rows.map((row) => row.id),
-            )
-          : [];
+        input,
+        asOf,
+        tenant.timezone,
+        true,
+      );
+      const moneyVisible = metadata.moneyVisible === true;
       const moneyKeys = new Set([
         "valueMinor",
         "balanceMinor",
@@ -418,6 +596,7 @@ export class ControlWorkbenchService {
             )
           : row,
       );
+      const kpis = metadata.kpis as Record<string, unknown>;
       const responseKpis = moneyVisible
         ? kpis
         : Object.fromEntries(
@@ -426,51 +605,59 @@ export class ControlWorkbenchService {
               key.toLowerCase().includes("minor") ? "••••" : value,
             ]),
           );
-      const ageing =
-        lens === "collection"
-          ? (["CURRENT", "31_45", "46_90", "OVER_90"] as const).map(
-              (bucket) => ({
-                bucket,
-                count: rows.filter(
-                  (row) =>
-                    this.ageingBucket(row) === bucket &&
-                    BigInt(String(row.balanceMinor ?? 0)) > 0n,
-                ).length,
-                amountMinor: moneyVisible
-                  ? rows
-                      .filter((row) => this.ageingBucket(row) === bucket)
-                      .reduce(
-                        (total, row) =>
-                          total + BigInt(String(row.balanceMinor ?? 0)),
-                        0n,
-                      )
-                      .toString()
-                  : "••••",
-              }),
-            )
-          : [];
+      const maskSummaries = (items: unknown) =>
+        (Array.isArray(items) ? items : []).map((item) => {
+          if (moneyVisible || !item || typeof item !== "object") return item;
+          return { ...(item as Row), valueMinor: "••••", balanceMinor: "••••" };
+        });
+      const ageing = (
+        Array.isArray(metadata.ageing) ? metadata.ageing : []
+      ).map((bucket) =>
+        moneyVisible || !bucket || typeof bucket !== "object"
+          ? bucket
+          : { ...(bucket as Row), amountMinor: "••••" },
+      );
+      const total = Number(metadata.total ?? 0);
+      const latest = metadata.lastCanonicalChange
+        ? String(metadata.lastCanonicalChange)
+        : null;
       return toJsonSafe({
         lens,
-        asOf: now.toISOString(),
+        asOf: asOf.toISOString(),
         timezone: tenant.timezone,
         moneyVisible,
         freshness: {
           lastCanonicalChange: latest,
           state:
-            latest && now.getTime() - new Date(latest).getTime() < 300000
+            latest && asOf.getTime() - new Date(latest).getTime() < 300_000
               ? "LIVE"
               : "DELAYED",
         },
-        filters,
+        filters: input,
         kpis: responseKpis,
+        kpiActions: kpiActionsByLens[lens],
         rows: responseRows,
-        vendors,
+        portfolios: maskSummaries(metadata.portfolios),
+        locations: maskSummaries(metadata.locations),
+        vendors: metadata.vendors ?? [],
         ageing,
+        pagination: {
+          page: input.page,
+          pageSize: input.pageSize,
+          total,
+          pageCount: Math.ceil(total / input.pageSize),
+          hasPrevious: input.page > 1,
+          hasNext: input.page * input.pageSize < total,
+          sort: input.sort,
+          direction: input.direction,
+        },
       });
     });
   }
+
   async exportCsv(actor: SessionActor, lens: Lens, raw: unknown) {
     return withTenant(this.app.db, this.tenant(actor), async (tx) => {
+      const input = parseControlQuery(lens, raw);
       const asOf = new Date();
       const tenant = (
         await tx.$queryRawUnsafe<Array<{ timezone: string }>>(
@@ -478,13 +665,14 @@ export class ControlWorkbenchService {
           this.tenant(actor),
         )
       )[0]!;
-      const { rows } = await this.rows(
+      const rows = await this.records(
         tx,
         actor,
         lens,
-        raw,
+        input,
         asOf,
         tenant.timezone,
+        false,
       );
       const columns = [
         "reference",
@@ -510,13 +698,17 @@ export class ControlWorkbenchService {
         crypto.randomUUID(),
         JSON.stringify({
           lens,
-          filters: filterSchema.parse(raw),
+          filters: input,
           rowCount: rows.length,
           columns,
+          asOf: asOf.toISOString(),
         }),
       );
       return {
-        filename: `control-${lens}-${new Date().toISOString().slice(0, 10)}.csv`,
+        filename: `control-${lens}-${asOf.toISOString().slice(0, 10)}.csv`,
+        rowCount: rows.length,
+        asOf: asOf.toISOString(),
+        filters: input,
         content: [
           columns,
           ...rows.map((row) =>
@@ -553,7 +745,7 @@ export class ControlWorkbenchService {
     const input = z
       .object({
         name: z.string().trim().min(2).max(100),
-        filters: filterSchema,
+        filters: controlFiltersSchema,
         isDefault: z.boolean().default(false),
       })
       .strict()

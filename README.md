@@ -6,17 +6,17 @@ The product requirements and per-feature implementation/test status are maintain
 
 ## Current project status
 
-| Item                              | Status                                                                                                                                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agentic SDLC scaffold             | Complete                                                                                                                                                                                          |
-| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                                                        |
-| Automated feature tests           | Demo bootstrap: 12 focused database checks and 4 real-browser journeys passing locally; deeper cross-feature concurrency, isolation, reconciliation, migration, and recovery cases remain planned |
-| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL                                                                                                                                              |
-| Feature implementation            | Canonical/product UX and versioned reusable demo bootstrap complete; SES owner-invitation delivery is deployed with verified sender, while arbitrary-recipient production access remains pending  |
+| Item                              | Status                                                                                                                                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agentic SDLC scaffold             | Complete                                                                                                                                                                                                 |
+| Application bootstrap             | Complete — `FND-01` concurrent report reconciliation is fixed and verified                                                                                                                               |
+| Automated feature tests           | Prior demo bootstrap: 12 focused database checks and 4 real-browser journeys passed locally; UI-02 responsive sheets/details/tabs/Control checks are Implemented / Not Run                               |
+| Local frontend/backend deployment | Healthy on ports 3000/4000 against shared PostgreSQL; production builds and readiness passed on 2026-09-01 with 28 migrations current                                                                    |
+| Feature implementation            | UI-02 shared responsive components, server-filtered reconciliation, list-first Users, resilient Control Tower, and expanded showcase data are implemented locally; SES production access remains pending |
 
 Agents synchronize this summary, `FEATURES.md`, `TODO.md`, affected specs, and executable test-case status once per implementation batch. New or changed tests remain `Implemented / Not Run` until an explicitly requested batch/release test phase executes them.
 
-The implementation includes normalized canonical stores and actionable workbenches for access, masters, operations, POD, finance, governance, configuration, control tower, alerts, imports, and integrations. The latest rapid batch closes the Operations/Finance/Control Tower product gaps, automatically keeps every INTERNAL tenant user linked one-to-one with an Employee master, and places mutation success/failure details beside the button that initiated the action. Successful create forms reset; successful edit forms reload the saved values. Focused tests are authored but intentionally not run; remaining deep test cases stay explicitly planned.
+The implementation includes normalized canonical stores and actionable workbenches for access, masters, operations, POD, finance, governance, configuration, control tower, alerts, imports, and integrations. UI-02 adds shared pill tabs/navigation, mobile bottom sheets with readable form grids and non-overlapping actions, structured tenant-timezone details, list-first User administration, server-filtered reconciliation cards, runtime-validated Control responses, safe masked/null Collection formatting, real vendor allocation summaries, and bounded long-name drills. Focused tests are authored but intentionally not run; remaining authorization, validation, idempotency, and independent reconciliation cases stay explicitly planned.
 
 ## Implemented feature surface
 
@@ -158,7 +158,7 @@ make demo-seed
 make refresh-local
 ```
 
-`make demo-seed` loads `.env`, requires `DEMO_DATA_ENABLED=true` internally, and creates the reserved `DEMO` tenant. Dataset `2026.08.1` is transactionally anchored to `2026-08-31` and recorded in `app.demo_bootstrap_runs` with a content hash. An identical rerun verifies the configured password hashes and exits without changing IDs, timestamps, ledgers, passwords, or sessions. It never creates or changes the Platform Administrator.
+`make demo-seed` loads `.env`, requires `DEMO_DATA_ENABLED=true` internally, and creates or additively upgrades the reserved `DEMO` tenant. Dataset `2026.09.2` is transactionally anchored to `2026-08-31` and recorded in `app.demo_bootstrap_runs` with a content hash. An identical rerun verifies the configured password hashes and exits without changing IDs, timestamps, ledgers, passwords, or sessions. It never creates or changes the Platform Administrator.
 
 Local credentials are intentionally disposable:
 
@@ -174,7 +174,9 @@ Local credentials are intentionally disposable:
 
 The shared demo password is rejected in production. Never add it to `/etc/logistics-management.env`. AWS uses the same tenant code and role emails, but its `DEMO_USER_PASSWORD` is a protected environment-specific secret of at least 16 characters. The production Platform Admin continues to use the independently configured `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`.
 
-The stable walkthrough records are:
+The `2026.09.2` showcase contains 2 regions, 3 branches, 6 linked internal employees, at least 4 clients, 10 client locations, 5 vendors, 12 vehicles, 10 drivers, 6 lanes, 36 indents, 24 allocations, 18 trips, 14 POD tasks, 18 client invoices, 8 receipts, 14 vendor bills, 5 payment runs, and 12 alerts. The data spans open, progressing, exception, overdue, part-paid, paid, blocked, disputed, failed, reversed, expired, current and upcoming scenarios so every Control Tower lens and primary Operations/Finance workbench has meaningful rows.
+
+Stable walkthrough anchors include:
 
 - Client `DEMO-RETAIL`, locations `BLR-DC` and `HYD-STORE`, contract `DEMO-CONTRACT`, and lane `BLR-HYD`.
 - Vendor `DEMO-FLEET`, two synthetic vehicles and two drivers with valid compliance.
@@ -190,7 +192,9 @@ A concise demonstration flow is:
 3. Search the live and delivered records, then open POD and Control to show the same canonical chain.
 4. Sign in as Finance Executive; open All invoices, Collections, Vendor payables, and Payment runs and search the stable references above.
 5. Sign in separately as Vendor Owner, Driver, and Client Viewer to demonstrate their scoped portals.
-6. Open Imports to show the three row dispositions and Alerts/Control to show the seeded exception and saved view.
+6. Open Imports to show the three row dispositions and Alerts/Control to compare multi-row portfolios, risk colours, ageing, exceptions, and saved views.
+
+Running `make demo-seed` again after pulling a newer dataset version performs the additive upgrade; it does not delete user-created demonstration rows. Run `make refresh-local` once afterward so frontend/backend processes serve the newly built UI.
 
 Focused local verification uses real PostgreSQL, backend, frontend, and browser requests:
 

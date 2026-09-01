@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
+import { FilterChip, MetricCard, Tabs } from "../ui/primitives";
 import styles from "./control-tower.module.css";
 
 type Lens = "placement" | "pod" | "collection" | "trip" | "vendor-payable";
@@ -28,10 +29,36 @@ type Data = {
   lens: Lens;
   asOf: string;
   freshness: { lastCanonicalChange: string | null; state: "LIVE" | "DELAYED" };
-  kpis: Record<string, string | number>;
+  kpis: Record<string, unknown>;
+  kpiActions: Record<string, string>;
   rows: Row[];
-  vendors: Array<Record<string, unknown>>;
+  portfolios: Summary[];
+  locations: Summary[];
+  vendors: VendorAllocationRow[];
   ageing: Bucket[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    pageCount: number;
+    hasPrevious: boolean;
+    hasNext: boolean;
+    sort: string;
+    direction: "asc" | "desc";
+  };
+};
+type Summary = {
+  id: string;
+  name: string;
+  recordCount: number;
+  locationCount?: number;
+  green: number;
+  yellow: number;
+  red: number;
+  demand: number;
+  placed: number;
+  valueMinor: string;
+  balanceMinor: string;
 };
 type Access = {
   lenses: Lens[];
@@ -47,6 +74,13 @@ type View = {
   isDefault: boolean;
 };
 type Drill = { id: string; name: string };
+type VendorAllocationRow = {
+  id: string;
+  vendor: string;
+  allotted: number;
+  placed: number;
+  ntp: number;
+};
 
 const meta: Record<
   Lens,
@@ -140,19 +174,128 @@ const percentKeys = new Set(["fillRate", "closureRate"]);
 
 function money(minor: unknown, currency = "INR", locale = "en-IN") {
   if (minor === "••••") return "••••";
-  const value = BigInt(String(minor ?? 0)),
-    absolute = value < BigInt(0) ? -value : value;
+  const value = minorValue(minor);
+  if (value === null) return "—";
+  const absolute = value < BigInt(0) ? -value : value;
   const symbol = currency === "INR" ? "₹" : `${currency} `;
   const formatted = `${symbol}${(absolute / BigInt(100)).toLocaleString(locale)}.${String(absolute % BigInt(100)).padStart(2, "0")}`;
   return value < BigInt(0) ? `-${formatted}` : formatted;
 }
+function minorValue(value: unknown) {
+  if (value === null || value === undefined || value === "" || value === "••••")
+    return null;
+  const raw = String(value).trim();
+  return /^-?\d+$/.test(raw) ? BigInt(raw) : null;
+}
+function count(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+function normalizeSummary(value: Partial<Summary>): Summary {
+  return {
+    id: String(value.id ?? "unknown"),
+    name: String(value.name ?? "Unnamed portfolio"),
+    recordCount: count(value.recordCount),
+    locationCount: count(value.locationCount),
+    green: count(value.green),
+    yellow: count(value.yellow),
+    red: count(value.red),
+    demand: count(value.demand),
+    placed: count(value.placed),
+    valueMinor:
+      value.valueMinor === "••••" ? "••••" : String(value.valueMinor ?? "0"),
+    balanceMinor:
+      value.balanceMinor === "••••"
+        ? "••••"
+        : String(value.balanceMinor ?? "0"),
+  };
+}
+function normalizeVendor(value: Record<string, unknown>): VendorAllocationRow {
+  return {
+    id: String(value.id),
+    vendor: String(value.vendor),
+    allotted: count(value.allotted),
+    placed: count(value.placed),
+    ntp: count(value.ntp),
+  };
+}
+function invalidDashboard(message: string): never {
+  throw {
+    code: "CONTROL_RESPONSE_INVALID",
+    message: `Control Tower data could not be displayed safely: ${message}`,
+  } satisfies ApiError;
+}
+function parseDashboard(value: unknown, requestedLens: Lens): Data {
+  if (!value || typeof value !== "object")
+    return invalidDashboard("the response was not an object");
+  const candidate = value as Partial<Data>;
+  if (candidate.lens !== requestedLens)
+    return invalidDashboard("the response lens did not match the selected tab");
+  if (
+    !candidate.freshness ||
+    !["LIVE", "DELAYED"].includes(String(candidate.freshness.state)) ||
+    (candidate.freshness.lastCanonicalChange !== null &&
+      typeof candidate.freshness.lastCanonicalChange !== "string")
+  )
+    return invalidDashboard("freshness metadata was missing or invalid");
+  if (
+    !candidate.pagination ||
+    !["page", "pageSize", "total", "pageCount"].every((key) =>
+      Number.isFinite(
+        Number(candidate.pagination?.[key as keyof Data["pagination"]]),
+      ),
+    )
+  )
+    return invalidDashboard("pagination metadata was missing or invalid");
+  if (
+    !Array.isArray(candidate.rows) ||
+    candidate.rows.some(
+      (row) =>
+        !row ||
+        typeof row.id !== "string" ||
+        typeof row.reference !== "string" ||
+        typeof row.state !== "string" ||
+        !["GREEN", "YELLOW", "RED"].includes(String(row.colour)),
+    )
+  )
+    return invalidDashboard("one or more canonical rows were malformed");
+  if (
+    !Array.isArray(candidate.vendors) ||
+    candidate.vendors.some(
+      (vendor) =>
+        !vendor ||
+        typeof vendor.id !== "string" ||
+        !vendor.id ||
+        typeof vendor.vendor !== "string" ||
+        !vendor.vendor ||
+        ![vendor.allotted, vendor.placed, vendor.ntp].every((entry) =>
+          Number.isFinite(Number(entry)),
+        ),
+    )
+  )
+    return invalidDashboard("vendor allocation totals were incomplete");
+  if (
+    !Array.isArray(candidate.portfolios) ||
+    !Array.isArray(candidate.locations) ||
+    !Array.isArray(candidate.ageing) ||
+    !candidate.kpis ||
+    typeof candidate.kpis !== "object" ||
+    !candidate.kpiActions ||
+    typeof candidate.kpiActions !== "object" ||
+    typeof candidate.asOf !== "string"
+  )
+    return invalidDashboard("dashboard summaries were incomplete");
+  return candidate as Data;
+}
 function dateTime(value: unknown, access: Access | null) {
   if (!value) return "—";
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return "—";
   return new Intl.DateTimeFormat(access?.locale ?? "en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: access?.timezone ?? "Asia/Kolkata",
-  }).format(new Date(String(value)));
+  }).format(parsed);
 }
 function href(lens: Lens, row: Row) {
   const search = encodeURIComponent(row.reference);
@@ -169,7 +312,12 @@ export function ControlTower() {
     [data, setData] = useState<Data | null>(null),
     [views, setViews] = useState<View[]>([]),
     [error, setError] = useState<ApiError | null>(null),
-    [loading, setLoading] = useState(true);
+    [initialLoading, setInitialLoading] = useState(true),
+    [refreshing, setRefreshing] = useState(false),
+    [refreshFailure, setRefreshFailure] = useState<{
+      error: ApiError;
+      failedAt: string;
+    } | null>(null);
   const [search, setSearch] = useState(""),
     [colour, setColour] = useState(""),
     [state, setState] = useState(""),
@@ -179,7 +327,17 @@ export function ControlTower() {
   const [paused, setPaused] = useState(false),
     [saveOpen, setSaveOpen] = useState(false),
     [viewName, setViewName] = useState(""),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [selectedView, setSelectedView] = useState(""),
+    [selectedKpi, setSelectedKpi] = useState(""),
+    [kpiPredicate, setKpiPredicate] = useState(""),
+    [page, setPage] = useState(1),
+    [pageSize, setPageSize] = useState(25),
+    [sort, setSort] = useState("updatedAt"),
+    [direction, setDirection] = useState<"asc" | "desc">("desc"),
+    [urlReady, setUrlReady] = useState(false);
+  const initializedFromUrl = useRef(false);
+  const hasData = useRef(false);
   const query = useMemo(
     () =>
       new URLSearchParams({
@@ -189,9 +347,80 @@ export function ControlTower() {
         ...(ageingBucket ? { ageingBucket } : {}),
         ...(client ? { clientId: client.id } : {}),
         ...(location ? { locationId: location.id } : {}),
+        ...(kpiPredicate ? { kpi: kpiPredicate } : {}),
+        page: String(page),
+        pageSize: String(pageSize),
+        sort,
+        direction,
       }).toString(),
-    [search, colour, state, ageingBucket, client, location],
+    [
+      search,
+      colour,
+      state,
+      ageingBucket,
+      client,
+      location,
+      kpiPredicate,
+      page,
+      pageSize,
+      sort,
+      direction,
+    ],
   );
+
+  useEffect(() => {
+    if (initializedFromUrl.current) return;
+    initializedFromUrl.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const requestedLens = params.get("lens") as Lens | null;
+    if (requestedLens && requestedLens in meta) setLens(requestedLens);
+    setSearch(params.get("search") ?? "");
+    setColour(params.get("colour") ?? "");
+    setState(params.get("state") ?? "");
+    setAgeingBucket(params.get("ageingBucket") ?? "");
+    const requestedPage = Number(params.get("page") ?? 1);
+    const requestedPageSize = Number(params.get("pageSize") ?? 25);
+    const requestedSort = params.get("sort") ?? "updatedAt";
+    setPage(
+      Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
+    );
+    setPageSize(
+      [10, 25, 50, 100].includes(requestedPageSize) ? requestedPageSize : 25,
+    );
+    setSort(
+      [
+        "reference",
+        "client",
+        "state",
+        "risk",
+        "dueAt",
+        "updatedAt",
+        "value",
+        "balance",
+      ].includes(requestedSort)
+        ? requestedSort
+        : "updatedAt",
+    );
+    setDirection(params.get("direction") === "asc" ? "asc" : "desc");
+    setKpiPredicate(params.get("kpi") ?? "");
+    const clientId = params.get("clientId"),
+      locationId = params.get("locationId");
+    setClient(clientId ? { id: clientId, name: "Shared client scope" } : null);
+    setLocation(
+      locationId ? { id: locationId, name: "Shared location scope" } : null,
+    );
+    window.requestAnimationFrame(() => setUrlReady(true));
+  }, []);
+  useEffect(() => {
+    if (!urlReady) return;
+    const next = new URLSearchParams(query);
+    next.set("lens", lens);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?${next}`,
+    );
+  }, [lens, query, urlReady]);
 
   useEffect(() => {
     let mounted = true;
@@ -199,67 +428,140 @@ export function ControlTower() {
       .then((value) => {
         if (!mounted) return;
         setAccess(value);
-        if (value.lenses[0] && !value.lenses.includes(lens))
-          setLens(value.lenses[0]);
+        if (value.lenses[0])
+          setLens((current) =>
+            value.lenses.includes(current) ? current : value.lenses[0]!,
+          );
       })
       .catch((value) => {
         if (!mounted) return;
         setError(value as ApiError);
-        setLoading(false);
+        setInitialLoading(false);
       });
     return () => {
       mounted = false;
     };
-  }, [lens]);
-  const load = useCallback(async () => {
-    if (!access?.lenses.includes(lens)) return;
-    setLoading(true);
-    try {
-      const [dashboard, saved] = await Promise.all([
-        api<Data>(`/control-workbench/${lens}?${query}`),
-        api<View[]>(`/control-workbench/${lens}/views`),
-      ]);
-      setData(dashboard);
-      setViews(saved);
-      setError(null);
-    } catch (value) {
-      setError(value as ApiError);
-    } finally {
-      setLoading(false);
-    }
-  }, [access, lens, query]);
+  }, []);
+  const load = useCallback(
+    async (signal?: AbortSignal, background = false) => {
+      if (!access?.lenses.includes(lens)) return;
+      if (background || hasData.current) setRefreshing(true);
+      else setInitialLoading(true);
+      try {
+        const [payload, saved] = await Promise.all([
+          api<unknown>(`/control-workbench/${lens}?${query}`, { signal }),
+          api<View[]>(`/control-workbench/${lens}/views`, { signal }),
+        ]);
+        if (signal?.aborted) return;
+        const dashboard = parseDashboard(payload, lens);
+        setData({
+          ...dashboard,
+          kpis:
+            dashboard.kpis && typeof dashboard.kpis === "object"
+              ? dashboard.kpis
+              : {},
+          kpiActions:
+            dashboard.kpiActions && typeof dashboard.kpiActions === "object"
+              ? dashboard.kpiActions
+              : {},
+          rows: Array.isArray(dashboard.rows) ? dashboard.rows : [],
+          portfolios: Array.isArray(dashboard.portfolios)
+            ? dashboard.portfolios.map(normalizeSummary)
+            : [],
+          locations: Array.isArray(dashboard.locations)
+            ? dashboard.locations.map(normalizeSummary)
+            : [],
+          vendors: Array.isArray(dashboard.vendors)
+            ? dashboard.vendors.map(normalizeVendor)
+            : [],
+          ageing: Array.isArray(dashboard.ageing)
+            ? dashboard.ageing.filter(
+                (bucket) =>
+                  ["CURRENT", "31_45", "46_90", "OVER_90"].includes(
+                    bucket.bucket,
+                  ) && Number.isFinite(Number(bucket.count)),
+              )
+            : [],
+        });
+        hasData.current = true;
+        if (kpiPredicate)
+          setSelectedKpi(
+            Object.entries(dashboard.kpiActions ?? {}).find(
+              ([, predicate]) => predicate === kpiPredicate,
+            )?.[0] ?? "",
+          );
+        setViews(saved);
+        setError(null);
+        setRefreshFailure(null);
+      } catch (value) {
+        if (signal?.aborted) return;
+        if (hasData.current)
+          setRefreshFailure({
+            error: value as ApiError,
+            failedAt: new Date().toISOString(),
+          });
+        else setError(value as ApiError);
+      } finally {
+        if (!signal?.aborted) {
+          setInitialLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [access, lens, query, kpiPredicate],
+  );
   useEffect(() => {
-    void load();
-    if (paused || !access) return;
-    const timer = window.setInterval(
-      () => void load(),
-      access.refreshSeconds * 1000,
+    const controller = new AbortController();
+    const debounce = window.setTimeout(
+      () => void load(controller.signal, hasData.current),
+      250,
     );
-    return () => window.clearInterval(timer);
+    const interval =
+      !paused && access
+        ? window.setInterval(
+            () => void load(controller.signal, true),
+            access.refreshSeconds * 1000,
+          )
+        : undefined;
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounce);
+      if (interval) window.clearInterval(interval);
+    };
   }, [access, load, paused]);
 
-  const groups = useMemo(
-    () => groupBy(data?.rows ?? [], "clientId", "client"),
-    [data],
-  );
   const resetDrill = () => {
     setClient(null);
     setLocation(null);
+    setPage(1);
   };
   function changeLens(value: Lens) {
+    if (value === lens) return;
+    setData(null);
+    hasData.current = false;
+    setError(null);
+    setInitialLoading(true);
     setLens(value);
-    setSearch("");
     setColour("");
     setState("");
     setAgeingBucket("");
+    setSelectedView("");
+    setSelectedKpi("");
+    setKpiPredicate("");
+    setPage(1);
+    setSort("updatedAt");
+    setDirection("desc");
     resetDrill();
   }
   function applyView(view?: View) {
     if (!view) return;
+    setSelectedView(view.id);
+    setPage(1);
     setSearch(view.filters.search ?? "");
     setColour(view.filters.colour ?? "");
     setState(view.filters.state ?? "");
     setAgeingBucket(view.filters.ageingBucket ?? "");
+    setKpiPredicate(view.filters.kpi ?? "");
     setClient(
       view.filters.clientId
         ? { id: view.filters.clientId, name: "Saved client scope" }
@@ -286,13 +588,14 @@ export function ControlTower() {
             ...(ageingBucket ? { ageingBucket } : {}),
             ...(client ? { clientId: client.id } : {}),
             ...(location ? { locationId: location.id } : {}),
+            ...(kpiPredicate ? { kpi: kpiPredicate } : {}),
           },
           isDefault: false,
         }),
       });
       setViewName("");
       setSaveOpen(false);
-      await load();
+      await load(undefined, true);
     } finally {
       setSaving(false);
     }
@@ -311,35 +614,22 @@ export function ControlTower() {
     URL.revokeObjectURL(url);
   }
   function drillKpi(key: string) {
+    const predicate = data?.kpiActions[key];
+    if (!predicate) return;
+    setSelectedKpi(key);
+    setKpiPredicate(predicate);
+    setPage(1);
     resetDrill();
-    setState("");
-    setAgeingBucket("");
-    if (["green", "received", "paid"].includes(key)) setColour("GREEN");
-    else if (["yellow", "atRisk", "due", "approvalPending"].includes(key))
-      setColour("YELLOW");
-    else if (
-      [
-        "red",
-        "delayed",
-        "deliveryExceptions",
-        "overdue",
-        "paymentBlocked",
-        "disputed",
-      ].includes(key)
-    )
-      setColour("RED");
-    else {
-      setColour("");
-      if (key === "partPaid") setState("PART_PAID");
-      if (key === "loadingDetention") setState("AT_ORIGIN");
-      if (key === "unloadingDetention") setState("AT_DESTINATION");
-    }
   }
   const clear = () => {
     setSearch("");
     setColour("");
     setState("");
     setAgeingBucket("");
+    setSelectedKpi("");
+    setKpiPredicate("");
+    setSelectedView("");
+    setPage(1);
     resetDrill();
   };
   const states = [
@@ -348,7 +638,7 @@ export function ControlTower() {
 
   return (
     <Shell>
-      <main className={styles.page}>
+      <div className={styles.page}>
         <header className={styles.head}>
           <div>
             <p className="eyebrow">CTL-01 · operational command view</p>
@@ -375,30 +665,24 @@ export function ControlTower() {
             <button
               type="button"
               onClick={() => void exportCsv()}
-              disabled={!data || loading}
+              disabled={!data || initialLoading}
             >
-              Download visible CSV
+              Download matching CSV
             </button>
           </div>
         </header>
         {access?.lenses.length ? (
-          <nav
-            className={styles.tabs}
-            aria-label="Control tower lens"
-            role="tablist"
-          >
-            {access.lenses.map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={lens === value}
-                onClick={() => changeLens(value)}
-              >
-                {meta[value].label}
-              </button>
-            ))}
-          </nav>
+          <Tabs
+            label="Control tower lens"
+            idPrefix="control-tab"
+            panelId="control-panel"
+            items={access.lenses.map((value) => ({
+              id: value,
+              label: meta[value].label,
+            }))}
+            active={lens}
+            onChange={changeLens}
+          />
         ) : !error ? (
           <section className={styles.panel}>
             <p>
@@ -423,7 +707,10 @@ export function ControlTower() {
             Search visible scope
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
               placeholder="Client, location, reference, vehicle or vendor"
             />
           </label>
@@ -431,7 +718,10 @@ export function ControlTower() {
             Traffic light
             <select
               value={colour}
-              onChange={(event) => setColour(event.target.value)}
+              onChange={(event) => {
+                setColour(event.target.value);
+                setPage(1);
+              }}
             >
               <option value="">All risks</option>
               <option value="GREEN">Green</option>
@@ -443,7 +733,10 @@ export function ControlTower() {
             Workflow status
             <select
               value={state}
-              onChange={(event) => setState(event.target.value)}
+              onChange={(event) => {
+                setState(event.target.value);
+                setPage(1);
+              }}
             >
               <option value="">All statuses</option>
               {states.map((value) => (
@@ -456,7 +749,10 @@ export function ControlTower() {
               Ageing bucket
               <select
                 value={ageingBucket}
-                onChange={(event) => setAgeingBucket(event.target.value)}
+                onChange={(event) => {
+                  setAgeingBucket(event.target.value);
+                  setPage(1);
+                }}
               >
                 <option value="">All ageing</option>
                 <option value="CURRENT">0–30 days</option>
@@ -469,10 +765,11 @@ export function ControlTower() {
           <label>
             Saved filter / view
             <select
-              defaultValue=""
-              onChange={(event) =>
-                applyView(views.find((view) => view.id === event.target.value))
-              }
+              value={selectedView}
+              onChange={(event) => {
+                setSelectedView(event.target.value);
+                applyView(views.find((view) => view.id === event.target.value));
+              }}
             >
               <option value="">Select a saved view</option>
               {views.map((view) => (
@@ -481,6 +778,57 @@ export function ControlTower() {
                   {view.isDefault ? " (default)" : ""}
                 </option>
               ))}
+            </select>
+          </label>
+          <label>
+            Sort records
+            <select
+              value={sort}
+              onChange={(event) => {
+                setSort(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="updatedAt">Recently changed</option>
+              <option value="reference">Reference</option>
+              <option value="client">Client / vendor</option>
+              <option value="state">Workflow status</option>
+              <option value="risk">Risk</option>
+              <option value="dueAt">Critical date</option>
+              {lens !== "placement" && lens !== "trip" && (
+                <option value="value">Value</option>
+              )}
+              {(lens === "collection" || lens === "vendor-payable") && (
+                <option value="balance">Outstanding</option>
+              )}
+            </select>
+          </label>
+          <label>
+            Direction
+            <select
+              value={direction}
+              onChange={(event) => {
+                setDirection(event.target.value as "asc" | "desc");
+                setPage(1);
+              }}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </label>
+          <label>
+            Rows per page
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
             </select>
           </label>
           <button type="button" className={styles.clear} onClick={clear}>
@@ -516,10 +864,18 @@ export function ControlTower() {
         {data && (
           <div className={styles.freshness} role="status">
             <span
-              className={`${styles.freshDot} ${data.freshness.state === "LIVE" ? styles.live : styles.delayed}`}
+              className={`${styles.freshDot} ${!refreshFailure && data.freshness.state === "LIVE" ? styles.live : styles.delayed}`}
               aria-hidden="true"
             />
-            <strong>{paused ? "PAUSED" : data.freshness.state}</strong>
+            <strong>
+              {refreshFailure
+                ? "REFRESH FAILED"
+                : refreshing
+                  ? "REFRESHING"
+                  : paused
+                    ? "PAUSED"
+                    : data.freshness.state}
+            </strong>
             <span>As of {dateTime(data.asOf, access)}</span>
             <span>
               Last canonical change{" "}
@@ -528,6 +884,27 @@ export function ControlTower() {
             <span>
               {access?.timezone} · {access?.currency}
             </span>
+          </div>
+        )}
+        {refreshFailure && data && (
+          <div className={styles.staleNotice} role="alert">
+            <div>
+              <strong>Showing the last permitted result.</strong>
+              <span>
+                {" "}
+                Refresh failed at {dateTime(refreshFailure.failedAt, access)};
+                counts and freshness may now be stale.
+              </span>
+              {refreshFailure.error.correlationId && (
+                <small>
+                  {" "}
+                  Correlation: {refreshFailure.error.correlationId}
+                </small>
+              )}
+            </div>
+            <button type="button" onClick={() => void load(undefined, true)}>
+              Retry refresh
+            </button>
           </div>
         )}
         {error && (
@@ -540,35 +917,77 @@ export function ControlTower() {
         )}
         {data && (
           <section
-            className={styles.metrics}
+            className={`${styles.metrics} ui-metric-grid`}
             aria-label={`${meta[lens].label} key performance indicators`}
           >
-            {Object.entries(data.kpis).map(([key, value]) => (
-              <button
-                type="button"
-                className={styles.metric}
-                key={key}
-                onClick={() => drillKpi(key)}
-                aria-label={`Show records for ${kpiNames[key] ?? key}`}
-              >
-                <span>{kpiNames[key] ?? key}</span>
-                <strong className={moneyKeys.has(key) ? styles.money : ""}>
-                  {moneyKeys.has(key)
-                    ? money(value, access?.currency, access?.locale)
-                    : `${value}${percentKeys.has(key) ? "%" : ""}`}
-                </strong>
-                <small>Open filtered records</small>
-              </button>
-            ))}
+            {Object.entries(data.kpis).map(([key, value]) => {
+              const shown = moneyKeys.has(key)
+                ? money(value, access?.currency, access?.locale)
+                : value === null ||
+                    value === undefined ||
+                    typeof value === "object"
+                  ? "—"
+                  : `${String(value)}${percentKeys.has(key) ? "%" : ""}`;
+              return (
+                <MetricCard
+                  key={key}
+                  label={kpiNames[key] ?? key}
+                  value={shown}
+                  help={
+                    data.kpiActions[key]
+                      ? "Open exact matching records"
+                      : "Summary metric"
+                  }
+                  selected={selectedKpi === key}
+                  onClick={
+                    data.kpiActions[key] ? () => drillKpi(key) : undefined
+                  }
+                />
+              );
+            })}
           </section>
         )}
         {lens === "collection" && data?.ageing.length ? (
           <AgeingBoard
             buckets={data.ageing}
             access={access}
-            onOpen={setAgeingBucket}
+            onOpen={(bucket) => {
+              setAgeingBucket(bucket);
+              setPage(1);
+            }}
           />
         ) : null}
+        {(search ||
+          colour ||
+          state ||
+          ageingBucket ||
+          selectedKpi ||
+          kpiPredicate) && (
+          <div
+            className={styles.activeFilters}
+            role="status"
+            aria-label="Applied filters"
+          >
+            <strong>Showing:</strong>
+            {selectedKpi && (
+              <FilterChip label={kpiNames[selectedKpi] ?? selectedKpi} />
+            )}
+            {!selectedKpi && kpiPredicate && (
+              <FilterChip label={`KPI: ${kpiPredicate.replaceAll("-", " ")}`} />
+            )}
+            {search && <FilterChip label={`Search: ${search}`} />}
+            {colour && <FilterChip label={`Risk: ${colour}`} />}
+            {state && <FilterChip label={`Status: ${state}`} />}
+            {ageingBucket && (
+              <FilterChip
+                label={`Ageing: ${ageingBucket.replaceAll("_", "–")}`}
+              />
+            )}
+            <button type="button" onClick={clear}>
+              Clear
+            </button>
+          </div>
+        )}
         <nav className={styles.crumbs} aria-label="Drill-down breadcrumb">
           <button type="button" onClick={resetDrill}>
             All {lens === "vendor-payable" ? "vendors" : "clients"}
@@ -576,7 +995,13 @@ export function ControlTower() {
           {client && (
             <>
               <span aria-hidden="true">›</span>
-              <button type="button" onClick={() => setLocation(null)}>
+              <button
+                type="button"
+                onClick={() => {
+                  setLocation(null);
+                  setPage(1);
+                }}
+              >
                 {client.name}
               </button>
             </>
@@ -590,12 +1015,15 @@ export function ControlTower() {
         </nav>
         <section
           className={styles.panel}
-          aria-busy={loading}
+          id="control-panel"
+          role="tabpanel"
+          aria-labelledby={`control-tab-${lens}`}
+          aria-busy={initialLoading}
           aria-live="polite"
         >
-          {loading ? (
+          {initialLoading ? (
             <LoadingRows />
-          ) : !data?.rows.length ? (
+          ) : !data || data.pagination.total === 0 ? (
             <div className={styles.empty}>
               <h2>No matching {meta[lens].record} records</h2>
               <p>
@@ -608,82 +1036,81 @@ export function ControlTower() {
           ) : !client ? (
             <PortfolioBoard
               lens={lens}
-              groups={groups}
+              summaries={data.portfolios}
               access={access}
-              onOpen={setClient}
+              onOpen={(value) => {
+                setClient(value);
+                setPage(1);
+              }}
             />
           ) : !location ? (
             <LocationBoard
               lens={lens}
-              rows={data.rows}
+              summaries={data.locations}
               access={access}
-              onOpen={setLocation}
+              onOpen={(value) => {
+                setLocation(value);
+                setPage(1);
+              }}
             />
           ) : (
-            <RecordTable lens={lens} rows={data.rows} access={access} />
+            <RecordTable
+              lens={lens}
+              rows={data.rows}
+              total={data.pagination.total}
+              access={access}
+            />
           )}
         </section>
+        {location && data && data.pagination.pageCount > 1 && (
+          <nav className={styles.pagination} aria-label="Record result pages">
+            <span>
+              Page {data.pagination.page} of {data.pagination.pageCount} ·{" "}
+              {data.pagination.total} records
+            </span>
+            <div>
+              <button
+                type="button"
+                disabled={!data.pagination.hasPrevious || refreshing}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={!data.pagination.hasNext || refreshing}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </nav>
+        )}
         {lens === "placement" && data?.vendors.length ? (
           <VendorAllocation vendors={data.vendors} />
         ) : null}
-      </main>
+      </div>
     </Shell>
   );
 }
 
-function groupBy(
-  rows: Row[],
-  idKey: "clientId" | "locationId",
-  nameKey: "client" | "location",
-) {
-  const result = new Map<string, { id: string; name: string; rows: Row[] }>();
-  for (const row of rows) {
-    const id = String(row[idKey] ?? row[nameKey] ?? "unassigned"),
-      group = result.get(id) ?? {
-        id,
-        name: String(row[nameKey] ?? "Unassigned"),
-        rows: [],
-      };
-    group.rows.push(row);
-    result.set(id, group);
-  }
-  return [...result.values()];
+function summaryRisk(summary: Summary): Risk {
+  return summary.red ? "RED" : summary.yellow ? "YELLOW" : "GREEN";
 }
-function rollup(rows: Row[]) {
-  const sum = (key: string) => {
-      if (rows.some((row) => row[key] === "••••")) return "••••";
-      return rows.reduce(
-        (total, row) => total + BigInt(String(row[key] ?? 0)),
-        BigInt(0),
-      );
-    },
-    demand = rows.reduce((total, row) => total + Number(row.demand ?? 0), 0),
-    placed = rows.reduce((total, row) => total + Number(row.placed ?? 0), 0),
-    red = rows.filter((row) => row.colour === "RED").length,
-    yellow = rows.filter((row) => row.colour === "YELLOW").length,
-    green = rows.filter((row) => row.colour === "GREEN").length;
-  return {
-    green,
-    yellow,
-    red,
-    worst: (red ? "RED" : yellow ? "YELLOW" : "GREEN") as Risk,
-    demand,
-    placed,
-    pending: Math.max(demand - placed, 0),
-    fill: demand ? Math.round((placed * 10000) / demand) / 100 : 0,
-    value: sum("valueMinor"),
-    balance: sum("balanceMinor"),
-  };
+function summaryFill(summary: Summary) {
+  return summary.demand
+    ? Math.round((summary.placed * 10_000) / summary.demand) / 100
+    : 0;
 }
 
 function PortfolioBoard({
   lens,
-  groups,
+  summaries,
   access,
   onOpen,
 }: {
   lens: Lens;
-  groups: ReturnType<typeof groupBy>;
+  summaries: Summary[];
   access: Access | null;
   onOpen: (value: Drill) => void;
 }) {
@@ -697,43 +1124,41 @@ function PortfolioBoard({
               : "Client portfolio"}
           </h2>
           <p className="muted">
-            Worst child status controls each portfolio card.
+            Server-projected summaries reconcile to the current authorized
+            filters.
           </p>
         </div>
-        <span>{groups.length} scoped portfolios</span>
+        <span>{summaries.length} scoped portfolios</span>
       </div>
       <div className={styles.clients}>
-        {groups.map((group) => {
-          const summary = rollup(group.rows);
+        {summaries.map((summary) => {
+          const worst = summaryRisk(summary);
           return (
             <button
               type="button"
               className={styles.client}
-              key={group.id}
-              onClick={() => onOpen({ id: group.id, name: group.name })}
+              key={summary.id}
+              onClick={() => onOpen({ id: summary.id, name: summary.name })}
             >
               <div className={styles.cardHead}>
                 <div>
-                  <h3>{group.name}</h3>
+                  <h3>{summary.name}</h3>
                   <p>
-                    {
-                      new Set(
-                        group.rows.map((row) => row.locationId ?? row.location),
-                      ).size
-                    }{" "}
-                    locations · {group.rows.length} records
+                    {summary.locationCount ?? 0} locations ·{" "}
+                    {summary.recordCount} records
                   </p>
                 </div>
-                <span className={`${styles.status} ${styles[summary.worst]}`}>
-                  {summary.worst}
+                <span className={`${styles.status} ${styles[worst]}`}>
+                  {worst}
                 </span>
               </div>
               <div
                 className={styles.strip}
+                aria-label={`Green ${summary.green}, yellow ${summary.yellow}, red ${summary.red}`}
                 style={
                   {
-                    "--green": `${(summary.green * 100) / group.rows.length}%`,
-                    "--yellow": `${(summary.yellow * 100) / group.rows.length}%`,
+                    "--green": `${summary.recordCount ? (summary.green * 100) / summary.recordCount : 0}%`,
+                    "--yellow": `${summary.recordCount ? (summary.yellow * 100) / summary.recordCount : 0}%`,
                   } as CSSProperties
                 }
               />
@@ -749,13 +1174,17 @@ function PortfolioBoard({
                 </span>
                 {lens === "placement" ? (
                   <span>
-                    Fill <b>{summary.fill}%</b>
+                    Fill <b>{summaryFill(summary)}%</b>
                   </span>
                 ) : (
                   <span>
                     Open{" "}
                     <b>
-                      {money(summary.balance, access?.currency, access?.locale)}
+                      {money(
+                        summary.balanceMinor,
+                        access?.currency,
+                        access?.locale,
+                      )}
                     </b>
                   </span>
                 )}
@@ -767,18 +1196,18 @@ function PortfolioBoard({
     </>
   );
 }
+
 function LocationBoard({
   lens,
-  rows,
+  summaries,
   access,
   onOpen,
 }: {
   lens: Lens;
-  rows: Row[];
+  summaries: Summary[];
   access: Access | null;
   onOpen: (value: Drill) => void;
 }) {
-  const groups = groupBy(rows, "locationId", "location");
   return (
     <>
       <div className={styles.sectionHead}>
@@ -786,10 +1215,69 @@ function LocationBoard({
           <h2>
             {lens === "vendor-payable" ? "Vendor accounts" : "Location board"}
           </h2>
-          <p className="muted">Select a row to open the detailed register.</p>
+          <p className="muted">
+            Select a server-projected summary to open its paged register.
+          </p>
         </div>
+        <span>{summaries.length} locations / accounts</span>
       </div>
-      <div className={styles.tableWrap}>
+      <div className={styles.recordCards} aria-label="Location summaries">
+        {summaries.map((summary) => {
+          const worst = summaryRisk(summary);
+          return (
+            <article className={styles.recordCard} key={summary.id}>
+              <header>
+                <strong>{summary.name}</strong>
+                <span className={`${styles.status} ${styles[worst]}`}>
+                  {worst}
+                </span>
+              </header>
+              <dl>
+                <div>
+                  <dt>Records</dt>
+                  <dd>{summary.recordCount}</dd>
+                </div>
+                <div>
+                  <dt>Green / Yellow / Red</dt>
+                  <dd>
+                    {summary.green} / {summary.yellow} / {summary.red}
+                  </dd>
+                </div>
+                {lens === "placement" ? (
+                  <div>
+                    <dt>Fill</dt>
+                    <dd>{summaryFill(summary)}%</dd>
+                  </div>
+                ) : (
+                  <div>
+                    <dt>Outstanding</dt>
+                    <dd>
+                      {money(
+                        summary.balanceMinor,
+                        access?.currency,
+                        access?.locale,
+                      )}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+              <button
+                type="button"
+                onClick={() => onOpen({ id: summary.id, name: summary.name })}
+              >
+                View records
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      <p className={styles.scrollHint}>Swipe or scroll for more columns.</p>
+      <div
+        className={styles.tableWrap}
+        role="region"
+        aria-label="Location results table"
+        tabIndex={0}
+      >
         <table className={styles.table}>
           <thead>
             <tr>
@@ -815,35 +1303,37 @@ function LocationBoard({
             </tr>
           </thead>
           <tbody>
-            {groups.map((group) => {
-              const summary = rollup(group.rows);
+            {summaries.map((summary) => {
+              const worst = summaryRisk(summary);
               return (
-                <tr key={group.id}>
+                <tr key={summary.id}>
                   <td>
-                    <span
-                      className={`${styles.status} ${styles[summary.worst]}`}
-                    >
-                      {summary.worst}
+                    <span className={`${styles.status} ${styles[worst]}`}>
+                      {worst}
                     </span>
                   </td>
                   <td>
-                    <strong>{group.name}</strong>
+                    <strong>{summary.name}</strong>
                   </td>
-                  <td>{group.rows.length}</td>
+                  <td>{summary.recordCount}</td>
                   {lens === "placement" ? (
                     <>
                       <td>{summary.placed}</td>
-                      <td>{summary.pending}</td>
-                      <td>{summary.fill}%</td>
+                      <td>{Math.max(summary.demand - summary.placed, 0)}</td>
+                      <td>{summaryFill(summary)}%</td>
                     </>
                   ) : (
                     <>
                       <td>
-                        {money(summary.value, access?.currency, access?.locale)}
+                        {money(
+                          summary.valueMinor,
+                          access?.currency,
+                          access?.locale,
+                        )}
                       </td>
                       <td>
                         {money(
-                          summary.balance,
+                          summary.balanceMinor,
                           access?.currency,
                           access?.locale,
                         )}
@@ -856,7 +1346,9 @@ function LocationBoard({
                   <td>
                     <button
                       type="button"
-                      onClick={() => onOpen({ id: group.id, name: group.name })}
+                      onClick={() =>
+                        onOpen({ id: summary.id, name: summary.name })
+                      }
                     >
                       View records
                     </button>
@@ -870,7 +1362,6 @@ function LocationBoard({
     </>
   );
 }
-
 function columns(lens: Lens) {
   const first = [
     {
@@ -984,10 +1475,12 @@ function cell(row: Row, key: string, access: Access | null) {
 function RecordTable({
   lens,
   rows,
+  total,
   access,
 }: {
   lens: Lens;
   rows: Row[];
+  total: number;
   access: Access | null;
 }) {
   const fields = columns(lens);
@@ -1000,9 +1493,43 @@ function RecordTable({
             Canonical rows in the current filters and drill scope.
           </p>
         </div>
-        <span>{rows.length} records</span>
+        <span>
+          {total} records · {rows.length} on this page
+        </span>
       </div>
-      <div className={styles.tableWrap}>
+      <div
+        className={styles.recordCards}
+        aria-label={`${meta[lens].record} records`}
+      >
+        {rows.map((row) => (
+          <article className={styles.recordCard} key={row.id}>
+            <header>
+              <strong>{row.reference}</strong>
+              <span className={`${styles.status} ${styles[row.colour]}`}>
+                {row.colour}
+              </span>
+            </header>
+            <dl>
+              {fields.slice(1).map((field) => (
+                <div key={field.key}>
+                  <dt>{field.label}</dt>
+                  <dd>{cell(row, field.key, access)}</dd>
+                </div>
+              ))}
+            </dl>
+            <Link className={styles.actionLink} href={href(lens, row)}>
+              Open source record
+            </Link>
+          </article>
+        ))}
+      </div>
+      <p className={styles.scrollHint}>Swipe or scroll for more columns.</p>
+      <div
+        className={styles.tableWrap}
+        role="region"
+        aria-label={`${meta[lens].record} results table`}
+        tabIndex={0}
+      >
         <table className={styles.table}>
           <thead>
             <tr>
@@ -1051,11 +1578,12 @@ function AgeingBoard({
       "46_90": "46–90 days",
       OVER_90: "Beyond 90 days",
     },
+    parsed = buckets.map((bucket) => minorValue(bucket.amountMinor)),
     masked = buckets.some((bucket) => bucket.amountMinor === "••••"),
-    total = masked
-      ? BigInt(0)
-      : buckets.reduce(
-          (sum, bucket) => sum + BigInt(bucket.amountMinor),
+    total = parsed.some((value) => value === null)
+      ? null
+      : parsed.reduce<bigint>(
+          (sum, value) => sum + (value ?? BigInt(0)),
           BigInt(0),
         );
   return (
@@ -1083,13 +1611,17 @@ function AgeingBoard({
               {bucket.count} invoices ·{" "}
               {masked
                 ? "masked"
-                : `${
-                    total
-                      ? Number(
-                          (BigInt(bucket.amountMinor) * BigInt(10000)) / total,
-                        ) / 100
-                      : 0
-                  }%`}
+                : total === null
+                  ? "amount unavailable"
+                  : `${
+                      total !== BigInt(0)
+                        ? Number(
+                            ((minorValue(bucket.amountMinor) ?? BigInt(0)) *
+                              BigInt(10000)) /
+                              total,
+                          ) / 100
+                        : 0
+                    }%`}
             </small>
           </button>
         ))}
@@ -1097,11 +1629,7 @@ function AgeingBoard({
     </section>
   );
 }
-function VendorAllocation({
-  vendors,
-}: {
-  vendors: Array<Record<string, unknown>>;
-}) {
+function VendorAllocation({ vendors }: { vendors: VendorAllocationRow[] }) {
   return (
     <section className={styles.panel}>
       <div className={styles.sectionHead}>
@@ -1115,20 +1643,20 @@ function VendorAllocation({
       </div>
       <div className={styles.vendors}>
         {vendors.map((vendor) => (
-          <article className={styles.vendor} key={String(vendor.id)}>
-            <strong>{String(vendor.vendor)}</strong>
+          <article className={styles.vendor} key={vendor.id}>
+            <strong>{vendor.vendor}</strong>
             <dl>
               <div>
                 <dt>Allotted</dt>
-                <dd>{String(vendor.allotted)}</dd>
+                <dd>{vendor.allotted}</dd>
               </div>
               <div>
                 <dt>Placed</dt>
-                <dd>{String(vendor.placed)}</dd>
+                <dd>{vendor.placed}</dd>
               </div>
               <div>
                 <dt>NTP</dt>
-                <dd>{String(vendor.ntp)}</dd>
+                <dd>{vendor.ntp}</dd>
               </div>
             </dl>
             <Link href="/app/operations/allocations">Review allocations</Link>

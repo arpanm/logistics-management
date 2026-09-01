@@ -545,7 +545,14 @@ export class CanonicalService {
     return toJsonSafe(result) as Row;
   }
 
-  async list(actor: SessionActor, resource: string, search = "", state = "") {
+  async list(
+    actor: SessionActor,
+    resource: string,
+    search = "",
+    state = "",
+    page = 1,
+    pageSize = 50,
+  ) {
     const definition = this.definition(resource);
     const tenantId = this.tenant(actor);
     return withTenant(this.app.db, tenantId, async (tx) => {
@@ -555,13 +562,14 @@ export class CanonicalService {
         `${definition.capability}.read`,
         "READ",
       );
-      const rows = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT to_jsonb(r) AS record FROM app.${definition.table} r
+      const rows = await tx.$queryRawUnsafe<Array<Row & { total: number }>>(
+        `SELECT to_jsonb(r) AS record,count(*) OVER()::int total FROM app.${definition.table} r
          WHERE r.tenant_id=$1::uuid
            AND ($2='' OR coalesce(to_jsonb(r)->>'code',to_jsonb(r)->>'name',to_jsonb(r)->>'display_name','') ILIKE $3)
            AND ($4='' OR coalesce(to_jsonb(r)->>'state','')=$4)
            AND app.domain_resource_authorized($1::uuid,$5::uuid,$6::uuid,$7,'READ',$8,r.id)
-         ORDER BY coalesce(to_jsonb(r)->>'updated_at',to_jsonb(r)->>'created_at') DESC NULLS LAST LIMIT 250`,
+         ORDER BY coalesce(to_jsonb(r)->>'updated_at',to_jsonb(r)->>'created_at') DESC NULLS LAST
+         LIMIT $9 OFFSET $10`,
         tenantId,
         search.trim(),
         `%${search.trim()}%`,
@@ -570,6 +578,8 @@ export class CanonicalService {
         actor.userId,
         `${definition.capability}.read`,
         resource,
+        pageSize,
+        (page - 1) * pageSize,
       );
       return {
         items: await Promise.all(
@@ -583,7 +593,9 @@ export class CanonicalService {
             ),
           ),
         ),
-        total: rows.length,
+        total: Number(rows[0]?.total ?? 0),
+        page,
+        pageSize,
       };
     });
   }

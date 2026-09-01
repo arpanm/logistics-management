@@ -124,11 +124,20 @@ export class CanonicalController {
     @Param("resource") resource: string,
     @Query("search") search: string | undefined,
     @Query("state") state: string | undefined,
+    @Query("page") page: string | undefined,
+    @Query("pageSize") pageSize: string | undefined,
     @Req() req: Request,
     @Res() res: Response,
   ) {
     return this.run(req, res, async () =>
-      this.canonical.list(await this.actor(req), resource, search, state),
+      this.canonical.list(
+        await this.actor(req),
+        resource,
+        search,
+        state,
+        z.coerce.number().int().min(1).default(1).parse(page),
+        z.coerce.number().int().min(10).max(100).default(50).parse(pageSize),
+      ),
     );
   }
   @Post(":resource")

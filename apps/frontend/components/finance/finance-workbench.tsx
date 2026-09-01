@@ -9,11 +9,19 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { api, type ApiError } from "../api";
 import { FormSubmitResult } from "../forms/form-submit-result";
+import { Modal } from "../modal";
 import { Shell } from "../shell";
+import {
+  DialogActions,
+  DialogBody,
+  DialogHeader,
+  PillNav,
+} from "../ui/primitives";
 import styles from "./finance-workbench.module.css";
 
 type Row = Record<string, unknown> & {
@@ -190,6 +198,7 @@ export function FinanceWorkbench({
     [feedbackAction, setFeedbackAction] = useState(""),
     [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const busyRef = useRef(false);
   const [filters, setFilters] = useState({
     search: "",
     status: "",
@@ -239,6 +248,8 @@ export function FinanceWorkbench({
     success = "Finance record updated.",
     feedbackKey = "",
   ) => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setFeedbackAction(feedbackKey);
     setBusy(true);
     setError("");
@@ -257,6 +268,34 @@ export function FinanceWorkbench({
       setError((value as ApiError).message ?? "Action could not be completed");
       return false;
     } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+  const dialogMutate = async (
+    path: string,
+    body: unknown,
+    success: string,
+    idempotencyKey: string,
+  ) => {
+    if (busyRef.current)
+      return { message: "An action is already in progress" } as ApiError;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await api(path, {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(body),
+      });
+      setNotice(success);
+      setDialog(null);
+      await load();
+      return null;
+    } catch (value) {
+      return value as ApiError;
+    } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -331,7 +370,7 @@ export function FinanceWorkbench({
     });
   return (
     <Shell>
-      <main className={styles.page}>
+      <div className={styles.page}>
         <header className={styles.hero}>
           <div>
             <p className="eyebrow">Finance command centre</p>
@@ -341,7 +380,7 @@ export function FinanceWorkbench({
               append-only minor-unit ledgers.
             </p>
           </div>
-          <FinanceNav />
+          <FinanceNav section={section} />
         </header>
         {error && (
           <div className={styles.error} role="alert">
@@ -436,23 +475,46 @@ export function FinanceWorkbench({
             refs={refs}
             busy={busy}
             close={() => setDialog(null)}
-            mutate={mutate}
+            mutate={dialogMutate}
           />
         )}
-      </main>
+      </div>
     </Shell>
   );
 }
 
-function FinanceNav() {
+function FinanceNav({ section }: { section: Section }) {
   return (
-    <nav className={styles.tabs} aria-label="Finance workbench">
-      <Link href="/app/finance">Dashboard</Link>
-      <Link href="/app/finance/invoices">All invoices</Link>
-      <Link href="/app/finance/receipts">Collections & receipts</Link>
-      <Link href="/app/finance/vendor-bills">Vendor payables</Link>
-      <Link href="/app/finance/payment-runs">Payment runs</Link>
-    </nav>
+    <PillNav
+      label="Finance workbench"
+      items={[
+        {
+          href: "/app/finance",
+          label: "Dashboard",
+          current: section === "overview",
+        },
+        {
+          href: "/app/finance/invoices",
+          label: "All invoices",
+          current: section === "invoices",
+        },
+        {
+          href: "/app/finance/receipts",
+          label: "Collections & receipts",
+          current: section === "collections",
+        },
+        {
+          href: "/app/finance/vendor-bills",
+          label: "Vendor payables",
+          current: section === "vendors",
+        },
+        {
+          href: "/app/finance/payment-runs",
+          label: "Payment runs",
+          current: section === "payments",
+        },
+      ]}
+    />
   );
 }
 function Overview({
@@ -473,7 +535,10 @@ function Overview({
   const bills = (data?.queues.vendorBills ?? []).filter(pendingBill);
   return (
     <>
-      <section className={styles.metrics} aria-label="Finance workload">
+      <section
+        className={`${styles.metrics} ui-metric-grid`}
+        aria-label="Finance workload"
+      >
         {Object.entries(data?.metrics ?? {}).map(([key, value]) => (
           <article className={styles.metric} key={key}>
             <strong>{value}</strong>
@@ -1406,7 +1471,12 @@ function ActionDialog({
   refs: Refs;
   busy: boolean;
   close: () => void;
-  mutate: (p: string, b: unknown, s?: string) => Promise<boolean>;
+  mutate: (
+    p: string,
+    b: unknown,
+    s: string,
+    idempotencyKey: string,
+  ) => Promise<ApiError | null>;
 }) {
   const row = dialog.row;
   const [form, setForm] = useState<Record<string, string>>({
@@ -1430,10 +1500,31 @@ function ActionDialog({
     batchNo: `PAY-${Date.now()}`,
     utr: "",
   });
+  const [dialogError, setDialogError] = useState<ApiError | null>(null);
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const idempotencyKey = useRef(crypto.randomUUID());
+  const perform = async (path: string, body: unknown, success: string) => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setDialogError(null);
+    try {
+      const failure = await mutate(path, body, success, idempotencyKey.current);
+      if (failure) {
+        setDialogError(failure);
+        requestAnimationFrame(() => errorRef.current?.focus());
+      }
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (dialog.kind === "edit")
-      void mutate(
+      void perform(
         `/tenant/finance/invoices/${row.id}/update`,
         {
           expectedVersion: row.version,
@@ -1444,13 +1535,13 @@ function ActionDialog({
         "Invoice draft updated.",
       );
     if (dialog.kind === "reject")
-      void mutate(
+      void perform(
         `/tenant/finance/invoices/${row.id}/actions`,
         { action: "REJECT", expectedVersion: row.version, reason: form.reason },
         "Invoice rejected for correction.",
       );
     if (dialog.kind === "acknowledge")
-      void mutate(
+      void perform(
         `/tenant/finance/invoices/${row.id}/actions`,
         {
           action: "ACKNOWLEDGE",
@@ -1460,7 +1551,7 @@ function ActionDialog({
         "Client acknowledgement recorded.",
       );
     if (dialog.kind === "reverse-invoice")
-      void mutate(
+      void perform(
         `/tenant/finance/invoices/${row.id}/actions`,
         {
           action: "REVERSE",
@@ -1471,7 +1562,7 @@ function ActionDialog({
         "Compensating reversal posted.",
       );
     if (dialog.kind === "note")
-      void mutate(
+      void perform(
         `/tenant/finance/invoices/${row.id}/notes`,
         {
           noteType: form.noteType,
@@ -1481,7 +1572,7 @@ function ActionDialog({
         "Invoice note recorded.",
       );
     if (dialog.kind === "followup")
-      void mutate(
+      void perform(
         `/tenant/finance/invoices/${row.id}/followups`,
         {
           outcome: form.outcome,
@@ -1495,7 +1586,7 @@ function ActionDialog({
         "Collection follow-up recorded.",
       );
     if (dialog.kind === "vendor-bill")
-      void mutate(
+      void perform(
         "/tenant/finance/vendor-bills",
         {
           vendorInvoiceNo: form.vendorInvoiceNo,
@@ -1507,7 +1598,7 @@ function ActionDialog({
         "Vendor bill created.",
       );
     if (dialog.kind === "pay")
-      void mutate(
+      void perform(
         `/tenant/finance/vendor-bills/${row.id}/actions`,
         {
           action: "PAY",
@@ -1519,7 +1610,7 @@ function ActionDialog({
         "Payment run created for approval.",
       );
     if (dialog.kind === "payment-reference")
-      void mutate(
+      void perform(
         `/tenant/finance/payment-runs/${row.id}/actions`,
         { action: dialog.action, expectedVersion: row.version, utr: form.utr },
         "Payment marked paid.",
@@ -1529,7 +1620,7 @@ function ActionDialog({
         dialog.action === "DISPUTE"
           ? `/tenant/finance/vendor-bills/${row.id}/actions`
           : `/tenant/finance/payment-runs/${row.id}/actions`;
-      void mutate(
+      void perform(
         route,
         {
           action: dialog.action,
@@ -1560,26 +1651,22 @@ function ActionDialog({
           : "Reverse payment",
   };
   return (
-    <div
-      className={styles.backdrop}
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
+    <Modal
+      titleId="finance-dialog-title"
+      onClose={() => {
+        if (!busy && !pending) close();
       }}
+      className={styles.dialog}
     >
-      <section
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="finance-dialog-title"
-      >
-        <div className={styles.panelHeading}>
-          <h2 id="finance-dialog-title">{title[dialog.kind]}</h2>
-          <button type="button" onClick={close} aria-label="Close dialog">
-            ×
-          </button>
-        </div>
-        <form className={styles.form} onSubmit={submit}>
+      <form className={`${styles.form} ui-dialog-layout`} onSubmit={submit}>
+        <DialogHeader
+          titleId="finance-dialog-title"
+          eyebrow="Finance action"
+          title={title[dialog.kind]}
+          onClose={close}
+          closeDisabled={busy || pending}
+        />
+        <DialogBody>
           {dialog.kind === "edit" && (
             <div className={styles.formGrid}>
               <Field label="Invoice number">
@@ -1790,15 +1877,35 @@ function ActionDialog({
             </Field>
           )}
           {dialog.kind === "payment-reason" && <Reason form={form} f={f} />}
-          <div className={styles.actions}>
-            <button type="button" onClick={close}>
-              Cancel
-            </button>
-            <button disabled={busy}>Confirm</button>
-          </div>
-        </form>
-      </section>
-    </div>
+          {dialogError && (
+            <div
+              ref={errorRef}
+              tabIndex={-1}
+              role="alert"
+              className={styles.error}
+            >
+              <span>{dialogError.message}</span>
+              {dialogError.correlationId && (
+                <small>Reference {dialogError.correlationId}</small>
+              )}
+            </div>
+          )}
+          {pending && (
+            <p role="status" className="muted">
+              Saving this finance action…
+            </p>
+          )}
+        </DialogBody>
+        <DialogActions>
+          <button type="button" onClick={close} disabled={busy || pending}>
+            Cancel
+          </button>
+          <button disabled={busy || pending}>
+            {busy || pending ? "Saving…" : "Confirm"}
+          </button>
+        </DialogActions>
+      </form>
+    </Modal>
   );
 }
 function Reason({
@@ -1861,43 +1968,64 @@ function DataTable({
       </div>
     );
   return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th key={c}>{label(c)}</th>
-            ))}
-            {actions && <th>Actions</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
+    <>
+      <div className={`${styles.tableWrap} ${styles.desktopTable}`}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
               {columns.map((c) => (
-                <td key={c}>
-                  {c.endsWith("Minor") ? (
-                    money(row[c])
-                  ) : c === "state" || c === "priority" ? (
-                    <span
-                      className={`${styles.badge} ${styles[String(row[c]).toLowerCase()] ?? ""}`}
-                    >
-                      {String(row[c] ?? "—")}
-                    </span>
-                  ) : (
-                    String(row[c] ?? "—")
-                  )}
-                </td>
+                <th key={c}>{label(c)}</th>
               ))}
-              {actions && (
-                <td>
-                  <div className={styles.actions}>{actions(row)}</div>
-                </td>
-              )}
+              {actions && <th>Actions</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                {columns.map((c) => (
+                  <td key={c}>
+                    {c.endsWith("Minor") ? (
+                      money(row[c])
+                    ) : c === "state" || c === "priority" ? (
+                      <span
+                        className={`${styles.badge} ${styles[String(row[c]).toLowerCase()] ?? ""}`}
+                      >
+                        {String(row[c] ?? "—")}
+                      </span>
+                    ) : (
+                      String(row[c] ?? "—")
+                    )}
+                  </td>
+                ))}
+                {actions && (
+                  <td>
+                    <div className={styles.actions}>{actions(row)}</div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className={styles.mobileCards} aria-label="Records">
+        {rows.map((row) => (
+          <article className={styles.recordCard} key={row.id}>
+            <dl>
+              {columns.map((column) => (
+                <div key={column}>
+                  <dt>{label(column)}</dt>
+                  <dd>
+                    {column.endsWith("Minor")
+                      ? money(row[column])
+                      : String(row[column] ?? "—")}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {actions && <div className={styles.actions}>{actions(row)}</div>}
+          </article>
+        ))}
+      </div>
+    </>
   );
 }

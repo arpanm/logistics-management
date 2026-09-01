@@ -4,6 +4,7 @@ import { createDatabase, withPlatform } from "./index.js";
 import {
   DEMO_CONTENT_HASH,
   DEMO_DATASET_VERSION,
+  DEMO_SHOWCASE_MANIFEST,
   seedDemoData,
 } from "./demo-seed.js";
 
@@ -66,14 +67,72 @@ describe.skipIf(!databaseUrl)("demo data bootstrap", () => {
     expect(replay).toEqual({ replayed: true, rotated: false });
     expect(second[0]).toEqual(first[0]);
     expect(second[0]).toMatchObject({
-      users: 6,
-      memberships: 6,
-      indents: 4,
-      trips: 2,
-      invoices: 2,
-      payouts: 1,
+      users: 9,
+      memberships: 9,
+      indents: DEMO_SHOWCASE_MANIFEST.indents,
+      trips: DEMO_SHOWCASE_MANIFEST.trips,
+      invoices: DEMO_SHOWCASE_MANIFEST.clientInvoices,
+      payouts: DEMO_SHOWCASE_MANIFEST.paymentBatches,
       markers: 1,
       dispositions: ["CREATE", "UPDATE", "REJECT"],
+    });
+  });
+
+  it("materializes the reconciled UI-01 showcase graph only inside the demo tenant", async () => {
+    const [counts] = await withPlatform(db!, (tx) =>
+      tx.$queryRawUnsafe<Array<Record<string, number>>>(`
+        SELECT
+          (SELECT count(*)::int FROM app.tenants WHERE id='10000000-0000-4000-8000-000000000100') tenant,
+          (SELECT count(*)::int FROM app.organization_nodes WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND node_type='REGION') regions,
+          (SELECT count(*)::int FROM app.organization_nodes WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND node_type='BRANCH') branches,
+          (SELECT count(*)::int FROM app.employees e JOIN app.tenant_memberships m ON m.tenant_id=e.tenant_id AND m.id=e.linked_membership_id WHERE e.tenant_id='10000000-0000-4000-8000-000000000100' AND m.portal_audience='INTERNAL') "internalEmployees",
+          (SELECT count(*)::int FROM app.clients WHERE tenant_id='10000000-0000-4000-8000-000000000100') clients,
+          (SELECT count(*)::int FROM app.client_locations WHERE tenant_id='10000000-0000-4000-8000-000000000100') "clientLocations",
+          (SELECT count(*)::int FROM app.vendors WHERE tenant_id='10000000-0000-4000-8000-000000000100') vendors,
+          (SELECT count(*)::int FROM app.vendors WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND state='ACTIVE') "activeVendors",
+          (SELECT count(*)::int FROM app.vehicles WHERE tenant_id='10000000-0000-4000-8000-000000000100') vehicles,
+          (SELECT count(*)::int FROM app.drivers WHERE tenant_id='10000000-0000-4000-8000-000000000100') drivers,
+          (SELECT count(*)::int FROM app.indents WHERE tenant_id='10000000-0000-4000-8000-000000000100') indents,
+          (SELECT count(*)::int FROM app.allocations WHERE tenant_id='10000000-0000-4000-8000-000000000100') allocations,
+          (SELECT count(*)::int FROM app.trips WHERE tenant_id='10000000-0000-4000-8000-000000000100') trips,
+          (SELECT count(*)::int FROM app.pod_tasks WHERE tenant_id='10000000-0000-4000-8000-000000000100') "podTasks",
+          (SELECT count(*)::int FROM app.client_invoices WHERE tenant_id='10000000-0000-4000-8000-000000000100') "clientInvoices",
+          (SELECT count(*)::int FROM app.receipts WHERE tenant_id='10000000-0000-4000-8000-000000000100') receipts,
+          (SELECT count(*)::int FROM app.vendor_bills WHERE tenant_id='10000000-0000-4000-8000-000000000100') "vendorBills",
+          (SELECT count(*)::int FROM app.payment_batches WHERE tenant_id='10000000-0000-4000-8000-000000000100') "paymentBatches",
+          (SELECT count(*)::int FROM app.operational_alerts WHERE tenant_id='10000000-0000-4000-8000-000000000100') alerts,
+          (SELECT count(*)::int FROM app.contract_lanes WHERE tenant_id='10000000-0000-4000-8000-000000000100') lanes,
+          (SELECT count(*)::int FROM app.client_rate_lines WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND effective_from<='2026-08-31T12:00:00+05:30'::timestamptz AND (effective_to IS NULL OR effective_to>'2026-08-31T12:00:00+05:30'::timestamptz)) "currentCommercialExamples",
+          (SELECT count(*)::int FROM app.client_rate_lines WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND effective_to<='2026-08-31T12:00:00+05:30'::timestamptz) "expiredCommercialExamples",
+          (SELECT count(*)::int FROM app.client_rate_lines WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND effective_from>'2026-08-31T12:00:00+05:30'::timestamptz) "upcomingCommercialExamples",
+          (SELECT count(*)::int FROM app.indents WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND state IN ('OPEN','PARTIALLY_ALLOCATED')) "placementLensRows",
+          (SELECT count(*)::int FROM app.pod_tasks WHERE tenant_id='10000000-0000-4000-8000-000000000100') "podLensRows",
+          (SELECT count(*)::int FROM app.client_invoices WHERE tenant_id='10000000-0000-4000-8000-000000000100') "collectionLensRows",
+          (SELECT count(*)::int FROM app.trips WHERE tenant_id='10000000-0000-4000-8000-000000000100') "tripLensRows",
+          (SELECT count(*)::int FROM app.vendor_bills WHERE tenant_id='10000000-0000-4000-8000-000000000100') "vendorPayableLensRows",
+          (SELECT count(DISTINCT client_id)::int FROM app.indents WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND state IN ('OPEN','PARTIALLY_ALLOCATED')) "placementPortfolios",
+          (SELECT count(DISTINCT i.client_id)::int FROM app.pod_tasks p JOIN app.trips t ON t.tenant_id=p.tenant_id AND t.id=p.trip_id JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id WHERE p.tenant_id='10000000-0000-4000-8000-000000000100') "podPortfolios",
+          (SELECT count(DISTINCT client_id)::int FROM app.client_invoices WHERE tenant_id='10000000-0000-4000-8000-000000000100') "collectionPortfolios",
+          (SELECT count(DISTINCT i.client_id)::int FROM app.trips t JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id WHERE t.tenant_id='10000000-0000-4000-8000-000000000100') "tripPortfolios",
+          (SELECT count(DISTINCT vendor_id)::int FROM app.vendor_bills WHERE tenant_id='10000000-0000-4000-8000-000000000100') "vendorPayablePortfolios",
+          (SELECT count(*)::int FROM app.tenant_configuration WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND namespace='notifications' AND value->>'suppressOutbound'='true' AND value->>'syntheticDestinationsOnly'='true') "notificationSuppression",
+          (SELECT count(*)::int FROM (
+            SELECT tenant_id FROM app.clients WHERE id::text LIKE '11000000-0000-4000-8000-%'
+            UNION ALL SELECT tenant_id FROM app.indents WHERE id::text LIKE '11000000-0000-4000-8000-%'
+            UNION ALL SELECT tenant_id FROM app.client_invoices WHERE id::text LIKE '11000000-0000-4000-8000-%'
+            UNION ALL SELECT tenant_id FROM app.vendor_bills WHERE id::text LIKE '11000000-0000-4000-8000-%'
+          ) demo_rows WHERE tenant_id<>'10000000-0000-4000-8000-000000000100') "foreignTenantRows",
+          ((SELECT count(*) FROM app.client_invoices WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND total_minor<>taxable_minor+tax_minor)
+            +(SELECT count(*) FROM app.vendor_bills WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND payable_minor<>taxable_minor+gst_minor-tds_minor-deduction_minor-advance_minor))::int "financialMismatchRows",
+          ((SELECT count(*) FROM app.indents WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND (requested_vehicles<=0 OR quantity_milli<=0))
+            +(SELECT count(*) FROM app.allocations WHERE tenant_id='10000000-0000-4000-8000-000000000100' AND allotted_vehicles<=0))::int "invalidQuantityRows"
+      `),
+    );
+    expect(counts).toMatchObject({
+      ...DEMO_SHOWCASE_MANIFEST,
+      foreignTenantRows: 0,
+      financialMismatchRows: 0,
+      invalidQuantityRows: 0,
     });
   });
 
@@ -96,7 +155,7 @@ describe.skipIf(!databaseUrl)("demo data bootstrap", () => {
       `),
     );
     expect(result).toMatchObject({
-      internal_links: 3,
+      internal_links: 6,
       external_employee_links: 0,
       driver_links: 1,
     });

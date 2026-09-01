@@ -1,6 +1,8 @@
 .page {
   display: grid;
   gap: 1.25rem;
+  width: 100%;
+  min-width: 0;
 }
 .hero {
   display: flex;
@@ -15,6 +17,7 @@
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  max-width: 100%;
 }
 .tab {
   border: 1px solid var(--border);
@@ -33,6 +36,7 @@
   border-radius: 14px;
   background: var(--surface);
   padding: 1rem;
+  min-width: 0;
 }
 .metric strong {
   font-size: 1.8rem;
@@ -40,7 +44,7 @@
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: 1rem;
 }
 .dashboardGrid {
@@ -64,7 +68,12 @@
   font-weight: 700;
 }
 .tableWrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .table {
   width: 100%;
@@ -225,23 +234,49 @@
   color: #067647;
   background: #ecfdf3;
 }
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  background: rgb(16 24 40 / 62%);
-}
 .dialog {
-  width: min(680px, 100%);
-  max-height: calc(100vh - 2rem);
-  overflow: auto;
+  width: min(42.5rem, 100%);
+}
+.dialog > .panelHeading {
+  position: sticky;
+  top: -1.5rem;
+  z-index: 2;
+  margin: -1.5rem -1.5rem 1rem;
+  padding: 1rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.mobileCards {
+  display: none;
+}
+.recordCard {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
-  padding: 1rem;
-  box-shadow: 0 24px 64px rgb(16 24 40 / 30%);
+}
+.recordCard dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+.recordCard dl > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 42%) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.recordCard dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.recordCard dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 720px) {
   .hero {
@@ -255,5 +290,65 @@
   }
   .table {
     min-width: 560px;
+  }
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    overscroll-behavior-inline: contain;
+  }
+  .tab,
+  .tabs a {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .filters,
+  .formGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .desktopTable {
+    display: none;
+  }
+  .mobileCards {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .hero,
+  .hero > * {
+    min-width: 0;
+  }
+  .panelHeading {
+    align-items: flex-start;
+  }
+  .dialog > .panelHeading {
+    top: -1rem;
+    margin: -1rem -1rem 1rem;
+    padding-inline: 1rem;
+  }
+  .dialog .form,
+  .dialog .form > * {
+    min-width: 0;
+  }
+}
+@media (max-width: 380px) {
+  .metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .metric strong {
+    font-size: 1.5rem;
+  }
+  .recordCard dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.1rem;
+  }
+  .recordCard .actions {
+    display: grid;
+  }
+  .recordCard .actions button,
+  .recordCard .actions a {
+    width: 100%;
   }
 }
