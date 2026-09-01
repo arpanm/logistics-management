@@ -739,10 +739,24 @@ export async function seedDemoProfile(
         );
         assertDemoProfileTenantCollision(profile, existingTenant[0]);
         if (profile.adoptExistingTenant && existingTenant[0]) {
-          const adoption = profile.adoptExistingTenant;
-          const [adoptionState] = await tx.$queryRaw<
-            Array<{ exactMatch: boolean }>
+          const [completedAdoption] = await tx.$queryRaw<
+            Array<{ complete: boolean }>
           >`
+            SELECT EXISTS(
+              SELECT 1 FROM app.demo_bootstrap_runs
+              WHERE tenant_id=${tenantId}::uuid
+                AND dataset=${profile.dataset}
+                AND dataset_version=${profile.datasetVersion}
+                AND content_hash=${profile.contentHash}
+            ) complete
+          `;
+          if (completedAdoption?.complete) {
+            // A matching immutable marker proves the expanded graph was already adopted.
+          } else {
+            const adoption = profile.adoptExistingTenant;
+            const [adoptionState] = await tx.$queryRaw<
+              Array<{ exactMatch: boolean }>
+            >`
             SELECT
               (SELECT count(*)=1 FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid) AND
               EXISTS(SELECT 1 FROM app.legal_entities WHERE tenant_id=${tenantId}::uuid AND id=${adoption.legalEntityId}::uuid) AND
@@ -757,10 +771,11 @@ export async function seedDemoProfile(
               EXISTS(SELECT 1 FROM app.employees WHERE tenant_id=${tenantId}::uuid AND id=${adoption.ownerEmployeeId}::uuid AND employee_code='OWNER-JG' AND linked_membership_id=${adoption.ownerMembershipId}::uuid)
               AS "exactMatch"
           `;
-          assertDemoProfileAdoptionState(
-            profile,
-            adoptionState?.exactMatch === true,
-          );
+            assertDemoProfileAdoptionState(
+              profile,
+              adoptionState?.exactMatch === true,
+            );
+          }
         }
 
         let rotated = false;
