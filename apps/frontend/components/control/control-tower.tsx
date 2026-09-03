@@ -191,6 +191,31 @@ const moneyKeys = new Set([
 ]);
 const percentKeys = new Set(["fillRate", "closureRate"]);
 
+function kpiTone(key: string) {
+  if (["green", "received", "paid", "closureRate", "fillRate"].includes(key))
+    return "success" as const;
+  if (
+    ["yellow", "awaiting", "pendingCurrent", "approvalPending", "due"].includes(
+      key,
+    )
+  )
+    return "warning" as const;
+  if (
+    [
+      "red",
+      "pendingPrior",
+      "over45Count",
+      "over45Minor",
+      "delayed",
+      "paymentBlocked",
+      "disputed",
+      "overdue",
+    ].includes(key)
+  )
+    return "danger" as const;
+  return "accent" as const;
+}
+
 function money(minor: unknown, currency = "INR", locale = "en-IN") {
   if (minor === "••••") return "••••";
   const value = minorValue(minor);
@@ -1018,6 +1043,7 @@ export function ControlTower() {
                       ? "Open exact matching records"
                       : "Summary metric"
                   }
+                  tone={kpiTone(key)}
                   selected={selectedKpi === key}
                   onClick={
                     data.kpiActions[key] ? () => drillKpi(key) : undefined

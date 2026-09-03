@@ -78,3 +78,84 @@ describe("BUG-CTL-027 request-scoped Control Tower rendering", () => {
     );
   });
 });
+
+describe("UI-03 / CTL-01 operations-console presentation contract", () => {
+  it("keeps the shared dark palette, square tabs, and semantic KPI rails explicit", () => {
+    const globalCss = readFileSync(
+      new URL("../../app/styles.css", import.meta.url),
+      "utf8",
+    );
+    const primitives = readFileSync(
+      new URL("../ui/primitives.tsx", import.meta.url),
+      "utf8",
+    );
+    const controlTower = readFileSync(
+      new URL("./control-tower.tsx", import.meta.url),
+      "utf8",
+    );
+    const finalCascadeMarker = "/* Final UI-03 cascade";
+    const finalCascadeIndex = globalCss.lastIndexOf(finalCascadeMarker);
+    const finalCascade = globalCss.slice(finalCascadeIndex);
+
+    expect(finalCascadeIndex).toBeGreaterThan(0);
+    expect(globalCss.indexOf("@import url(")).toBe(0);
+    expect(globalCss).toContain("family=Barlow+Condensed:wght@500;600;700");
+    expect(globalCss).toContain("family=IBM+Plex+Mono:wght@400;500;600");
+    expect(globalCss).toContain("family=IBM+Plex+Sans:wght@400;500;600");
+    expect(globalCss).toContain("color-scheme: dark");
+    expect(globalCss).toContain("--bg: #080d18");
+    expect(globalCss).toContain("--surface: #0f1728");
+    expect(globalCss).toContain("--surface-muted: #141e33");
+    expect(globalCss).toContain("--line: #22304c");
+    expect(globalCss).toContain("--ink: #e8eef9");
+    expect(globalCss).toContain("--dim: #788daa");
+    expect(globalCss).toContain(
+      '--font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif',
+    );
+    expect(globalCss).toContain(
+      '--font-display: "Barlow Condensed", "Oswald", Impact, sans-serif',
+    );
+    expect(finalCascade).toContain(".ui-metric-card::before");
+    expect(finalCascade).toContain(".ui-tone-success");
+    expect(finalCascade).toContain(".ui-tone-warning");
+    expect(finalCascade).toContain(".ui-tone-danger");
+    expect(finalCascade).toMatch(/\.ui-tabs\s*\{[\s\S]*?border-radius:\s*0;/);
+    expect(finalCascade).toMatch(
+      /input,\s*\nselect,\s*\ntextarea,[\s\S]*?color: var\(--ink\);[\s\S]*?background: var\(--surface\);/,
+    );
+    expect(finalCascade).toMatch(
+      /\.safe-json,[\s\S]*?color: var\(--ink\);[\s\S]*?background: rgb\(8 13 24 \/ 0\.72\);/,
+    );
+    expect(finalCascade).toMatch(
+      /\.auth-page\s*\{[\s\S]*?var\(--bg\);[\s\S]*?\.auth-card\s*\{[\s\S]*?var\(--surface-muted\), var\(--surface\)/,
+    );
+    expect(finalCascade).toMatch(
+      /\.success,[\s\S]*?color: #8be9ad;[\s\S]*?\.error,[\s\S]*?color: #ff9ca0;[\s\S]*?\.field-error\s*\{\s*color: #ff9ca0;/,
+    );
+    expect(finalCascade).toMatch(
+      /\.form-feedback-popover\s*\{[\s\S]*?color: var\(--ink\);[\s\S]*?background: var\(--surface-raised\);/,
+    );
+    expect(primitives).toContain("ui-tone-${tone}");
+    expect(controlTower).toContain("tone={kpiTone(key)}");
+  });
+
+  it("preserves dense Control Tower tables, vendor rails, and mobile card fallbacks", () => {
+    const moduleCss = readFileSync(
+      new URL("./control-tower.module.css", import.meta.url),
+      "utf8",
+    );
+
+    expect(moduleCss).toContain("CTL-01 operations-console skin");
+    expect(moduleCss).toContain(".vendor::before");
+    expect(moduleCss).toMatch(
+      /\.table th,\s*\n\.table td\s*\{[\s\S]*?0\.48rem/,
+    );
+    expect(moduleCss).toContain("font-family: var(--font-mono)");
+    expect(moduleCss).toMatch(
+      /@media \(max-width: 767px\)[\s\S]*\.recordCards\s*\{\s*display: grid;/,
+    );
+    expect(moduleCss).toMatch(
+      /\.recordCards ~ \.tableWrap\s*\{\s*display: none;/,
+    );
+  });
+});

@@ -243,12 +243,14 @@ export function MetricCard({
   value,
   help,
   selected = false,
+  tone = "accent",
   onClick,
 }: {
   label: ReactNode;
   value: ReactNode;
   help?: ReactNode;
   selected?: boolean;
+  tone?: "accent" | "success" | "warning" | "danger" | "neutral";
   onClick?: () => void;
 }) {
   const content = (
@@ -261,14 +263,14 @@ export function MetricCard({
   return onClick ? (
     <button
       type="button"
-      className="ui-metric-card"
+      className={`ui-metric-card ui-tone-${tone}`}
       aria-pressed={selected}
       onClick={onClick}
     >
       {content}
     </button>
   ) : (
-    <article className="ui-metric-card">{content}</article>
+    <article className={`ui-metric-card ui-tone-${tone}`}>{content}</article>
   );
 }
 

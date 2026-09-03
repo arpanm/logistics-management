@@ -6,14 +6,16 @@
 ## Delivered
 
 - Token-driven responsive application shell with capability-aware desktop navigation and an accessible compact/mobile drawer.
+- Prototype-derived dark operations-console presentation across the shell, forms, tables, tabs, cards and dialogs, with cyan focus/accent, condensed uppercase operational labels, monospaced values and semantic KPI rails.
 - Overflow-safe responsive foundations for labels, controls, cards, tables, actions and reports.
-- Control Tower keyboard tabs, URL state, bounded server pagination, desktop table/mobile record-card presentation, explicit refresh/stale/error handling, and source-record drill paths.
+- Control Tower keyboard tabs, URL state, bounded server pagination, compact dark KPI/client/vendor/register surfaces, desktop table/mobile record-card presentation, explicit refresh/stale/error handling, and source-record drill paths.
 - Additive deterministic demo dataset `2026.09.2` with materially broader masters, operations, POD, finance, alerts and five-lens reporting data.
 - Focused Playwright and database assertions authored without mocks.
 
 ## Evidence state
 
 - `tests/e2e/control-tower-workbench.spec.ts`: `UIM-E2E-001`–`003` — Implemented / Not Run.
+- `apps/frontend/components/control/control-tower.test.ts`: `UI-03 / CTL-01 operations-console presentation contract` — Implemented / Not Run.
 - `apps/backend/src/modules/control/workbench.service.test.ts`: `UI01-CTL-CONTRACT-001` — Implemented / Not Run.
 - `apps/backend/test/control-workbench.integration.test.ts`: `CTL-DB-01`–`03` — Implemented / Not Run.
 - `apps/backend/test/responsive-workbenches.contract.test.ts`: responsive/modal/idempotency contracts — Implemented / Not Run.

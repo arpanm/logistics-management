@@ -513,3 +513,290 @@
     animation: none;
   }
 }
+
+/* CTL-01 operations-console skin. Layout semantics remain owned by the
+   component; these rules only increase information density and visual parity
+   with the approved Control Tower prototype. */
+.page {
+  gap: 0.85rem;
+}
+.head {
+  padding: 0.2rem 0 0.65rem;
+  border-bottom: 1px solid var(--line);
+}
+.head h1 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 3vw, 2.3rem);
+  font-stretch: condensed;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.head p,
+.guidance,
+.freshness {
+  color: var(--muted);
+}
+.actions button,
+.actions a,
+.crumbs button {
+  min-height: 2.35rem;
+  padding: 0.42rem 0.68rem;
+}
+.panel,
+.client,
+.vendor,
+.recordCard,
+.pagination {
+  color: var(--ink);
+  border-color: var(--line);
+  border-radius: 0.55rem;
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18);
+}
+.panel {
+  padding: 0.85rem;
+}
+.lensIntro h2,
+.sectionHead h2,
+.cardHead h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+.guidance {
+  border-left-width: 2px;
+  background: rgb(90 200 232 / 0.04);
+  padding: 0.45rem 0.65rem;
+}
+.metrics {
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.45rem;
+}
+.metrics :global(.ui-metric-card) {
+  min-height: 5.25rem;
+}
+.toolbar {
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: rgb(8 13 24 / 0.48);
+}
+.toolbar label {
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 0.69rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.toolbar input,
+.toolbar select,
+.saveForm input {
+  min-height: 2.45rem;
+}
+.freshness {
+  width: fit-content;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgb(8 13 24 / 0.56);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.freshDot {
+  width: 0.48rem;
+  height: 0.48rem;
+}
+.live {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgb(49 197 110 / 0.15);
+}
+.delayed {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px rgb(245 179 43 / 0.15);
+}
+.status {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.GREEN {
+  color: #6ee79b;
+  border-color: rgb(49 197 110 / 0.45);
+  background: rgb(49 197 110 / 0.1);
+}
+.YELLOW {
+  color: #ffd166;
+  border-color: rgb(245 179 43 / 0.45);
+  background: rgb(245 179 43 / 0.1);
+}
+.RED {
+  color: #ff878b;
+  border-color: rgb(240 66 72 / 0.48);
+  background: rgb(240 66 72 / 0.1);
+}
+.clients {
+  gap: 0.5rem;
+}
+.client,
+.vendor {
+  padding: 0.78rem;
+}
+.client {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.client:hover,
+.client:focus-visible,
+.ageing button:hover,
+.ageing button:focus-visible {
+  color: var(--ink);
+  border-color: var(--primary);
+  background: #16233a;
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.cardStats,
+.vendor dt,
+.recordCard dt,
+.ageing small {
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.strip {
+  height: 0.22rem;
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    var(--success) var(--green),
+    var(--warning) var(--green),
+    var(--warning) calc(var(--green) + var(--yellow)),
+    var(--danger) 0
+  );
+}
+.tableWrap {
+  border-color: var(--line);
+  border-radius: 0.45rem;
+  background: var(--surface);
+}
+.table th,
+.table td {
+  padding: 0.48rem 0.58rem;
+  border-color: var(--line);
+}
+.table th {
+  color: var(--muted);
+  background: #141e33;
+  font-family: var(--font-display);
+  font-size: 0.67rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.table td {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.table tbody tr:hover {
+  background: rgb(90 200 232 / 0.055);
+}
+.vendors {
+  gap: 0.5rem;
+}
+.vendor {
+  position: relative;
+  overflow: hidden;
+}
+.vendor::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--primary);
+  content: "";
+}
+.vendor dl {
+  gap: 0.3rem;
+  margin: 0.55rem 0;
+}
+.vendor dl div {
+  border: 1px solid var(--line);
+  border-radius: 0.3rem;
+  background: rgb(8 13 24 / 0.68);
+  padding: 0.42rem;
+}
+.vendor dd,
+.ageing strong,
+.money,
+.recordCard dd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.vendor dd {
+  color: var(--primary);
+  font-size: 1rem;
+}
+.ageing {
+  gap: 0.45rem;
+}
+.ageing button {
+  border-radius: 0.4rem;
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+  padding: 0.65rem;
+}
+.activeFilters span {
+  color: var(--muted);
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.recordCard {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.staleNotice {
+  color: #ffd166;
+  border-color: rgb(245 179 43 / 0.5);
+  background: rgb(245 179 43 / 0.09);
+}
+.loading span {
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: linear-gradient(
+    90deg,
+    var(--surface) 0%,
+    var(--surface-muted) 50%,
+    var(--surface) 100%
+  );
+  background-size: 200% 100%;
+}
+
+@media (max-width: 767px) {
+  .head {
+    gap: 0.6rem;
+  }
+  .panel,
+  .client,
+  .vendor,
+  .recordCard,
+  .pagination {
+    border-radius: 0.45rem;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .recordCards {
+    display: grid;
+  }
+  .recordCards ~ .tableWrap {
+    display: none;
+  }
+}
