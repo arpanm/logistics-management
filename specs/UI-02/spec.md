@@ -49,7 +49,8 @@ Repeated feature-local form, modal, detail, tab, metric, and report patterns fai
 4. Reconciliation states and KPI cards are selectable filters with pressed state, result count, and an All/reset control.
 5. Details use human labels, localized dates, semantic statuses, Yes/No booleans, secondary identifiers, and structured nested sections—never raw JSON.
 6. Dense tabs use a shared contained/pill treatment with owned horizontal scrolling and keyboard tab semantics.
-7. Control Tower follows hero/freshness, lens tabs, metrics, filters, drill context, then responsive portfolios/locations/records.
+7. Control Tower preserves the prototype's command hierarchy while removing mobile dead space: compact command header and actions, lens tabs, freshness/KPIs, an expandable filter region, drill context, then responsive portfolios/locations/records.
+8. A portfolio card presents a stable scan path: monogram; full-width name and location/record count; top-right named ageing state; one server-projected traffic signal per scoped location; then a dashed footer with green/yellow/red totals and fill or open value.
 
 ### Validation, loading, empty, error, retry, and stale states
 
@@ -58,6 +59,8 @@ Errors remain within the active sheet or panel with field/correlation context. C
 ### Responsive and accessibility behavior
 
 Required viewports are 320, 390, 768, and 1440 CSS px plus 200% text resize. There is no document-level horizontal scrolling. Controls are at least 44 CSS px, labels break only at word boundaries, dialogs support Escape/backdrop dismissal and focus restoration, tabs implement roving keyboard focus, and status/filter changes are announced.
+
+At compact widths the filter region is collapsed by default and exposes its active-filter count in the disclosure label. Pause/resume, save-view, and export remain individually named controls in one compact action row; visible icon treatment never replaces accessible names. Lens guidance is concise and the KPI grid uses reduced vertical padding so a user reaches portfolio cards without traversing multiple screens of controls.
 
 ## Data model and migration
 
@@ -85,15 +88,16 @@ No new sensitive logging. Client boundaries must not stringify arbitrary payload
 
 ## Lightweight acceptance notes
 
-| Acceptance criterion                            | Design section                | Planned test IDs                                            |
-| ----------------------------------------------- | ----------------------------- | ----------------------------------------------------------- |
-| Shared primitives and readable responsive forms | UX flow                       | UI02-OPS-001, UI02-FIN-002, UI02-SHEET-003, UI02-SHARED-012 |
-| Interactive reconciliation                      | Reports                       | UI02-REC-004, UI02-REC-018                                  |
-| Structured details without raw JSON             | UX flow                       | UI02-DETAIL-005                                             |
-| Accessible contained tabs                       | Responsive behavior           | UI02-TABS-006, UI02-A11Y-014                                |
-| User directory is list-first                    | Primary flow                  | UI02-USERS-007                                              |
-| Stable, readable Control Tower                  | Primary flow and calculations | UI02-CTL-008 through UI02-CTL-011                           |
-| Authorization, validation, idempotency          | Security/error states         | UI02-AUTH-015 through UI02-IDEM-017                         |
+| Acceptance criterion                                 | Design section                | Planned test IDs                                            |
+| ---------------------------------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| Shared primitives and readable responsive forms      | UX flow                       | UI02-OPS-001, UI02-FIN-002, UI02-SHEET-003, UI02-SHARED-012 |
+| Interactive reconciliation                           | Reports                       | UI02-REC-004, UI02-REC-018                                  |
+| Structured details without raw JSON                  | UX flow                       | UI02-DETAIL-005                                             |
+| Accessible contained tabs                            | Responsive behavior           | UI02-TABS-006, UI02-A11Y-014                                |
+| User directory is list-first                         | Primary flow                  | UI02-USERS-007                                              |
+| Stable, readable Control Tower                       | Primary flow and calculations | UI02-CTL-008 through UI02-CTL-011                           |
+| Prototype-aligned portfolio cards and mobile density | Primary and responsive flows  | UI02-CTL-020, UI02-CTL-021                                  |
+| Authorization, validation, idempotency               | Security/error states         | UI02-AUTH-015 through UI02-IDEM-017                         |
 
 ## Open decisions
 

@@ -20,6 +20,38 @@ describe("UI01-CTL-CONTRACT-001 control query contract", () => {
     expect(source).toContain("FROM summary");
   });
 
+  it("projects one canonical traffic signal per scoped portfolio location", () => {
+    const source = readFileSync(
+      new URL("./workbench.service.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      "jsonb_build_object('id',signal.\"locationId\",'name',signal.location,'colour',signal.colour)",
+    );
+    expect(source).toContain(
+      "CASE WHEN bool_or(scoped.colour='RED') THEN 'RED' WHEN bool_or(scoped.colour='YELLOW') THEN 'YELLOW' ELSE 'GREEN' END colour",
+    );
+    expect(source).toContain(
+      'WHERE scoped.\"clientId\"=f.\"clientId\" GROUP BY scoped.\"locationId\"',
+    );
+  });
+
+  it("uses actual-or-current placement variance for the 24/48 hour bands", () => {
+    const source = readFileSync(
+      new URL("./workbench.service.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      "coalesce(assets.\"placedAt\",$4::timestamptz)-i.committed_placement_at<=interval '24 hours'",
+    );
+    expect(source).toContain(
+      "coalesce(assets.\"placedAt\",$4::timestamptz)-i.committed_placement_at<=interval '48 hours'",
+    );
+    expect(source).not.toContain(
+      "CASE WHEN supply.placed>=i.requested_vehicles THEN 'GREEN'",
+    );
+  });
+
   it("preaggregates placement quantities separately from assignment assets", () => {
     const source = readFileSync(
       new URL("./workbench.service.ts", import.meta.url),

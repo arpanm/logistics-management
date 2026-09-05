@@ -1,4 +1,5 @@
-import { redirect } from "next/navigation";
+import { SessionLanding } from "../components/session-landing";
+
 export default function Home() {
-  redirect("/login");
+  return <SessionLanding />;
 }

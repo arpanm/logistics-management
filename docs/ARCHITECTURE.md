@@ -13,6 +13,7 @@ The application begins as a modular backend with clear domain boundaries. No Red
 ```mermaid
 flowchart LR
     U["Internal and external users"] --> F["Next.js frontend"]
+    W["Signed WhatsApp provider webhook"] --> B
     F --> B["NestJS backend"]
     E["Approved external APIs and imports"] --> B
     B --> A["Application services and authorization"]
@@ -67,9 +68,33 @@ specs/
 - Alerts and work queues
 - Control-tower reporting
 - Imports, exports, integrations, and notifications
+- Conversational channels, typed proposals, and verified channel bindings
 - Audit, comments, and approvals
 
 Modules own their writes. Cross-module reads use published query services or reporting projections. Events, idempotency keys, scheduled work, and delivery attempts are persisted in PostgreSQL. Until another infrastructure decision is approved, background work runs within the backend deployment and uses PostgreSQL locking/leases for coordination.
+
+## Conversational operations
+
+INT-02 uses one channel-neutral orchestration path for authenticated web chat and verified WhatsApp input:
+
+```mermaid
+flowchart LR
+    I["Session or signed channel binding"] --> N["Untrusted text/file normalization"]
+    N --> R["Closed intent and command registry"]
+    R --> V["Strict schema and scoped reference resolution"]
+    V --> P["Expiring typed proposal"]
+    P --> C["Explicit confirmation and re-authorization"]
+    C --> S["Existing application service"]
+    S --> A["Canonical record, audit and idempotency evidence"]
+    S --> O["PostgreSQL delivery lease/outbox"]
+    O --> W["Transactional reply or approved alert template"]
+```
+
+The parser may suggest only a registered intent and structured fields. It cannot select the actor, tenant, capability, SQL, URL or service method. Browser identity comes from the existing session and CSRF/origin protections. WhatsApp identity requires raw-body signature verification and a short-lived challenge created by an authenticated tenant member; address lookup uses an HMAC and the recoverable address is encrypted at rest. Multi-membership ambiguity never selects a tenant automatically.
+
+Every mutation is represented as an expiring proposal. Confirmation rechecks membership, capability, scope, target state and optimistic version immediately before the registered handler calls the existing application service. Approval handlers additionally enforce role, expiry and maker-checker segregation; money is normalized to integer minor units. Scoped reference/status/insight reads use a closed parameterized registry and never free-form model-generated SQL. Provider event IDs and confirmation keys produce one logical effect under retries.
+
+Files remain in PostgreSQL behind the current bounded storage abstractions: tabular data follows DAT-01 preview/commit, while governed documents retain quarantine/scan state. WhatsApp media metadata is fetched from the configured Graph endpoint and bytes only from allow-listed provider HTTPS hosts. Transactional replies and consented approved-template alerts use PostgreSQL leases, append-only attempts, bounded retry and dead-letter state. Delivery rechecks membership/capability, observes tenant-timezone quiet hours, and never turns a transactional conversation into proactive consent. No model or messaging adapter introduces a separate database, queue, worker or object-store deployment.
 
 ## Data and isolation
 

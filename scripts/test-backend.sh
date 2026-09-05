@@ -49,3 +49,7 @@ pnpm --filter @logistics/backend exec vitest run test/control-governance-workben
 pnpm --filter @logistics/db run db:reset:test
 pnpm --filter @logistics/db run db:seed
 pnpm --filter @logistics/backend exec vitest run test/control-workbench.integration.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/db run db:reset:test
+pnpm --filter @logistics/db run db:seed
+pnpm --filter @logistics/backend exec vitest run test/conversation-security.integration.test.ts --maxWorkers=1 --no-file-parallelism
+pnpm --filter @logistics/backend exec vitest run src/modules/conversation --maxWorkers=1 --no-file-parallelism

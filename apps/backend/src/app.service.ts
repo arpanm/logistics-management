@@ -14,7 +14,7 @@ import {
   withTenant,
 } from "@logistics/db";
 import { isRequestOriginAllowed, loadConfig } from "@logistics/config";
-import type { SessionActor } from "@logistics/auth";
+import { portalHome, type SessionActor } from "@logistics/auth";
 import type { TenantCreateInput } from "@logistics/domain";
 import { sealOwnerInvitationToken } from "./invitation-token-envelope.js";
 
@@ -565,11 +565,12 @@ export class AppService implements OnModuleDestroy {
         return { invalidCredentials: true } as const;
       }
       let activeTenantId: string | null = null;
+      let home = "/platform/tenants";
       let mfaRequired = false;
       let mfaEnrolled = false;
       if (!Boolean(user.platformAdmin)) {
         const memberships = await tx.$queryRawUnsafe<Array<Row>>(
-          `SELECT t.id,t.code,t.name FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id WHERE m.user_id=$1::uuid AND m.status='ACTIVE' AND t.status='ACTIVE' ORDER BY t.name`,
+          `SELECT t.id,t.code,t.name,m.portal_audience AS "portalAudience" FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id WHERE m.user_id=$1::uuid AND m.status='ACTIVE' AND t.status='ACTIVE' ORDER BY t.name`,
           String(user.id),
         );
         const chosen = tenantCode
@@ -593,6 +594,12 @@ export class AppService implements OnModuleDestroy {
             },
           };
         activeTenantId = chosen ? String(chosen.id) : null;
+        const audience = String(chosen?.portalAudience ?? "INTERNAL") as
+          | "INTERNAL"
+          | "VENDOR"
+          | "DRIVER"
+          | "CLIENT";
+        home = audience === "INTERNAL" ? "/app" : portalHome(audience);
         if (activeTenantId) {
           const mfa = await tx.$queryRawUnsafe<Array<Row>>(
             `SELECT coalesce((SELECT value->>'mfaPolicy' FROM app.tenant_configuration WHERE tenant_id=$1::uuid AND namespace='security'),'OFF') policy,
@@ -635,6 +642,7 @@ export class AppService implements OnModuleDestroy {
           platformAdmin: Boolean(user.platformAdmin),
         },
         activeTenantId,
+        home,
         mfaRequired,
         mfaEnrolled,
       };
@@ -1022,8 +1030,11 @@ export class AppService implements OnModuleDestroy {
   async me(actor: SessionActor) {
     return withPlatform(this.db, async (tx) => {
       const rows = await tx.$queryRawUnsafe<Array<Row>>(
-        `SELECT t.id,t.code,t.name,t.short_name AS "shortName",t.primary_color AS "primaryColor",t.accent_color AS "accentColor" FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id WHERE m.user_id=$1::uuid AND m.status='ACTIVE' AND t.status='ACTIVE' ORDER BY t.name`,
+        `SELECT t.id,t.code,t.name,t.short_name AS "shortName",t.primary_color AS "primaryColor",t.accent_color AS "accentColor",m.id AS "membershipId",m.portal_audience AS "portalAudience" FROM app.tenant_memberships m JOIN app.tenants t ON t.id=m.tenant_id WHERE m.user_id=$1::uuid AND m.status='ACTIVE' AND t.status='ACTIVE' ORDER BY t.name`,
         actor.userId,
+      );
+      const activeMembership = rows.find(
+        (row) => String(row.membershipId) === String(actor.membershipId),
       );
       return {
         user: {
@@ -1032,6 +1043,17 @@ export class AppService implements OnModuleDestroy {
           platformAdmin: actor.platformAdmin,
         },
         activeTenantId: actor.activeTenantId,
+        home: actor.platformAdmin
+          ? "/platform/tenants"
+          : String(activeMembership?.portalAudience ?? "INTERNAL") ===
+              "INTERNAL"
+            ? "/app"
+            : portalHome(
+                String(activeMembership?.portalAudience) as
+                  | "VENDOR"
+                  | "DRIVER"
+                  | "CLIENT",
+              ),
         contextVersion: actor.contextVersion,
         csrfToken: undefined,
         memberships: rows,
@@ -3194,6 +3216,27 @@ export class AppService implements OnModuleDestroy {
     idempotencyKey: string,
   ) {
     const tenantId = this.requireTenant(actor);
+    return withTenant(this.db, tenantId, (tx) =>
+      this.createProbeInTransaction(
+        tx,
+        actor,
+        label,
+        note,
+        correlationId,
+        idempotencyKey,
+      ),
+    );
+  }
+
+  async createProbeInTransaction(
+    tx: Prisma.TransactionClient,
+    actor: SessionActor,
+    label: string,
+    note: string,
+    correlationId: string,
+    idempotencyKey: string,
+  ) {
+    const tenantId = this.requireTenant(actor);
     if (
       !idempotencyKey ||
       idempotencyKey.length < 8 ||
@@ -3206,7 +3249,7 @@ export class AppService implements OnModuleDestroy {
       );
     const keyHash = hash(idempotencyKey);
     const requestHash = hash(JSON.stringify({ label, note }));
-    return withTenant(this.db, tenantId, async (tx) => {
+    return (async () => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
         `${actor.userId}:probe.create:${keyHash}`,
@@ -3271,7 +3314,7 @@ export class AppService implements OnModuleDestroy {
         JSON.stringify(probe),
       );
       return probe;
-    });
+    })();
   }
   async getProbe(actor: SessionActor, id: string) {
     const tenantId = this.requireTenant(actor);
@@ -3305,7 +3348,20 @@ export class AppService implements OnModuleDestroy {
     correlationId: string,
   ) {
     const tenantId = this.requireTenant(actor);
-    return withTenant(this.db, tenantId, async (tx) => {
+    return withTenant(this.db, tenantId, (tx) =>
+      this.updateProbeInTransaction(tx, actor, id, input, correlationId),
+    );
+  }
+
+  async updateProbeInTransaction(
+    tx: Prisma.TransactionClient,
+    actor: SessionActor,
+    id: string,
+    input: { label?: string; note?: string; expectedVersion: number },
+    correlationId: string,
+  ) {
+    const tenantId = this.requireTenant(actor);
+    return (async () => {
       const rows = await tx.$queryRawUnsafe<Array<Row>>(
         `UPDATE app.tenant_probe_records SET label=COALESCE($1,label),note=COALESCE($2,note),updated_at=now(),version=version+1 WHERE id=$3::uuid AND version=$4 RETURNING id,label,note,version`,
         input.label ?? null,
@@ -3332,7 +3388,7 @@ export class AppService implements OnModuleDestroy {
         after: { label: rows[0].label },
       });
       return rows[0];
-    });
+    })();
   }
   async probeDocument(actor: SessionActor, id: string) {
     const tenantId = this.requireTenant(actor);
@@ -3746,7 +3802,7 @@ export class AppService implements OnModuleDestroy {
                 ? "/portal/driver"
                 : audience === "CLIENT"
                   ? "/portal/client"
-                  : "/app",
+                  : "/app/control",
         };
         return user;
       };
@@ -3762,7 +3818,7 @@ export class AppService implements OnModuleDestroy {
         membershipId: ownerMembership.id,
         email: ownerEmail,
         tenantCode,
-        home: "/app",
+        home: "/app/control",
       };
       const regional = await addActor("regional", "INTERNAL", [
         {

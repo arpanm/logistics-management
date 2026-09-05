@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ApiError } from "../api";
 import { Shell } from "../shell";
@@ -59,6 +58,12 @@ type Summary = {
   placed: number;
   valueMinor: string;
   balanceMinor: string;
+  signals?: SummarySignal[];
+};
+type SummarySignal = {
+  id: string;
+  name: string;
+  colour: Risk;
 };
 type Access = {
   lenses: Lens[];
@@ -236,6 +241,21 @@ function count(value: unknown) {
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
 }
 function normalizeSummary(value: Partial<Summary>): Summary {
+  const signals = Array.isArray(value.signals)
+    ? value.signals
+        .filter(
+          (signal): signal is SummarySignal =>
+            Boolean(signal) &&
+            typeof signal.id === "string" &&
+            typeof signal.name === "string" &&
+            ["GREEN", "YELLOW", "RED"].includes(String(signal.colour)),
+        )
+        .map((signal) => ({
+          id: signal.id,
+          name: signal.name,
+          colour: signal.colour,
+        }))
+    : [];
   return {
     id: String(value.id ?? "unknown"),
     name: String(value.name ?? "Unnamed portfolio"),
@@ -252,6 +272,7 @@ function normalizeSummary(value: Partial<Summary>): Summary {
       value.balanceMinor === "••••"
         ? "••••"
         : String(value.balanceMinor ?? "0"),
+    signals,
   };
 }
 function normalizeVendor(value: Record<string, unknown>): VendorAllocationRow {
@@ -350,6 +371,38 @@ function href(lens: Lens, row: Row) {
   return `/app/finance/vendor-bills?search=${search}`;
 }
 
+function ActionIcon({
+  name,
+}: {
+  name: "pause" | "play" | "save" | "download";
+}) {
+  const path =
+    name === "pause"
+      ? "M9 6v12M15 6v12"
+      : name === "play"
+        ? "m9 6 9 6-9 6Z"
+        : name === "save"
+          ? "M5 4h12l2 2v14H5Zm3 0v6h8V4m-8 16v-6h8v6"
+          : "M12 4v11m-4-4 4 4 4-4M5 20h14";
+  return (
+    <svg
+      className={styles.actionIcon}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d={path}
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
 export function ControlTower() {
   const [access, setAccess] = useState<Access | null>(null),
     [lens, setLens] = useState<Lens>("placement"),
@@ -372,6 +425,7 @@ export function ControlTower() {
     [client, setClient] = useState<Drill | null>(null),
     [location, setLocation] = useState<Drill | null>(null);
   const [paused, setPaused] = useState(false),
+    [filtersOpen, setFiltersOpen] = useState(false),
     [saveOpen, setSaveOpen] = useState(false),
     [viewName, setViewName] = useState(""),
     [saving, setSaving] = useState(false),
@@ -473,6 +527,15 @@ export function ControlTower() {
       locationId ? { id: locationId, name: "Shared location scope" } : null,
     );
     window.requestAnimationFrame(() => setUrlReady(true));
+  }, []);
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const syncFilterDisclosure = (matches: boolean) => setFiltersOpen(matches);
+    syncFilterDisclosure(desktop.matches);
+    const listener = (event: MediaQueryListEvent) =>
+      syncFilterDisclosure(event.matches);
+    desktop.addEventListener("change", listener);
+    return () => desktop.removeEventListener("change", listener);
   }, []);
   useEffect(() => {
     if (!urlReady) return;
@@ -684,6 +747,7 @@ export function ControlTower() {
     try {
       await api(`/control-workbench/${lens}/views`, {
         method: "POST",
+        successFeedback: "View saved.",
         body: JSON.stringify({
           name: viewName.trim(),
           filters: {
@@ -740,39 +804,60 @@ export function ControlTower() {
   const states = [
     ...new Set((data?.rows ?? []).map((row) => row.state)),
   ].sort();
+  const activeFilterCount = [
+    search,
+    colour,
+    state,
+    ageingBucket,
+    selectedView,
+    kpiPredicate,
+  ].filter(Boolean).length;
 
   return (
     <Shell>
       <div className={styles.page}>
         <header className={styles.head}>
-          <div>
+          <div className={styles.headCopy}>
             <p className="eyebrow">CTL-01 · operational command view</p>
             <h1>Control tower</h1>
-            <p className="muted">
-              Move from portfolio risk to the exact canonical record and its
-              owning workflow.
-            </p>
+            <p className={styles.headSubtitle}>Portfolio risk to workflow.</p>
           </div>
           <div className={styles.actions}>
             <button
               type="button"
+              className={styles.actionButton}
               onClick={() => setPaused((value) => !value)}
               aria-pressed={paused}
+              aria-label={paused ? "Resume live refresh" : "Pause live refresh"}
+              title={paused ? "Resume live refresh" : "Pause live refresh"}
             >
-              {paused ? "Resume live refresh" : "Pause live refresh"}
+              <ActionIcon name={paused ? "play" : "pause"} />
+              <span className={styles.actionLabel}>
+                {paused ? "Resume live refresh" : "Pause live refresh"}
+              </span>
             </button>
             <button
               type="button"
+              className={styles.actionButton}
               onClick={() => setSaveOpen((value) => !value)}
+              aria-expanded={saveOpen}
+              aria-controls="control-save-view"
+              aria-label="Save current view"
+              title="Save current view"
             >
-              Save current view
+              <ActionIcon name="save" />
+              <span className={styles.actionLabel}>Save current view</span>
             </button>
             <button
               type="button"
+              className={styles.actionButton}
               onClick={() => void exportCsv()}
               disabled={!data || initialLoading}
+              aria-label="Download matching CSV"
+              title="Download matching CSV"
             >
-              Download matching CSV
+              <ActionIcon name="download" />
+              <span className={styles.actionLabel}>Download matching CSV</span>
             </button>
           </div>
         </header>
@@ -798,151 +883,170 @@ export function ControlTower() {
         <section className={styles.lensIntro}>
           <div>
             <h2>{meta[lens].label}</h2>
-            <p>{meta[lens].description}</p>
+            <p className={styles.lensDescription}>{meta[lens].description}</p>
           </div>
-          <p className={styles.guidance}>
-            <strong>Ageing guide:</strong> {meta[lens].guidance}
-          </p>
+          <details className={styles.guidance}>
+            <summary>Ageing guide</summary>
+            <p>{meta[lens].guidance}</p>
+          </details>
         </section>
-        <section
-          className={`${styles.panel} ${styles.toolbar}`}
-          aria-label="View filters"
+        <details
+          className={`${styles.panel} ${styles.filterDisclosure}`}
+          open={filtersOpen}
+          onToggle={(event) => setFiltersOpen(event.currentTarget.open)}
         >
-          <label>
-            Search visible scope
-            <input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Client, location, reference, vehicle or vendor"
-            />
-          </label>
-          <label>
-            Traffic light
-            <select
-              value={colour}
-              onChange={(event) => {
-                setColour(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All risks</option>
-              <option value="GREEN">Green</option>
-              <option value="YELLOW">Yellow</option>
-              <option value="RED">Red</option>
-            </select>
-          </label>
-          <label>
-            Workflow status
-            <select
-              value={state}
-              onChange={(event) => {
-                setState(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All statuses</option>
-              {states.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          {(lens === "collection" || lens === "vendor-payable") && (
+          <summary className={styles.filterSummary}>
+            <span className={styles.filterSummaryText}>Search and filters</span>
+            <span className={styles.filterCount}>
+              {activeFilterCount
+                ? `${activeFilterCount} active`
+                : "Search, risk, status and sort"}
+            </span>
+          </summary>
+          <div
+            className={`${styles.toolbar} ${styles.filterBody}`}
+            id="control-view-filters"
+            aria-label="View filters"
+          >
             <label>
-              Ageing bucket
-              <select
-                value={ageingBucket}
+              Search visible scope
+              <input
+                value={search}
                 onChange={(event) => {
-                  setAgeingBucket(event.target.value);
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Client, location, reference, vehicle or vendor"
+              />
+            </label>
+            <label>
+              Traffic light
+              <select
+                value={colour}
+                onChange={(event) => {
+                  setColour(event.target.value);
                   setPage(1);
                 }}
               >
-                <option value="">All ageing</option>
-                <option value="CURRENT">0–30 days</option>
-                <option value="31_45">31–45 days</option>
-                <option value="46_90">46–90 days</option>
-                <option value="OVER_90">Beyond 90 days</option>
+                <option value="">All risks</option>
+                <option value="GREEN">Green</option>
+                <option value="YELLOW">Yellow</option>
+                <option value="RED">Red</option>
               </select>
             </label>
-          )}
-          <label>
-            Saved filter / view
-            <select
-              value={selectedView}
-              onChange={(event) => {
-                setSelectedView(event.target.value);
-                applyView(views.find((view) => view.id === event.target.value));
-              }}
-            >
-              <option value="">Select a saved view</option>
-              {views.map((view) => (
-                <option key={view.id} value={view.id}>
-                  {view.name}
-                  {view.isDefault ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Sort records
-            <select
-              value={sort}
-              onChange={(event) => {
-                setSort(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="updatedAt">Recently changed</option>
-              <option value="reference">Reference</option>
-              <option value="client">Client / vendor</option>
-              <option value="state">Workflow status</option>
-              <option value="risk">Risk</option>
-              <option value="dueAt">Critical date</option>
-              {lens !== "placement" && lens !== "trip" && (
-                <option value="value">Value</option>
-              )}
-              {(lens === "collection" || lens === "vendor-payable") && (
-                <option value="balance">Outstanding</option>
-              )}
-            </select>
-          </label>
-          <label>
-            Direction
-            <select
-              value={direction}
-              onChange={(event) => {
-                setDirection(event.target.value as "asc" | "desc");
-                setPage(1);
-              }}
-            >
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
-          </label>
-          <label>
-            Rows per page
-            <select
-              value={pageSize}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
-                setPage(1);
-              }}
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </label>
-          <button type="button" className={styles.clear} onClick={clear}>
-            Clear filters
-          </button>
-        </section>
+            <label>
+              Workflow status
+              <select
+                value={state}
+                onChange={(event) => {
+                  setState(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All statuses</option>
+                {states.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            {(lens === "collection" || lens === "vendor-payable") && (
+              <label>
+                Ageing bucket
+                <select
+                  value={ageingBucket}
+                  onChange={(event) => {
+                    setAgeingBucket(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All ageing</option>
+                  <option value="CURRENT">0–30 days</option>
+                  <option value="31_45">31–45 days</option>
+                  <option value="46_90">46–90 days</option>
+                  <option value="OVER_90">Beyond 90 days</option>
+                </select>
+              </label>
+            )}
+            <label>
+              Saved filter / view
+              <select
+                value={selectedView}
+                onChange={(event) => {
+                  setSelectedView(event.target.value);
+                  applyView(
+                    views.find((view) => view.id === event.target.value),
+                  );
+                }}
+              >
+                <option value="">Select a saved view</option>
+                {views.map((view) => (
+                  <option key={view.id} value={view.id}>
+                    {view.name}
+                    {view.isDefault ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Sort records
+              <select
+                value={sort}
+                onChange={(event) => {
+                  setSort(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="updatedAt">Recently changed</option>
+                <option value="reference">Reference</option>
+                <option value="client">Client / vendor</option>
+                <option value="state">Workflow status</option>
+                <option value="risk">Risk</option>
+                <option value="dueAt">Critical date</option>
+                {lens !== "placement" && lens !== "trip" && (
+                  <option value="value">Value</option>
+                )}
+                {(lens === "collection" || lens === "vendor-payable") && (
+                  <option value="balance">Outstanding</option>
+                )}
+              </select>
+            </label>
+            <label>
+              Direction
+              <select
+                value={direction}
+                onChange={(event) => {
+                  setDirection(event.target.value as "asc" | "desc");
+                  setPage(1);
+                }}
+              >
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+              </select>
+            </label>
+            <label>
+              Rows per page
+              <select
+                value={pageSize}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setPage(1);
+                }}
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </label>
+            <button type="button" className={styles.clear} onClick={clear}>
+              Clear filters
+            </button>
+          </div>
+        </details>
         {saveOpen && (
           <form
             className={`${styles.panel} ${styles.saveForm}`}
+            id="control-save-view"
             onSubmit={(event) => {
               event.preventDefault();
               void saveView();
@@ -1209,6 +1313,58 @@ function summaryFill(summary: Summary) {
     : 0;
 }
 
+function summaryMonogram(name: string) {
+  const ignored = new Set(["private", "limited", "ltd", "pvt", "llp"]);
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word && !ignored.has(word.toLowerCase()));
+  if (words.length === 1) return words[0]!.slice(0, 3).toUpperCase();
+  return words
+    .slice(0, 3)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+}
+
+function summaryStatusLabel(lens: Lens, risk: Risk) {
+  const labels: Record<Lens, Record<Risk, string>> = {
+    placement: {
+      GREEN: "On time",
+      YELLOW: "24–48 hrs",
+      RED: "Over 48 hrs",
+    },
+    pod: {
+      GREEN: "On track",
+      YELLOW: "8–15 days",
+      RED: "Over 15 days",
+    },
+    collection: {
+      GREEN: "Current",
+      YELLOW: "31–45 days",
+      RED: "Over 45 days",
+    },
+    trip: { GREEN: "On track", YELLOW: "At risk", RED: "Delayed" },
+    "vendor-payable": {
+      GREEN: "On track",
+      YELLOW: "Due soon",
+      RED: "Exception",
+    },
+  };
+  return labels[lens][risk];
+}
+
+function summaryRecordLabel(lens: Lens, value: number) {
+  const noun: Record<Lens, string> = {
+    placement: "indent",
+    pod: "delivery",
+    collection: "invoice",
+    trip: "trip",
+    "vendor-payable": "vendor bill",
+  };
+  return `${value} ${noun[lens]}${value === 1 ? "" : "s"}`;
+}
+
 function PortfolioBoard({
   lens,
   summaries,
@@ -1223,22 +1379,19 @@ function PortfolioBoard({
   return (
     <>
       <div className={styles.sectionHead}>
-        <div>
+        <div className={styles.portfolioTitle}>
           <h2>
             {lens === "vendor-payable"
               ? "Vendor portfolio"
               : "Client portfolio"}
           </h2>
-          <p className="muted">
-            Server-projected summaries reconcile to the current authorized
-            filters.
-          </p>
+          <p>{summaries.length} scoped portfolios</p>
         </div>
-        <span>{summaries.length} scoped portfolios</span>
       </div>
       <div className={styles.clients}>
         {summaries.map((summary) => {
           const worst = summaryRisk(summary);
+          const signals = summary.signals ?? [];
           return (
             <button
               type="button"
@@ -1246,44 +1399,72 @@ function PortfolioBoard({
               key={summary.id}
               onClick={() => onOpen({ id: summary.id, name: summary.name })}
             >
+              <span className="sr-only">
+                Open {summary.name}. {summary.locationCount ?? 0} locations.{" "}
+                {summaryRecordLabel(lens, summary.recordCount)}. Status{" "}
+                {summaryStatusLabel(lens, worst)}. Green {summary.green}, yellow{" "}
+                {summary.yellow}, red {summary.red}.
+                {signals.length
+                  ? ` Location signals: ${signals
+                      .map(
+                        (signal) =>
+                          `${signal.name}, ${summaryStatusLabel(lens, signal.colour)}`,
+                      )
+                      .join("; ")}.`
+                  : ""}
+              </span>
               <div className={styles.cardHead}>
-                <div>
-                  <h3>{summary.name}</h3>
-                  <p>
-                    {summary.locationCount ?? 0} locations ·{" "}
-                    {summary.recordCount} records
-                  </p>
+                <div className={styles.clientIdentity}>
+                  <span className={styles.clientMonogram} aria-hidden="true">
+                    {summaryMonogram(summary.name)}
+                  </span>
+                  <div className={styles.clientTitle}>
+                    <h3>{summary.name}</h3>
+                    <p className={styles.clientMeta}>
+                      {summary.locationCount ?? 0}{" "}
+                      {(summary.locationCount ?? 0) === 1
+                        ? "location"
+                        : "locations"}{" "}
+                      · {summaryRecordLabel(lens, summary.recordCount)}
+                    </p>
+                  </div>
                 </div>
                 <span className={`${styles.status} ${styles[worst]}`}>
-                  {worst}
+                  {summaryStatusLabel(lens, worst)}
                 </span>
               </div>
-              <div
-                className={styles.strip}
-                aria-label={`Green ${summary.green}, yellow ${summary.yellow}, red ${summary.red}`}
-                style={
-                  {
-                    "--green": `${summary.recordCount ? (summary.green * 100) / summary.recordCount : 0}%`,
-                    "--yellow": `${summary.recordCount ? (summary.yellow * 100) / summary.recordCount : 0}%`,
-                  } as CSSProperties
-                }
-              />
-              <div className={styles.cardStats}>
-                <span>
-                  G <b>{summary.green}</b>
-                </span>
-                <span>
-                  Y <b>{summary.yellow}</b>
-                </span>
-                <span>
-                  R <b>{summary.red}</b>
-                </span>
+              {signals.length > 0 && (
+                <div className={styles.clientDots} aria-hidden="true">
+                  {signals.map((signal) => (
+                    <span
+                      key={signal.id}
+                      className={`${styles.clientDot} ${styles[signal.colour]}`}
+                      title={`${signal.name}: ${summaryStatusLabel(lens, signal.colour)}`}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className={styles.clientFooter}>
+                <div
+                  className={styles.clientCounts}
+                  aria-label={`Green ${summary.green}, yellow ${summary.yellow}, red ${summary.red}`}
+                >
+                  <span className={styles.GREEN}>
+                    G <b>{summary.green}</b>
+                  </span>
+                  <span className={styles.YELLOW}>
+                    Y <b>{summary.yellow}</b>
+                  </span>
+                  <span className={styles.RED}>
+                    R <b>{summary.red}</b>
+                  </span>
+                </div>
                 {lens === "placement" ? (
-                  <span>
+                  <span className={styles.clientMeasure}>
                     Fill <b>{summaryFill(summary)}%</b>
                   </span>
                 ) : (
-                  <span>
+                  <span className={styles.clientMeasure}>
                     Open{" "}
                     <b>
                       {money(

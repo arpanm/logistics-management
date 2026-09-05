@@ -20,6 +20,7 @@ export default defineConfig({
     "platform-tenant-user-admin.spec.ts",
     "demo-data.spec.ts",
     "jurigari-demo.spec.ts",
+    "conversational-operations.spec.ts",
   ],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

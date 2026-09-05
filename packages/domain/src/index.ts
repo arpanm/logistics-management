@@ -1,6 +1,7 @@
 import { z } from "zod";
 export * from "./canonical.js";
 export * from "./phone.js";
+export * from "./conversation.js";
 import { e164MobileSchema } from "./phone.js";
 
 const trimmed = (min: number, max: number) =>

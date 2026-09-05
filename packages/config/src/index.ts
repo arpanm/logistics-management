@@ -34,6 +34,44 @@ const schema = z.object({
   MFA_KEY_VERSION: z.coerce.number().int().positive().default(1),
   SUPPORTED_COUNTRIES: z.string().default("AE,GB,IN,SG,US"),
   SUPPORTED_CURRENCIES: z.string().default("AED,EUR,GBP,INR,SGD,USD"),
+  CONVERSATION_INTENT_PROVIDER: z
+    .enum(["deterministic", "disabled"])
+    .default("deterministic"),
+  WHATSAPP_PROVIDER: z.enum(["disabled", "meta"]).default("disabled"),
+  WHATSAPP_APP_SECRET: z.string().default(""),
+  WHATSAPP_VERIFY_TOKEN: z.string().default(""),
+  WHATSAPP_PHONE_NUMBER_ID: z
+    .string()
+    .regex(/^[0-9]+$/)
+    .or(z.literal(""))
+    .default(""),
+  WHATSAPP_ACCESS_TOKEN: z.string().default(""),
+  WHATSAPP_GRAPH_API_VERSION: z
+    .string()
+    .regex(/^v[0-9]+\.[0-9]+$/)
+    .default("v23.0"),
+  WHATSAPP_ALERT_TEMPLATE_NAME: z
+    .string()
+    .regex(/^[a-z0-9_]+$/)
+    .default("logistics_operational_alert"),
+  WHATSAPP_TEMPLATE_LANGUAGE: z
+    .string()
+    .regex(/^[a-z]{2}(?:_[A-Z]{2})?$/)
+    .default("en"),
+  WHATSAPP_ADDRESS_ENCRYPTION_KEY: z.string().default(""),
+  WHATSAPP_ADDRESS_PEPPER: z.string().default(""),
+  WHATSAPP_DELIVERY_POLL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(5)
+    .max(300)
+    .default(15),
+  WHATSAPP_DELIVERY_MAX_ATTEMPTS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .default(5),
 });
 export type RuntimeConfig = z.infer<typeof schema>;
 
@@ -109,6 +147,36 @@ export function loadConfig(
     if (key.length !== 32)
       throw new Error(
         "EMAIL_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+      );
+  }
+  if (cfg.WHATSAPP_PROVIDER === "meta") {
+    if (cfg.WHATSAPP_APP_SECRET.length < 32)
+      throw new Error(
+        "WHATSAPP_APP_SECRET must be at least 32 characters when WhatsApp is enabled",
+      );
+    if (cfg.WHATSAPP_VERIFY_TOKEN.length < 16)
+      throw new Error(
+        "WHATSAPP_VERIFY_TOKEN must be at least 16 characters when WhatsApp is enabled",
+      );
+    if (!cfg.WHATSAPP_PHONE_NUMBER_ID)
+      throw new Error(
+        "WHATSAPP_PHONE_NUMBER_ID is required when WhatsApp is enabled",
+      );
+    if (cfg.WHATSAPP_ACCESS_TOKEN.length < 20)
+      throw new Error(
+        "WHATSAPP_ACCESS_TOKEN must be configured when WhatsApp is enabled",
+      );
+    const addressKey = Buffer.from(
+      cfg.WHATSAPP_ADDRESS_ENCRYPTION_KEY,
+      "base64",
+    );
+    if (addressKey.length !== 32)
+      throw new Error(
+        "WHATSAPP_ADDRESS_ENCRYPTION_KEY must be a base64-encoded 32-byte key when WhatsApp is enabled",
+      );
+    if (cfg.WHATSAPP_ADDRESS_PEPPER.length < 32)
+      throw new Error(
+        "WHATSAPP_ADDRESS_PEPPER must be at least 32 characters when WhatsApp is enabled",
       );
   }
   return cfg;

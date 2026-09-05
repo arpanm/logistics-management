@@ -7,6 +7,7 @@ import type { ApiError } from "../api";
 type ApiResultEvent = CustomEvent<{
   id: string;
   ok: boolean;
+  message?: string;
   error?: ApiError;
   anchor?: HTMLElement | null;
 }>;
@@ -14,6 +15,7 @@ type ApiResultEvent = CustomEvent<{
 type Feedback = {
   id: string;
   ok: boolean;
+  message?: string;
   error?: ApiError;
   anchor: HTMLElement;
   top: number;
@@ -22,9 +24,10 @@ type Feedback = {
 
 /**
  * Mutation forms predate the shared submit-result component. This bridge gives
- * every API-backed form/action immediate feedback at the initiating control,
- * including field and correlation details, while those forms are migrated to
- * fully local state at their normal maintenance boundary.
+ * API-backed forms/actions immediate error feedback at the initiating control.
+ * A success appears only when a confirmed create/update explicitly supplies a
+ * successFeedback message; authentication, reads, previews and commands do not
+ * masquerade as saved records.
  */
 export function FormFeedbackBridge() {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
@@ -110,9 +113,7 @@ export function FormFeedbackBridge() {
                 aria-live={item.ok ? "polite" : "assertive"}
                 key={item.id}
               >
-                <strong>
-                  {item.ok ? "Saved successfully." : error?.message}
-                </strong>
+                <strong>{item.ok ? item.message : error?.message}</strong>
                 {error?.fields &&
                   Object.entries(error.fields).map(([field, messages]) => (
                     <span key={field}>

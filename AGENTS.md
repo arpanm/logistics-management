@@ -10,10 +10,17 @@ Build the reusable logistics platform described in `FEATURES.md` through complet
 
 For implementation requests, use the repo-local `$feature-sdlc` skill in rapid batch mode. The normal unit of delivery is a dependency-compatible batch of related features or TODO fixes, not one agent ceremony and test cycle per feature.
 
-Default roles:
+Default role:
 
-1. `implementation_worker` — owns production code and updates automated tests without running the full suites.
-2. `reviewer` — reviews one completed batch for correctness, isolation, security, financial integrity, and obvious gaps.
+1. `implementation_worker` — owns production code and updates automated tests without running the full suites when delegation will materially shorten the batch. The primary agent may implement a small/localized change directly.
+
+Review is risk-based, not a mandatory agent ceremony:
+
+- **Fast path:** localized, reversible changes that do not alter tenant isolation, authorization decisions, financial calculations/posting, migrations, external integrations, secrets, or broad shared contracts receive a concise primary-agent diff/self-review only. Do not spawn a reviewer.
+- **Standard review:** cross-module behavior or a substantial shared UI/domain batch gets one bounded reviewer pass over the changed files and acceptance risks. Ask only for blocking/high findings unless broader review was requested.
+- **Mandatory independent review:** tenant isolation, authorization policy, financial integrity, destructive/data migration behavior, credential/secret handling, external side effects, or similarly high-risk changes require one reviewer.
+
+Escalate review when actual risk appears; do not infer high risk merely because a file is large or the repository is dirty.
 
 Use `spec_analyst`, `test_designer`, or `e2e_tester` only when the user explicitly requests them or a batch has material ambiguity or high risk that cannot be handled with lightweight acceptance notes and normal review. Parallelize independent implementation areas with explicit, non-overlapping ownership. Never let agents overwrite or revert another agent's work.
 
@@ -23,9 +30,9 @@ Use `spec_analyst`, `test_designer`, or `e2e_tester` only when the user explicit
 2. Add or update lightweight acceptance notes in existing feature specs. Create a full spec/test plan only for material ambiguity, high-risk authorization/financial behavior, or an explicit user request.
 3. Implement the batch end to end: migrations, domain logic, API, authorization, UI, audit/telemetry, affected reports/events, documentation, and automated test cases.
 4. Author or update focused unit, integration, contract, security, migration, and Playwright cases as applicable, but mark newly added or changed cases `Implemented / Not Run` until an explicit test phase executes them.
-5. Do not automatically run tests, invoke Playwright, run `make check`, or run `make verify` for each feature. If repository-owned local frontend/backend services are already running, finish the implementation batch with one `make refresh-local` so the user never receives stale UI/API artifacts; this migrates/builds/restarts without reseeding and is not a test run. If no local services are running, leave deployment explicit. Do not enter fix/retest loops unless the user asks.
-6. Review the combined batch once. Fix clear code-review blockers together without automatically running tests afterward.
-7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case lists, and documentation once for the batch. Implementation and test status must remain distinct.
+5. Do not automatically run tests, invoke Playwright, run `make check`, or run `make verify` for each feature. If runtime code changed and repository-owned local frontend/backend services are already running, finish the implementation batch with one `make refresh-local` so the user never receives stale UI/API artifacts; this migrates/builds/restarts without reseeding and is not a test run. Documentation, agent-instruction, test-only, and other non-runtime changes do not require a refresh. If no local services are running, leave deployment explicit. Do not enter fix/retest loops unless the user asks.
+6. Apply the smallest review tier justified by the change. Fast-path work gets a short self-review; standard/high-risk work gets one bounded independent review after implementation. Fix clear blockers together without starting repeated review loops. A reviewer may be asked for one short confirmation only when its original blocker required a material correction.
+7. Synchronize only trackers/specs/documentation materially affected by the batch, once. Do not churn `FEATURES.md`, `README.md`, `TODO.md`, or test plans for a purely internal/mechanical change that does not alter their truth. Implementation and test status must remain distinct.
 8. When the user explicitly requests a batch/release test phase, deploy once if needed, run the selected focused suites or full regression once, and record each result as Passing, Failing, or Blocked. Do not automatically fix or rerun failures; add them to the bug/TODO list with evidence unless asked to fix.
 9. Before a requested batch commit, run only lightweight non-test gates once: formatting, type checking, and policy/status checks. A single focused batch commit covering related IDs is allowed. Do not push unless explicitly asked.
 
@@ -39,9 +46,9 @@ A feature may be implementation-complete before its tests have been executed. Ke
 - UI is accessible, responsive, and handles loading, empty, error, and retry states.
 - Domain calculations have exact boundary tests and use exact decimal/timezone-safe handling.
 - Relevant reports reconcile with transaction detail.
-- A full deployment/Playwright result is not a prerequisite for `Implemented`. When repository-owned local services are already running, `make refresh-local` is nevertheless required before handoff to keep runtime artifacts aligned; record only build/readiness evidence, not test Passing.
+- A full deployment/Playwright result is not a prerequisite for `Implemented`. When runtime code changed and repository-owned local services are already running, `make refresh-local` is required before handoff to keep runtime artifacts aligned; documentation/process/test-only changes skip it. Record only build/readiness evidence, not test Passing.
 - No secrets, backup source artifacts, generated test output, or unrelated changes enter the commit.
-- A batch review has no unresolved blocking code finding.
+- The selected review tier has no unresolved blocking code finding.
 - Feature/test statuses, README summary, TODO queue, specs, and executable test-case status are mutually consistent. `Implemented / Not Run` is valid and must never be reported as Passing.
 
 ## Architecture invariants

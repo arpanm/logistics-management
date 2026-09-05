@@ -1440,6 +1440,7 @@ describe.sequential(
           tenantCode: "FND02-A",
         });
       expect(login.status, JSON.stringify(login.body)).toBe(200);
+      expect(login.body.home).toBe("/app");
       const cookies = login.headers["set-cookie"] as unknown as string[];
       expect(
         cookies.some(

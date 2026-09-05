@@ -176,8 +176,12 @@ export class OperationalWorkerService {
 
   private async notificationDeliveries(tx: Tx, limit: number) {
     const rows = await tx.$queryRawUnsafe<Array<Row>>(
-      `SELECT d.id,d.tenant_id AS "tenantId",d.attempts FROM app.notification_deliveries d WHERE d.state IN ('PENDING','FAILED') AND d.available_at<=now() ORDER BY d.available_at,d.id FOR UPDATE SKIP LOCKED LIMIT $1`,
+      `SELECT d.id,d.tenant_id AS "tenantId",d.attempts FROM app.notification_deliveries d
+       WHERE d.state IN ('PENDING','FAILED') AND d.available_at<=now()
+         AND NOT(d.channel='WHATSAPP' AND $2='meta')
+       ORDER BY d.available_at,d.id FOR UPDATE SKIP LOCKED LIMIT $1`,
       limit,
+      this.app.config.WHATSAPP_PROVIDER,
     );
     for (const row of rows) {
       const attempt = Number(row.attempts) + 1;

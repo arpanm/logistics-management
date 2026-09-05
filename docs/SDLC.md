@@ -11,15 +11,27 @@ flowchart LR
     B["Select dependency-compatible batch"] --> N["Lightweight acceptance notes"]
     N --> I["Parallel implementation with non-overlapping ownership"]
     I --> T["Author/update automated tests: Not Run"]
-    T --> R["One integrated batch review"]
-    R --> S["Synchronize trackers and docs once"]
-    S --> L["Refresh running local artifacts once"]
-    L --> G["One lightweight commit gate"]
-    G --> C["Optional batch commit"]
+    T --> R["Risk-based self or independent review"]
+    R --> S["Synchronize affected trackers/docs once"]
+    S -. "runtime changed + local services running" .-> L["Refresh local artifacts once"]
+    S --> H["Handoff"]
+    L --> H
+    H -. "commit requested" .-> G["One lightweight commit gate"]
+    G --> C["Batch commit"]
     C -. "explicit request only" .-> X["Deploy/test once; record pass/fail"]
 ```
 
-The default agents are implementation workers and one batch reviewer. Add a specification analyst, test designer, or E2E tester only for an explicit request or material unresolved risk. Parallel workers must own different modules/files.
+The primary agent handles small/localized work directly. Add implementation workers only when parallel, non-overlapping ownership will materially reduce elapsed time. Add a reviewer only when the standard or mandatory risk tier applies. Add a specification analyst, test designer, or E2E tester only for an explicit request or material unresolved risk.
+
+## Review tiers
+
+| Tier      | Use when                                                                                                                                                     | Review action                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Fast path | Localized and reversible UI composition, copy, CSS, documentation, configuration wiring, or mechanical changes with no protected invariant impact            | Primary agent checks the focused diff, call sites, formatting, and obvious regressions. No reviewer agent. |
+| Standard  | Substantial shared UI/domain behavior, cross-module contracts, or a batch whose interactions are not obvious from one focused diff                           | One bounded reviewer pass over named files and risks; request blocking/high findings only.                 |
+| Mandatory | Tenant isolation, authorization policy, financial posting/calculation, migrations or destructive data changes, credentials/secrets, or external side effects | One independent reviewer pass focused on the affected invariant and coverage.                              |
+
+Review tier is determined by impact, not line count. Keep review after the combined implementation, do not review every small edit, and do not repeat full reviews after each correction. One short confirmation is sufficient when a reviewer’s material blocker is fixed.
 
 ## Implementation batch
 
@@ -27,9 +39,9 @@ The default agents are implementation workers and one batch reviewer. Add a spec
 2. Inspect the working tree and list included feature/TODO IDs.
 3. Record compact acceptance notes: outcome, critical rules, dependencies, affected interfaces, and planned automated tests. Reuse existing specs instead of creating ceremony-only documents.
 4. Implement migrations, backend, frontend, authorization, audit, affected reporting/events, documentation, and automated tests together.
-5. Do not run tests, Playwright, or `make check`/`make verify` automatically per feature. Mark changed tests `Implemented / Not Run`. When repository-owned local services are already running in production-style mode, run `make refresh-local` once after the batch so migrations and all package/app artifacts are rebuilt and restarted without reseeding. `make dev` remains the hot-reload alternative.
-6. Review the integrated batch once. Resolve clear blocking findings together without automatically testing after each fix.
-7. Synchronize `FEATURES.md`, `README.md`, `TODO.md`, affected specs, test-case lists, and documentation once.
+5. Do not run tests, Playwright, or `make check`/`make verify` automatically per feature. Mark changed tests `Implemented / Not Run`. When runtime code changed and repository-owned local services are already running in production-style mode, run `make refresh-local` once after the batch so migrations and all package/app artifacts are rebuilt and restarted without reseeding. Documentation, process, agent-instruction, and test-only changes do not require a runtime refresh. `make dev` remains the hot-reload alternative.
+6. Apply the review tier once to the integrated batch. Resolve clear blockers together without automatically testing or repeating a full review after each fix.
+7. Synchronize only materially affected trackers, specs, test-case lists, and documentation once. Avoid status-file churn when their recorded truth did not change.
 8. When a commit is requested, run formatting, type checking, and policy/status checks once for the batch; inspect the cached diff and create one related Conventional Commit.
 
 ## Test status

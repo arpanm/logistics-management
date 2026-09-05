@@ -80,6 +80,37 @@ describe("BUG-CTL-027 request-scoped Control Tower rendering", () => {
 });
 
 describe("UI-03 / CTL-01 operations-console presentation contract", () => {
+  it("keeps mobile controls compact and portfolio cards faithful to the command-board hierarchy", () => {
+    const controlTower = readFileSync(
+      new URL("./control-tower.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(controlTower).toContain('window.matchMedia("(min-width: 768px)")');
+    expect(controlTower).toContain("className={styles.actionIcon}");
+    expect(controlTower).toContain('aria-label="Save current view"');
+    expect(controlTower).toContain('aria-label="Download matching CSV"');
+    expect(controlTower).toContain(
+      "className={`${styles.panel} ${styles.filterDisclosure}`}",
+    );
+    expect(controlTower).toContain("open={filtersOpen}");
+    expect(controlTower).toContain("className={styles.filterSummary}");
+    expect(controlTower).toContain("className={styles.filterBody}");
+
+    expect(controlTower).toContain("signals?: SummarySignal[]");
+    expect(controlTower).toContain("const signals = summary.signals ?? []");
+    expect(controlTower).toContain("className={styles.clientMonogram}");
+    expect(controlTower).toContain("className={styles.clientTitle}");
+    expect(controlTower).toContain("className={styles.clientMeta}");
+    expect(controlTower).toContain("className={styles.clientDots}");
+    expect(controlTower).toContain("styles[signal.colour]");
+    expect(controlTower).toContain('className="sr-only"');
+    expect(controlTower).toContain('aria-hidden="true"');
+    expect(controlTower).toContain("className={styles.clientFooter}");
+    expect(controlTower).toContain('RED: "Over 48 hrs"');
+    expect(controlTower).not.toContain('"--green"');
+  });
+
   it("keeps the shared dark palette, square tabs, and semantic KPI rails explicit", () => {
     const globalCss = readFileSync(
       new URL("../../app/styles.css", import.meta.url),

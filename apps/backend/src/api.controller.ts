@@ -255,6 +255,7 @@ export class ApiController {
       return {
         user: result.user,
         activeTenantId: result.activeTenantId,
+        home: result.home,
         contextVersion: result.contextVersion,
         mfaRequired: result.mfaRequired,
         mfaEnrolled: result.mfaEnrolled,

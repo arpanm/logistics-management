@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   capabilityAllowsAction,
+  effectiveHome,
   evaluatePolicy,
   maskSensitive,
   portalHome,
@@ -205,11 +206,33 @@ describe("FND02-U-006/FND02-U-008 preview and home", () => {
   it("is deterministic for identical policy input", () =>
     expect(evaluatePolicy(base)).toEqual(evaluatePolicy(base)));
   it.each([
-    ["INTERNAL", "/app"],
+    ["INTERNAL", "/app/control"],
     ["VENDOR", "/portal/vendor"],
     ["DRIVER", "/portal/driver"],
     ["CLIENT", "/portal/client"],
   ] as const)("resolves %s without role-name checks", (audience, home) =>
     expect(portalHome(audience)).toBe(home),
   );
+
+  it.each([
+    [["control.dashboard.read"], "/app/control"],
+    [["operations.read"], "/app/operations"],
+    [["finance.read"], "/app/finance"],
+    [["identity.user.read"], "/app/access/users"],
+    [["governance.read"], "/app/governance/policies"],
+    [["configuration.read"], "/app/configuration/settings"],
+    [["probe.read"], "/app/setup"],
+    [["operations.admin"], "/app/no-access"],
+    [[], "/app/no-access"],
+  ] as const)(
+    "selects the first permitted INTERNAL home",
+    (capabilities, home) =>
+      expect(effectiveHome("INTERNAL", capabilities)).toBe(home),
+  );
+
+  it("keeps external audiences in their dedicated portals", () => {
+    expect(effectiveHome("VENDOR", ["control.dashboard.read"])).toBe(
+      "/portal/vendor",
+    );
+  });
 });

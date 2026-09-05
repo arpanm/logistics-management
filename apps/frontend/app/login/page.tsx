@@ -20,6 +20,7 @@ export default function Login() {
         user: { platformAdmin: boolean };
         mfaRequired?: boolean;
         activeTenantId?: string;
+        home?: string;
         requiresTenantSelection?: boolean;
         tenants?: Array<{ code: string; name: string }>;
       }>("/auth/login", {

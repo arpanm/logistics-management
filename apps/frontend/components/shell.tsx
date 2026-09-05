@@ -29,10 +29,8 @@ type Effective = {
 };
 type NavItem = { href: string; label: string; allowed: boolean };
 
-function capability(effective: Effective | null, prefix: string) {
-  return Boolean(
-    effective?.capabilities.some((value) => value.startsWith(prefix)),
-  );
+function capability(effective: Effective | null, code: string) {
+  return Boolean(effective?.capabilities.includes(code));
 }
 
 export function Shell({
@@ -144,17 +142,42 @@ export function Shell({
           {
             href: effective?.home || "/app/setup",
             label: "Home",
-            allowed: ready,
+            allowed: ready && effective?.home !== "/app/control",
           },
           {
             href: "/app/control",
             label: "Control tower",
-            allowed: capability(effective, "control."),
+            allowed: capability(effective, "control.dashboard.read"),
           },
           {
             href: "/app/alerts",
             label: "Alerts",
-            allowed: capability(effective, "alerts."),
+            allowed: capability(effective, "alerts.read"),
+          },
+          {
+            href: "/app/assistant",
+            label: "Assistant",
+            allowed: capability(effective, "conversation.use"),
+          },
+        ],
+      },
+      {
+        label: "Quick access",
+        items: [
+          {
+            href: "/app/operations",
+            label: "Open operations",
+            allowed: capability(effective, "operations.read"),
+          },
+          {
+            href: "/app/access/users",
+            label: "Manage access",
+            allowed: Boolean(effective?.navigation.users),
+          },
+          {
+            href: "/app/access/reports",
+            label: "Review activity & audit",
+            allowed: Boolean(effective?.navigation.reports),
           },
         ],
       },
@@ -162,14 +185,9 @@ export function Shell({
         label: "Operations",
         items: [
           {
-            href: "/app/operations",
-            label: "Operations",
-            allowed: capability(effective, "operations."),
-          },
-          {
             href: "/app/pod",
             label: "POD",
-            allowed: capability(effective, "pod."),
+            allowed: capability(effective, "pod.read"),
           },
         ],
       },
@@ -179,7 +197,7 @@ export function Shell({
           {
             href: "/app/finance",
             label: "Finance",
-            allowed: capability(effective, "finance."),
+            allowed: capability(effective, "finance.read"),
           },
         ],
       },
@@ -189,19 +207,17 @@ export function Shell({
           {
             href: "/app/masters",
             label: "Masters",
-            allowed: capability(effective, "masters."),
+            allowed: capability(effective, "masters.read"),
           },
           {
             href: "/app/data",
             label: "Imports",
-            allowed:
-              capability(effective, "data.") ||
-              capability(effective, "import."),
+            allowed: capability(effective, "data.import.admin"),
           },
           {
             href: "/app/integrations",
             label: "Integrations",
-            allowed: capability(effective, "integrations."),
+            allowed: capability(effective, "integrations.read"),
           },
         ],
       },
@@ -209,29 +225,19 @@ export function Shell({
         label: "Administration",
         items: [
           {
-            href: "/app/access/users",
-            label: "Users",
-            allowed: Boolean(effective?.navigation.users),
-          },
-          {
             href: "/app/access/roles",
             label: "Roles",
             allowed: Boolean(effective?.navigation.roles),
           },
           {
-            href: "/app/access/reports",
-            label: "Activity & audit",
-            allowed: Boolean(effective?.navigation.reports),
-          },
-          {
             href: "/app/governance/policies",
             label: "Governance",
-            allowed: capability(effective, "governance."),
+            allowed: capability(effective, "governance.read"),
           },
           {
             href: "/app/configuration/settings",
             label: "Configuration",
-            allowed: capability(effective, "configuration."),
+            allowed: capability(effective, "configuration.read"),
           },
         ],
       },
@@ -251,7 +257,7 @@ export function Shell({
       },
     );
     setNotice("Active tenant changed");
-    window.location.replace(`/app/setup?context=${result.contextVersion}`);
+    window.location.replace(`/app?context=${result.contextVersion}`);
   }
   async function logout() {
     await api("/auth/logout", { method: "POST" });

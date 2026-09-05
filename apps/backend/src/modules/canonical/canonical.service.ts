@@ -198,6 +198,22 @@ const governedTargets: Record<string, { resource: CanonicalResource }> = {
   VENDOR_BILL: { resource: "vendor-bills" },
 };
 
+const resourceScopeQueries: Partial<Record<CanonicalResource, string>> = {
+  "organization-nodes": `SELECT ARRAY_REMOVE(ARRAY[authorization_scope_node_id],null) nodes FROM app.organization_nodes WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+  employees: `SELECT ARRAY_REMOVE(ARRAY[n.authorization_scope_node_id],null) nodes FROM app.employees e JOIN app.organization_nodes n ON n.tenant_id=e.tenant_id AND n.id=e.home_node_id WHERE e.tenant_id=$1::uuid AND e.id=$2::uuid`,
+  clients: `SELECT ARRAY_REMOVE(ARRAY[authorization_scope_node_id],null) nodes FROM app.clients WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+  vendors: `SELECT ARRAY_REMOVE(ARRAY[authorization_scope_node_id],null) nodes FROM app.vendors WHERE tenant_id=$1::uuid AND id=$2::uuid`,
+  vehicles: `SELECT ARRAY_REMOVE(ARRAY[v.authorization_scope_node_id],null) nodes FROM app.vehicles a JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id WHERE a.tenant_id=$1::uuid AND a.id=$2::uuid`,
+  drivers: `SELECT ARRAY_REMOVE(ARRAY[v.authorization_scope_node_id],null) nodes FROM app.drivers d JOIN app.vendors v ON v.tenant_id=d.tenant_id AND v.id=d.vendor_id WHERE d.tenant_id=$1::uuid AND d.id=$2::uuid`,
+  indents: `SELECT ARRAY_REMOVE(ARRAY[c.authorization_scope_node_id,l.authorization_scope_node_id],null) nodes FROM app.indents i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id JOIN app.client_locations l ON l.tenant_id=i.tenant_id AND l.id=i.client_location_id WHERE i.tenant_id=$1::uuid AND i.id=$2::uuid`,
+  allocations: `SELECT ARRAY_REMOVE(ARRAY[c.authorization_scope_node_id,v.authorization_scope_node_id],null) nodes FROM app.allocations a JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id WHERE a.tenant_id=$1::uuid AND a.id=$2::uuid`,
+  trips: `SELECT ARRAY_REMOVE(ARRAY[c.authorization_scope_node_id,v.authorization_scope_node_id],null) nodes FROM app.trips t JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id WHERE t.tenant_id=$1::uuid AND t.id=$2::uuid`,
+  "pod-tasks": `SELECT ARRAY_REMOVE(ARRAY[c.authorization_scope_node_id,v.authorization_scope_node_id],null) nodes FROM app.pod_tasks p JOIN app.trips t ON t.tenant_id=p.tenant_id AND t.id=p.trip_id JOIN app.allocations a ON a.tenant_id=t.tenant_id AND a.id=t.allocation_id JOIN app.indents i ON i.tenant_id=a.tenant_id AND i.id=a.indent_id JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id JOIN app.vendors v ON v.tenant_id=a.tenant_id AND v.id=a.vendor_id WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`,
+  invoices: `SELECT ARRAY_REMOVE(ARRAY[c.authorization_scope_node_id],null) nodes FROM app.client_invoices i JOIN app.clients c ON c.tenant_id=i.tenant_id AND c.id=i.client_id WHERE i.tenant_id=$1::uuid AND i.id=$2::uuid`,
+  receipts: `SELECT ARRAY_REMOVE(ARRAY[c.authorization_scope_node_id],null) nodes FROM app.receipts r JOIN app.clients c ON c.tenant_id=r.tenant_id AND c.id=r.client_id WHERE r.tenant_id=$1::uuid AND r.id=$2::uuid`,
+  "vendor-bills": `SELECT ARRAY_REMOVE(ARRAY[v.authorization_scope_node_id],null) nodes FROM app.vendor_bills b JOIN app.vendors v ON v.tenant_id=b.tenant_id AND v.id=b.vendor_id WHERE b.tenant_id=$1::uuid AND b.id=$2::uuid`,
+};
+
 const sensitiveFields = {
   "sensitive.tax_identifier.read": [
     "pan",
@@ -367,6 +383,58 @@ export class CanonicalService {
     )[0];
     if (!rowsBoolean(allowed?.allowed))
       throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+  }
+
+  private async assertRoleResourceScope(
+    tx: Tx,
+    actor: SessionActor,
+    roleId: string,
+    resource: CanonicalResource,
+    resourceId: string,
+  ) {
+    const query = resourceScopeQueries[resource];
+    if (!query)
+      throw new AppError(
+        403,
+        "APPROVER_SCOPE_REQUIRED",
+        "The required approval role cannot cover this target",
+      );
+    const scopeRow = (
+      await tx.$queryRawUnsafe<Array<Row>>(
+        query,
+        this.tenant(actor),
+        resourceId,
+      )
+    )[0];
+    const nodes = (scopeRow?.nodes as string[] | undefined) ?? [];
+    if (!scopeRow || !nodes.length)
+      throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+    const allowed = await tx.$queryRawUnsafe<Array<Row>>(
+      `WITH RECURSIVE ancestors AS (
+         SELECT id,parent_id FROM app.authorization_scope_nodes WHERE tenant_id=$1::uuid AND id=ANY($5::uuid[]) AND status='ACTIVE'
+         UNION ALL SELECT n.id,n.parent_id FROM app.authorization_scope_nodes n JOIN ancestors a ON a.parent_id=n.id WHERE n.tenant_id=$1::uuid AND n.status='ACTIVE'
+       )
+       SELECT 1 FROM app.tenant_memberships m
+       JOIN app.membership_role_assignments a ON a.tenant_id=m.tenant_id AND a.membership_id=m.id AND a.role_id=$4::uuid
+         AND a.status='ACTIVE' AND a.effective_from<=now() AND (a.effective_to IS NULL OR a.effective_to>now())
+       JOIN app.role_capabilities c ON c.tenant_id=a.tenant_id AND c.role_id=a.role_id AND c.capability_code='governance.admin'
+       JOIN app.scope_grants g ON g.tenant_id=a.tenant_id AND g.assignment_id=a.id AND g.status='ACTIVE'
+         AND g.action IN ('APPROVE','ADMIN') AND g.effective_from<=now() AND (g.effective_to IS NULL OR g.effective_to>now())
+       JOIN app.authorization_scope_nodes n ON n.tenant_id=g.tenant_id AND n.id=g.scope_node_id AND n.status='ACTIVE'
+       WHERE m.tenant_id=$1::uuid AND m.id=$2::uuid AND m.user_id=$3::uuid AND m.status='ACTIVE' AND m.portal_audience='INTERNAL'
+         AND (n.scope_type='TENANT' OR EXISTS(SELECT 1 FROM ancestors WHERE id=n.id)) LIMIT 1`,
+      this.tenant(actor),
+      actor.membershipId,
+      actor.userId,
+      roleId,
+      nodes,
+    );
+    if (!allowed[0])
+      throw new AppError(
+        403,
+        "APPROVER_SCOPE_REQUIRED",
+        "The required approval role does not cover this target",
+      );
   }
 
   private governedTarget(targetType: string) {
@@ -640,63 +708,75 @@ export class CanonicalService {
     key: string,
     correlationId: string,
   ) {
+    const tenantId = this.tenant(actor);
+    return withTenant(this.app.db, tenantId, (tx) =>
+      this.createInTransaction(tx, actor, resource, raw, key, correlationId),
+    );
+  }
+
+  async createInTransaction(
+    tx: Tx,
+    actor: SessionActor,
+    resource: string,
+    raw: unknown,
+    key: string,
+    correlationId: string,
+  ) {
     const definition = this.definition(resource);
     const tenantId = this.tenant(actor);
-    return withTenant(this.app.db, tenantId, async (tx) => {
-      const grants = await this.access(
-        tx,
-        actor,
-        `${definition.capability}.admin`,
-        "CREATE",
+    const grants = await this.access(
+      tx,
+      actor,
+      `${definition.capability}.admin`,
+      "CREATE",
+    );
+    if (grants.some((grant) => grant.audience !== "INTERNAL"))
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "Portal users cannot create this resource",
       );
-      if (grants.some((grant) => grant.audience !== "INTERNAL"))
-        throw new AppError(
-          403,
-          "FORBIDDEN",
-          "Portal users cannot create this resource",
+    return this.idempotent(
+      tx,
+      actor,
+      `canonical.${resource}.create`,
+      key,
+      raw,
+      async () => {
+        const row = await this.createRow(
+          tx,
+          actor,
+          resource as CanonicalResource,
+          raw,
         );
-      return this.idempotent(
-        tx,
-        actor,
-        `canonical.${resource}.create`,
-        key,
-        raw,
-        async () => {
-          const row = await this.createRow(
-            tx,
-            actor,
-            resource as CanonicalResource,
-            raw,
-          );
-          await this.audit(
-            tx,
-            actor,
-            `${resource}.created`,
-            resource,
-            String(row.id),
-            correlationId,
-            undefined,
-            row,
-          );
-          await this.event(
-            tx,
-            tenantId,
-            resource,
-            String(row.id),
-            `${resource}.created.v1`,
-            row,
-            Number(row.version ?? 1),
-          );
-          return this.project(
-            tx,
-            actor,
-            resource as CanonicalResource,
-            row,
-            String(grants[0]?.audience ?? "INTERNAL"),
-          );
-        },
-      );
-    });
+        await this.audit(
+          tx,
+          actor,
+          `${resource}.created`,
+          resource,
+          String(row.id),
+          correlationId,
+          undefined,
+          row,
+        );
+        await this.event(
+          tx,
+          tenantId,
+          resource,
+          String(row.id),
+          `${resource}.created.v1`,
+          row,
+          Number(row.version ?? 1),
+        );
+        return this.project(
+          tx,
+          actor,
+          resource as CanonicalResource,
+          row,
+          String(grants[0]?.audience ?? "INTERNAL"),
+        );
+      },
+    );
   }
 
   private async createRow(
@@ -1480,11 +1560,12 @@ export class CanonicalService {
     raw: unknown,
     key: string,
     correlationId: string,
+    existingTransaction?: Tx,
   ) {
     const definition = this.definition(resource);
     const input = transitionCommandSchema.parse(raw);
     const tenantId = this.tenant(actor);
-    return withTenant(this.app.db, tenantId, async (tx) => {
+    const execute = async (tx: Tx) => {
       const grants = await this.access(
         tx,
         actor,
@@ -1517,6 +1598,15 @@ export class CanonicalService {
           )[0]?.record as Row | undefined;
           if (!before)
             throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found");
+          if (
+            ["invoices", "receipts", "vendor-bills"].includes(resource) &&
+            input.toState === "REVERSED"
+          )
+            throw new AppError(
+              409,
+              "COMPENSATING_ENTRY_REQUIRED",
+              "Financial reversals require the dedicated compensating-entry workflow",
+            );
           if (resource === "vendor-bills")
             throw new AppError(
               405,
@@ -1604,9 +1694,12 @@ export class CanonicalService {
               "POSTED_IMMUTABLE",
               "Posted invoices require a compensating entry",
             );
+          const updatedAt = ["invoices", "receipts"].includes(resource)
+            ? ""
+            : ",updated_at=now()";
           const updated = (
             await tx.$queryRawUnsafe<Array<Row>>(
-              `UPDATE app.${definition.table} SET state=$1,updated_at=now(),version=version+1${resource === "invoices" && input.toState === "POSTED" ? ",posted_at=now()" : ""} WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4 RETURNING *`,
+              `UPDATE app.${definition.table} SET state=$1${updatedAt},version=version+1${resource === "invoices" && input.toState === "POSTED" ? ",posted_at=now()" : ""} WHERE tenant_id=$2::uuid AND id=$3::uuid AND version=$4 RETURNING *`,
               input.toState,
               tenantId,
               id,
@@ -1656,7 +1749,10 @@ export class CanonicalService {
           );
         },
       );
-    });
+    };
+    return existingTransaction
+      ? execute(existingTransaction)
+      : withTenant(this.app.db, tenantId, execute);
   }
 
   async appendTripEvent(
@@ -2751,6 +2847,7 @@ export class CanonicalService {
     raw: unknown,
     key: string,
     correlationId: string,
+    existingTransaction?: Tx,
   ) {
     const input = z
       .object({
@@ -2762,7 +2859,7 @@ export class CanonicalService {
       .strict()
       .parse(raw);
     const tenantId = this.tenant(actor);
-    return withTenant(this.app.db, tenantId, async (tx) => {
+    const execute = async (tx: Tx) => {
       await this.access(tx, actor, "governance.admin", "APPROVE");
       return this.idempotent(
         tx,
@@ -2807,6 +2904,15 @@ export class CanonicalService {
               "APPROVAL_STATE_CONFLICT",
               "Approval is no longer pending",
             );
+          if (
+            before.expires_at &&
+            new Date(String(before.expires_at)) <= new Date()
+          )
+            throw new AppError(
+              409,
+              "APPROVAL_EXPIRED",
+              "Approval has expired and cannot be decided",
+            );
           const definition = (
             await tx.$queryRawUnsafe<Array<Row>>(
               `SELECT steps FROM app.approval_definitions WHERE tenant_id=$1::uuid AND id=$2::uuid`,
@@ -2826,18 +2932,13 @@ export class CanonicalService {
               "APPROVER_ROLE_REQUIRED",
               "The current approval step requires another role",
             );
-          const holdsRole = await tx.$queryRawUnsafe<Array<Row>>(
-            `SELECT 1 FROM app.membership_role_assignments WHERE tenant_id=$1::uuid AND membership_id=$2::uuid AND role_id=$3::uuid AND status='ACTIVE'`,
-            tenantId,
-            actor.membershipId,
+          await this.assertRoleResourceScope(
+            tx,
+            actor,
             input.roleId,
+            target.resource,
+            String(before.target_id),
           );
-          if (!holdsRole[0])
-            throw new AppError(
-              403,
-              "APPROVER_ROLE_REQUIRED",
-              "The current approval step requires another role",
-            );
           await tx.$executeRawUnsafe(
             `INSERT INTO app.approval_decisions(tenant_id,instance_id,step,decision,actor_id,actor_role_id,comment) VALUES($1::uuid,$2::uuid,$3,$4,$5::uuid,$6::uuid,$7)`,
             tenantId,
@@ -2877,7 +2978,10 @@ export class CanonicalService {
           return row;
         },
       );
-    });
+    };
+    return existingTransaction
+      ? execute(existingTransaction)
+      : withTenant(this.app.db, tenantId, execute);
   }
 
   async publishConfiguration(

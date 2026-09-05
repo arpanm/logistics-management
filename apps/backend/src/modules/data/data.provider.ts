@@ -8,7 +8,19 @@ import { tenantId, type TenantActor } from "../control/module-contract.js";
 import { importProfiles } from "./manifest.js";
 
 type Row = Record<string, unknown>;
-type Dataset = keyof typeof importProfiles;
+export type Dataset = keyof typeof importProfiles;
+export type ImportPreviewInput = {
+  dataset: Dataset;
+  filename: string;
+  mediaType: string;
+  byteSize: number;
+  checksum: string;
+  sourceTimezone: string;
+  importMode: "APPEND" | "UPSERT" | "FULL_FILE";
+  headers: string[];
+  rows: Array<Record<string, unknown>>;
+  idempotencyKey: string;
+};
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const recordCode = (value: unknown, rowNumber: number) => {
   const normalized = String(value ?? "")
@@ -255,20 +267,17 @@ export class DataProvider {
     };
   }
 
-  async preview(
+  async preview(actor: TenantActor, input: ImportPreviewInput) {
+    const id = tenantId(actor);
+    return withTenant(this.app.db, id, (tx) =>
+      this.previewInTransaction(tx, actor, input),
+    );
+  }
+
+  async previewInTransaction(
+    tx: Prisma.TransactionClient,
     actor: TenantActor,
-    input: {
-      dataset: Dataset;
-      filename: string;
-      mediaType: string;
-      byteSize: number;
-      checksum: string;
-      sourceTimezone: string;
-      importMode: "APPEND" | "UPSERT" | "FULL_FILE";
-      headers: string[];
-      rows: Array<Record<string, unknown>>;
-      idempotencyKey: string;
-    },
+    input: ImportPreviewInput,
   ) {
     const id = tenantId(actor);
     const required = importProfiles[input.dataset];
@@ -289,7 +298,7 @@ export class DataProvider {
     const unknown = input.headers.filter(
       (header) => !required.includes(header as never),
     );
-    return withTenant(this.app.db, id, async (tx) => {
+    {
       const grants = await this.importAccess(tx, actor, "CREATE");
       const prior = (
         await tx.$queryRawUnsafe<Array<Row>>(
@@ -373,7 +382,7 @@ export class DataProvider {
         ...job,
         summary: { rows: input.rows.length, missing, unknown, duplicates },
       };
-    });
+    }
   }
 
   private addError(
@@ -398,7 +407,19 @@ export class DataProvider {
 
   async commit(actor: TenantActor, jobId: string, expectedVersion: number) {
     const id = tenantId(actor);
-    return withTenant(this.app.db, id, async (tx) => {
+    return withTenant(this.app.db, id, (tx) =>
+      this.commitInTransaction(tx, actor, jobId, expectedVersion),
+    );
+  }
+
+  async commitInTransaction(
+    tx: Prisma.TransactionClient,
+    actor: TenantActor,
+    jobId: string,
+    expectedVersion: number,
+  ) {
+    const id = tenantId(actor);
+    {
       await this.importAccess(tx, actor, "UPDATE");
       const job = (
         await tx.$queryRawUnsafe<Array<Row>>(
@@ -495,7 +516,7 @@ export class DataProvider {
           )
         )[0] ?? queued
       );
-    });
+    }
   }
 
   private async commitCanonicalRow(

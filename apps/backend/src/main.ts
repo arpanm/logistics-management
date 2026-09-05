@@ -2,14 +2,29 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import { json, urlencoded, type Request } from "express";
 import { AppModule } from "./app.module.js";
 import { isRequestOriginAllowed, loadConfig } from "@logistics/config";
 import { configureLoopbackProxyTrust } from "./network-trust.js";
 
 const config = loadConfig();
-const app = await NestFactory.create(AppModule, { rawBody: false });
+// Preserve the exact bytes for signed provider webhooks. Controllers must never
+// trust a parsed/re-serialized body when validating an external signature.
+const app = await NestFactory.create(AppModule, {
+  rawBody: true,
+  bodyParser: false,
+});
 configureLoopbackProxyTrust(app);
 app.setGlobalPrefix("api/v1");
+app.use(
+  json({
+    limit: "8mb",
+    verify: (request, _response, buffer) => {
+      (request as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    },
+  }),
+);
+app.use(urlencoded({ extended: false, limit: "100kb" }));
 app.use(cookieParser());
 app.use(
   helmet({

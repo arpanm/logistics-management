@@ -2335,7 +2335,8 @@ export function MfaPage() {
         body: JSON.stringify({ factorId: setup.factorId, acknowledged: true }),
       });
       setRecovery(null);
-      router.replace("/app");
+      const effective = await api<{ home: string }>("/tenant/access/effective");
+      router.replace(effective.home);
     } catch (value) {
       setError(value as ApiError);
     }

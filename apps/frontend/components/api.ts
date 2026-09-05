@@ -7,7 +7,18 @@ export type ApiError = {
 export type ApiRequestInit = RequestInit & {
   /** Explicitly pins asynchronous/multi-request form work to its submitter. */
   feedbackAnchor?: HTMLElement | null;
+  /** Opts a confirmed create/update into shared success feedback. */
+  successFeedback?: string;
 };
+
+export function mutationSuccessFeedback(
+  method: string,
+  message?: string,
+): string | null {
+  if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return null;
+  const normalized = message?.trim();
+  return normalized ? normalized : null;
+}
 function mutationFeedbackAnchor() {
   if (typeof document === "undefined") return null;
   const active = document.activeElement;
@@ -36,9 +47,14 @@ export async function api<T>(
   path: string,
   options: ApiRequestInit = {},
 ): Promise<T> {
-  const { feedbackAnchor: explicitFeedbackAnchor, ...fetchOptions } = options;
+  const {
+    feedbackAnchor: explicitFeedbackAnchor,
+    successFeedback,
+    ...fetchOptions
+  } = options;
   const method = (options.method ?? "GET").toUpperCase();
   const mutation = !["GET", "HEAD", "OPTIONS"].includes(method);
+  const successMessage = mutationSuccessFeedback(method, successFeedback);
   // Snapshot the initiator before awaiting fetch. Concurrent requests must not
   // compete for one mutable "last clicked" control when their results arrive.
   const feedbackAnchor = mutation
@@ -85,10 +101,15 @@ export async function api<T>(
       );
     throw error;
   }
-  if (typeof window !== "undefined" && mutation)
+  if (typeof window !== "undefined" && mutation && successMessage)
     window.dispatchEvent(
       new CustomEvent("logistics:api-result", {
-        detail: { id: feedbackId, ok: true, anchor: feedbackAnchor },
+        detail: {
+          id: feedbackId,
+          ok: true,
+          message: successMessage,
+          anchor: feedbackAnchor,
+        },
       }),
     );
   return response.json() as Promise<T>;

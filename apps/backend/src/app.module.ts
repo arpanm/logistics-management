@@ -40,6 +40,17 @@ import {
   InvitationEmailDeliveryService,
   InvitationEmailScheduler,
 } from "./invitation-email.service.js";
+import {
+  ConversationController,
+  ConversationService,
+  WhatsappWebhookController,
+} from "./modules/conversation/index.js";
+import { MetaWhatsappAdapter } from "./modules/conversation/conversation-whatsapp.adapter.js";
+import { ConversationFileService } from "./modules/conversation/conversation-file.service.js";
+import {
+  ConversationWhatsappScheduler,
+  ConversationWhatsappService,
+} from "./modules/conversation/conversation-whatsapp.service.js";
 
 @Module({
   controllers: [
@@ -49,6 +60,8 @@ import {
     FinanceWorkbenchController,
     ControlWorkbenchController,
     GovernanceWorkbenchController,
+    ConversationController,
+    WhatsappWebhookController,
     ...intelligenceControllers,
     Mst01Controller,
     AdvancedDomainController,
@@ -66,6 +79,11 @@ import {
     FinanceWorkbenchService,
     ControlWorkbenchService,
     GovernanceWorkbenchService,
+    ConversationService,
+    ConversationFileService,
+    MetaWhatsappAdapter,
+    ConversationWhatsappService,
+    ConversationWhatsappScheduler,
     KernelService,
     ...intelligenceProviders,
     CanonicalService,

@@ -10,6 +10,7 @@ import {
 import { Prisma, withPlatform, withTenant } from "@logistics/db";
 import {
   evaluatePolicy,
+  effectiveHome,
   maskSensitive,
   portalHome,
   type PolicyAssignment,
@@ -460,8 +461,9 @@ export class AccessService {
           probes: capabilities.includes("probe.read"),
         },
         portalAudience: membership.audience,
-        home: portalHome(
+        home: effectiveHome(
           membership.audience as "INTERNAL" | "VENDOR" | "DRIVER" | "CLIENT",
+          capabilities,
         ),
         authorizationVersion: membership.version,
       };
@@ -1687,9 +1689,12 @@ export class AccessService {
       return {
         ...created,
         activeTenantId: invite.tenantId,
-        home: portalHome(
-          invite.portalAudience as "INTERNAL" | "VENDOR" | "DRIVER" | "CLIENT",
-        ),
+        home:
+          invite.portalAudience === "INTERNAL"
+            ? "/app"
+            : portalHome(
+                invite.portalAudience as "VENDOR" | "DRIVER" | "CLIENT",
+              ),
         mfaRequired,
       };
     });

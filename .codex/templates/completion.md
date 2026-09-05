@@ -22,9 +22,11 @@
 
 Record service health and the tested build identifier. Do not embed secrets or bulky generated artifacts.
 
-## Independent review
+## Review evidence
 
-- Reviewer:
+- Review tier: Fast path | Standard | Mandatory
+- Reviewer (only when applicable):
+- Self-review scope (fast path only):
 - Blocking findings resolved:
 - Remaining non-blocking findings:
 
@@ -37,7 +39,7 @@ Record service health and the tested build identifier. Do not embed secrets or b
 - [ ] Lightweight acceptance notes and planned coverage are current
 - [ ] Changed automated tests are authored and truthfully marked
 - [ ] Explicit test-phase results are recorded, or tests say Implemented / Not Run
-- [ ] Reviewer reports no unresolved blocking finding
+- [ ] Selected review tier has no unresolved blocking finding
 - [ ] `FEATURES.md` status is accurate
 - [ ] `FEATURES.md` register and feature section have matching implementation/test status
 - [ ] `README.md` current status and next feature are accurate

@@ -256,7 +256,35 @@ export function maskSensitive(
 export function portalHome(
   audience: "INTERNAL" | "VENDOR" | "DRIVER" | "CLIENT",
 ): string {
-  return audience === "INTERNAL" ? "/app" : `/portal/${audience.toLowerCase()}`;
+  return audience === "INTERNAL"
+    ? "/app/control"
+    : `/portal/${audience.toLowerCase()}`;
+}
+
+export function effectiveHome(
+  audience: "INTERNAL" | "VENDOR" | "DRIVER" | "CLIENT",
+  capabilities: Iterable<string>,
+): string {
+  if (audience !== "INTERNAL") return portalHome(audience);
+
+  const granted = new Set(capabilities);
+  if (granted.has("control.dashboard.read")) return "/app/control";
+  if (granted.has("operations.read")) return "/app/operations";
+  if (granted.has("pod.read")) return "/app/pod";
+  if (granted.has("finance.read")) return "/app/finance";
+  if (granted.has("masters.read")) return "/app/masters";
+  if (granted.has("alerts.read")) return "/app/alerts";
+  if (granted.has("conversation.use")) return "/app/assistant";
+  if (granted.has("data.import.admin")) return "/app/data";
+  if (granted.has("integrations.read")) return "/app/integrations";
+  if (granted.has("identity.user.read")) return "/app/access/users";
+  if (granted.has("identity.report.read") || granted.has("identity.audit.read"))
+    return "/app/access/reports";
+  if (granted.has("identity.role.read")) return "/app/access/roles";
+  if (granted.has("governance.read")) return "/app/governance/policies";
+  if (granted.has("configuration.read")) return "/app/configuration/settings";
+  if (granted.has("probe.read")) return "/app/setup";
+  return "/app/no-access";
 }
 export function requirePlatform(actor: SessionActor): void {
   if (!actor.platformAdmin) throw new Error("FORBIDDEN");
