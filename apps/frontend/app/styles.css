@@ -774,6 +774,88 @@ dd,
   }
 }
 
+/* UI-01 role-aware compact navigation. */
+.mobile-bottom-nav {
+  display: none;
+}
+@media (max-width: 767px) {
+  .tenant-shell.has-mobile-nav .menu-button {
+    display: none;
+  }
+  .tenant-shell.has-mobile-nav .page {
+    padding-bottom: calc(6.25rem + env(safe-area-inset-bottom));
+  }
+  .mobile-bottom-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    min-height: calc(4.6rem + env(safe-area-inset-bottom));
+    padding: 0.35rem 0.35rem calc(0.35rem + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line-strong);
+    background: rgb(8 13 24 / 0.97);
+    box-shadow: 0 -12px 28px rgb(0 0 0 / 0.32);
+    backdrop-filter: blur(14px);
+  }
+  .mobile-bottom-nav a,
+  .mobile-bottom-nav button {
+    display: grid;
+    grid-template-rows: 1.65rem auto;
+    place-items: center;
+    align-content: center;
+    gap: 0.2rem;
+    min-width: 0;
+    min-height: 3.85rem;
+    margin: 0;
+    padding: 0.3rem 0.2rem;
+    color: var(--dim);
+    border: 0;
+    border-radius: 0.55rem;
+    background: transparent;
+    box-shadow: none;
+    font-family: var(--font-display);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.1;
+    text-align: center;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+  .mobile-bottom-nav a:hover,
+  .mobile-bottom-nav button:hover,
+  .mobile-bottom-nav a[aria-current="page"] {
+    color: var(--primary);
+    background: rgb(90 200 232 / 0.09);
+  }
+  .mobile-bottom-nav a[aria-current="page"] {
+    box-shadow: inset 0 2px 0 var(--primary);
+  }
+  .mobile-bottom-nav svg {
+    width: 1.45rem;
+    height: 1.45rem;
+    overflow: visible;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+  }
+  .mobile-bottom-nav svg circle {
+    fill: currentColor;
+    stroke: none;
+  }
+  .mobile-bottom-nav span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* UI-02 shared application primitives. */
 .ui-tabs {
   display: flex;

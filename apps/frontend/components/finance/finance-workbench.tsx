@@ -495,22 +495,22 @@ function FinanceNav({ section }: { section: Section }) {
         },
         {
           href: "/app/finance/invoices",
-          label: "All invoices",
+          label: "Invoices",
           current: section === "invoices",
         },
         {
           href: "/app/finance/receipts",
-          label: "Collections & receipts",
+          label: "Collection & Receipt",
           current: section === "collections",
         },
         {
           href: "/app/finance/vendor-bills",
-          label: "Vendor payables",
+          label: "Vendor Payable",
           current: section === "vendors",
         },
         {
           href: "/app/finance/payment-runs",
-          label: "Payment runs",
+          label: "Payout Runs",
           current: section === "payments",
         },
       ]}

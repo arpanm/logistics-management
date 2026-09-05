@@ -6,7 +6,8 @@
 ## Delivered
 
 - Token-driven responsive application shell with capability-aware desktop navigation and an accessible compact/mobile drawer.
-- Session-aware `/` and `/app` landing that opens Control Tower for authorized internal users, falls back to the first permitted workspace for restricted roles, preserves audience portals, and moves the former landing cards into a capability-filtered Quick access menu.
+- Session-aware `/` and `/app` landing that opens Control Tower for authorized internal users, falls back to the first permitted workspace for restricted roles, preserves audience portals, and keeps former landing destinations in their owning Operations and Administration groups.
+- Domain-grouped desktop navigation with five direct Finance destinations and a safe-area-aware mobile bottom bar containing three capability-derived primary destinations plus a full-menu More control.
 - Prototype-derived dark operations-console presentation across the shell, forms, tables, tabs, cards and dialogs, with cyan focus/accent, condensed uppercase operational labels, monospaced values and semantic KPI rails.
 - Overflow-safe responsive foundations for labels, controls, cards, tables, actions and reports.
 - Control Tower keyboard tabs, URL state, bounded server pagination, compact dark KPI/client/vendor/register surfaces, desktop table/mobile record-card presentation, explicit refresh/stale/error handling, and source-record drill paths.
@@ -23,7 +24,8 @@
 - `tests/e2e/ui-responsive-regression.spec.ts`: `UIREG-CTL-API-001`–`005`, `UIREG-OPS-008`–`009`, `UIREG-FIN-010`–`011`, `UIREG-DETAIL-012`–`014`, `UIREG-A11Y-015` — Implemented / Not Run.
 - `packages/db/src/demo-seed-manifest.test.ts` — Implemented / Not Run.
 - `packages/db/src/demo-seed.integration.test.ts` — updated showcase assertions Implemented / Not Run.
-- `packages/auth/src/index.test.ts` and `apps/frontend/components/session-landing.test.ts` — capability-aware home and Quick access contracts Implemented / Not Run.
+- `packages/auth/src/index.test.ts` and `apps/frontend/components/session-landing.test.ts` — capability-aware home, grouped navigation, direct Finance links, and role-aware mobile navigation contracts Implemented / Not Run.
+- `make refresh-local` confirmed all 33 migrations current, completed frontend/backend production builds, and restarted ready local services on 2026-09-05 after the navigation batch.
 - Independent review identified reconciliation, refresh, pagination, drawer semantics, demo breadth and documentation gaps; the blocking production findings were returned for correction before handoff.
 - A second remediation review traced the five-lens HTTP 500 to PostgreSQL `42803`, identified mobile overflow/detail discoverability and mutation safety regressions, and cleared the corrected SQL, modal, master-edit, idempotency/error and real-DB fixture implementation with no remaining blocking/high finding.
 - `make demo-seed` applied dataset `2026.09.2` locally on 2026-08-31.
